@@ -5,7 +5,7 @@ description: Set up and use the shared local Apple Silicon image service for Z-I
 
 # Local image model service
 
-Locate the checkout containing `Makefile`, `model_profiles.py`, `server.py` and this README. On the original Mac it is `~/Documents/models/image-model-server`; elsewhere use the supplied folder. Read `README.md` before provisioning or changing settings. This skill is usable directly by any AI tool without installation.
+Locate the checkout containing `Makefile`, `model_profiles.py`, `server.py` and this README. On the original Mac it is `~/Documents/models/ImageGen-Service`; elsewhere use the supplied folder. Read `README.md` before provisioning or changing settings. This skill is usable directly by any AI tool without installation.
 
 Run `make setup` in a terminal to choose a model from the menu; Enter selects **Z-Image Turbo**. It then asks once for a model store directory; Enter uses the project folder, another absolute path creates per-model symlinks. For scripts use `make setup MODEL=<id> DATA_DIR=/absolute/store NONINTERACTIVE=1`, or omit DATA_DIR to reuse saved/default storage. Valid IDs: `z-image-turbo`, `chroma1-hd`, `chroma1-flash`. The store contains these three model subfolders. Do not pass one model's weights folder as the store. Keep source/environment internal and weights/data on the user's chosen external volume. Reuse existing assets; fail on missing mounts rather than downloading a fallback. Flash setup fetches shared T5/VAE assets without downloading the HD diffusion checkpoint. Realism for Z-Image is the only optional public adapter; never publish personal catalogs/media.
 

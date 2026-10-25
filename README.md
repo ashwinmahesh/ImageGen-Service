@@ -1,6 +1,6 @@
-# Local Image Model Server
+# ImageGen-Service
 
-One Apple Silicon project for **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**, with a shared webpage, API, and searchable image gallery. Select a model when starting the server; one backend runs at a time. The repository URL remains `ashwinmahesh/Z-Image-Turbo-Service` for existing users.
+One Apple Silicon project for **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**, with a shared webpage, API, and searchable image gallery. Select a model when starting the server; one backend runs at a time. Source repository: [ImageGen-Service](https://github.com/ashwinmahesh/ImageGen-Service).
 
 ## First-time setup
 
@@ -56,7 +56,7 @@ make storage DATA_DIR="/Volumes/MySSD/models"
 make setup MODEL=z-image-turbo NONINTERACTIVE=1
 ```
 
-`DATA_DIR` means the **store containing model folders**, not one model's weights folder. On the original Mac, the single serving project is `~/Documents/models/image-model-server`, and the store is `/Volumes/ASH-SSD/models`. Existing model, output, tag and custom-location index paths are reused in place. A fresh clone needs no external SSD or original user's home path. Prior separate source folders can be retained as backups; use the consolidated project for new changes.
+`DATA_DIR` means the **store containing model folders**, not one model's weights folder. On the original Mac, the single serving project is `~/Documents/models/ImageGen-Service`, and the store is `/Volumes/ASH-SSD/models`. Existing model, output, tag and custom-location index paths are reused in place. A fresh clone needs no external SSD or original user's home path. Prior separate source folders can be retained as backups; use the consolidated project for new changes.
 
 Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and one native runtime in `<project>/runtime`. **Flash setup does not download the HD diffusion checkpoint.** Back up the actual SSD data, including indexes and tags; symlinks are not backups.
 
