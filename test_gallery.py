@@ -82,6 +82,75 @@ class GalleryTest(unittest.TestCase):
         for query in ['limit=0', 'limit=101', 'offset=-1', 'sort=invalid']:
             self.assertEqual(self.client.get('/v1/images?' + query).status_code, 422)
 
+    def test_tags_persist_without_changing_originals(self):
+        identifier = 'a' * 32
+        path = self.save(identifier, {'prompt': 'A castle', 'seed': 42}, folder=self.root / 'custom', index=True)
+        png, sidecar = path.read_bytes(), path.with_suffix('.json').read_bytes()
+        response = self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': ['  Dark   Fantasy ', 'CASTLE', 'castle', 'café']})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['tags'], ['Dark Fantasy', 'CASTLE', 'café'])
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        self.assertEqual(path.read_bytes(), png)
+        self.assertEqual(path.with_suffix('.json').read_bytes(), sidecar)
+        other = TestClient(server.app, base_url='http://127.0.0.1')
+        try:
+            self.assertEqual(other.get('/v1/images/' + identifier).json()['tags'], response.json()['tags'])
+            self.assertEqual(other.get('/v1/images?q=fantasy').json()['total'], 1)
+            self.assertEqual(other.get('/v1/images?tag=dark%20fantasy&tag=castle').json()['total'], 1)
+            self.assertEqual(other.get('/v1/images?tag=cast').json()['total'], 0)
+            self.assertEqual(other.get('/v1/images?q=castle&tag=missing').json()['total'], 0)
+        finally:
+            other.close()
+        self.assertEqual(self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': []}).json()['tags'], [])
+        self.assertEqual(self.client.get('/v1/images?q=fantasy').json()['total'], 0)
+
+    def test_legacy_tags_and_invalid_edits(self):
+        identifier = 'a' * 32
+        path = self.save(identifier)
+        path.with_suffix('.json').write_text('{unreadable')
+        self.assertEqual(self.client.get('/v1/images/' + identifier).json()['tags'], [])
+        response = self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': ['Legacy']})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['metadata_available'])
+        self.assertEqual(path.with_suffix('.json').read_text(), '{unreadable')
+        self.assertEqual(self.client.get('/v1/images?tag=legacy').json()['total'], 1)
+        for values in [None, 'castle', [1], [''], ['x' * 65], ['a,b'], ['line\nbreak'], ['x'] * 33]:
+            with self.subTest(values=values):
+                response = self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': values})
+                self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': [], 'prompt': 'changed'}).status_code, 422)
+        self.assertEqual(self.client.patch('/v1/images/' + 'b' * 32 + '/tags', json={'tags': ['test']}).status_code, 404)
+        self.assertEqual(self.client.get('/v1/images', params={'tag': 'x' * 65}).status_code, 422)
+        with patch.object(image_catalog, 'write_index', side_effect=PermissionError('read only')):
+            self.assertEqual(self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': ['test']}).status_code, 503)
+        self.assertEqual(self.client.get('/v1/images/' + identifier).json()['tags'], ['Legacy'])
+
+    def test_filtered_pagination_metadata_and_boundaries(self):
+        for number in range(5):
+            self.save(f'{number:032x}', {'prompt': 'A castle', 'created': 100, 'tags': ['campaign']})
+        params = {'limit': 2, 'offset': 0, 'q': 'campaign', 'sort': 'oldest', 'tag': 'CAMPAIGN'}
+        first = self.client.get('/v1/images', params=params).json()
+        self.assertEqual((first['total'], first['limit'], first['offset']), (5, 2, 0))
+        self.assertFalse(first['has_previous'])
+        self.assertNotIn('previous_offset', first)
+        self.assertEqual(first['next_offset'], 2)
+        second = self.client.get('/v1/images', params={**params, 'offset': first['next_offset']}).json()
+        self.assertEqual(second['previous_offset'], 0)
+        self.assertTrue(second['has_previous'])
+        self.assertEqual(second['next_offset'], 4)
+        self.assertFalse({item['id'] for item in first['data']} & {item['id'] for item in second['data']})
+        last = self.client.get('/v1/images', params={**params, 'offset': second['next_offset']}).json()
+        self.assertEqual(len(last['data']), 1)
+        self.assertFalse(last['has_more'])
+        self.assertEqual(last['previous_offset'], 2)
+        outside = self.client.get('/v1/images', params={**params, 'offset': 100}).json()
+        self.assertEqual(outside['data'], [])
+        self.assertEqual(outside['total'], 5)
+        self.assertFalse(outside['has_more'])
+        schema = self.client.get('/openapi.json').json()
+        self.assertIn('patch', schema['paths']['/v1/images/{identifier}/tags'])
+        self.assertIn('tags', schema['components']['schemas']['CatalogImage']['properties'])
+
     def test_detail_and_metadata_download(self):
         identifier = 'a' * 32
         metadata = {'prompt': '<script>alert(1)</script>', 'seed': 42, 'steps': 9, 'seconds': 12.3,

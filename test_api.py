@@ -82,6 +82,19 @@ class APITest(unittest.TestCase):
         finally:
             other.close()
 
+    def test_generation_tags_are_saved_and_searchable(self):
+        response = self.post(tags=[' Mist ', 'mist', 'campaign'])
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()['data'][0]
+        self.assertEqual(item['tags'], ['Mist', 'campaign'])
+        metadata = json.loads(Path(item['metadata_path']).read_text())
+        self.assertEqual(metadata['tags'], item['tags'])
+        listing = self.client.get('/v1/images?q=mist&tag=campaign').json()
+        self.assertEqual(listing['total'], 1)
+        self.assertEqual(listing['data'][0]['file_path'], item['file_path'])
+        for tags in ['mist', [1], ['x' * 65], ['']]:
+            self.assertEqual(self.post(tags=tags).status_code, 422)
+
     def test_base64_still_returns_files(self):
         response = self.post(response_format='b64_json')
         self.assertEqual(response.status_code, 200, response.text)

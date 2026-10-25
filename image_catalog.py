@@ -6,12 +6,15 @@ from pathlib import Path
 import re
 import tempfile
 import threading
+import time
+import unicodedata
 
 from PIL import Image, ImageOps
 
 IDENTIFIER = re.compile(r'[0-9a-f]{32}')
 MAX_METADATA_BYTES = 256 * 1024
 _thumbnail_slots = threading.BoundedSemaphore(2)
+_index_lock = threading.Lock()
 
 
 def valid_identifier(value):
@@ -53,6 +56,60 @@ def resolve_image(root, image_dir, identifier):
         except (OSError, ValueError):
             continue
     raise FileNotFoundError('Saved image is unavailable')
+
+
+def normalize_tags(values):
+    if not isinstance(values, list) or len(values) > 32:
+        raise ValueError('Use a list of at most 32 tags')
+    tags, seen = [], set()
+    for value in values:
+        if not isinstance(value, str) or any(unicodedata.category(c).startswith('C') for c in value) or ',' in value:
+            raise ValueError('Tags must be text without commas or control characters')
+        tag = ' '.join(unicodedata.normalize('NFC', value).split())
+        if not 1 <= len(tag) <= 64:
+            raise ValueError('Each tag must contain 1–64 characters')
+        if tag.casefold() not in seen:
+            seen.add(tag.casefold())
+            tags.append(tag)
+    return tags
+
+
+def read_tags(record, metadata):
+    values = record.get('tags', metadata.get('tags', [])) if record else metadata.get('tags', [])
+    try:
+        return normalize_tags(values)
+    except ValueError:
+        return []
+
+
+def write_index(root, identifier, path, tags):
+    tags = normalize_tags(tags)
+    if not valid_identifier(identifier):
+        raise ValueError('Invalid image ID')
+    folder = root / 'image-index'
+    with _index_lock:
+        folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / f'{identifier}.json'
+        record = read_metadata(destination) or {}
+        record.update(file_path=str(path), tags=tags, tags_updated=int(time.time()))
+        with tempfile.NamedTemporaryFile(dir=folder, prefix='index-', suffix='.tmp', mode='w', delete=False) as stream:
+            temporary = Path(stream.name)
+            try:
+                json.dump(record, stream, ensure_ascii=False)
+                stream.write('\n')
+            except BaseException:
+                temporary.unlink(missing_ok=True)
+                raise
+        try:
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def update_tags(root, image_dir, identifier, tags):
+    path = resolve_image(root, image_dir, identifier)
+    write_index(root, identifier, path, tags)
+    return image_record(root, image_dir, identifier)
 
 
 def _number(value, integer=False):
@@ -104,11 +161,12 @@ def image_record(root, image_dir, identifier):
         'seed': _number(data.get('seed'), integer=True),
         'steps': _number(data.get('steps'), integer=True),
         'generation_seconds': _number(data.get('seconds')), 'lora': adapter,
+        'tags': read_tags(read_metadata(root / 'image-index' / f'{identifier}.json'), data),
         'file_size': stat.st_size, '_version': f'{stat.st_mtime_ns}-{stat.st_size}',
     }
 
 
-def list_images(root, image_dir, query='', order='newest', limit=24, offset=0):
+def list_images(root, image_dir, query='', order='newest', limit=24, offset=0, tags=None):
     if not root.is_dir():
         raise OSError('Project storage is unavailable')
     identifiers = set()
@@ -117,12 +175,16 @@ def list_images(root, image_dir, query='', order='newest', limit=24, offset=0):
             identifiers.update(path.stem for path in folder.glob(pattern) if valid_identifier(path.stem))
     records = []
     query = query.casefold().strip()
+    required_tags = {tag.casefold() for tag in normalize_tags(tags or [])}
     for identifier in identifiers:
         try:
             record = image_record(root, image_dir, identifier)
         except (OSError, ValueError):
             continue
         searchable = ' '.join(str(record[key]) for key in ['prompt', 'seed', 'size', 'model'] if record[key] is not None)
+        searchable += ' ' + ' '.join(record['tags'])
+        if not required_tags.issubset({tag.casefold() for tag in record['tags']}):
+            continue
         if record['lora']:
             searchable += ' ' + record['lora']['id'] + ' ' + record['lora']['name']
         if query and query not in searchable.casefold():

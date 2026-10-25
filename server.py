@@ -59,7 +59,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="Local Z-Image Turbo", version="1.7.0", lifespan=lifespan,
+    title="Local Z-Image Turbo", version="1.8.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -79,6 +79,7 @@ class GenerateRequest(BaseModel):
     model: Literal["z-image-turbo"] = "z-image-turbo"
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. The installed MFLUX tokenizer processes only 512 tokens including chat formatting; excess text is truncated. Put essential details first.")
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
+    tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     n: Literal[1] = 1
     steps: int = Field(default=9, ge=1, le=12, strict=True, description="Sampling steps. 9 is recommended.")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned.")
@@ -100,6 +101,11 @@ class GenerateRequest(BaseModel):
         default=0.6, ge=0, lt=1,
         description="Reference preservation strength, following MFLUX semantics: higher values retain more of the original and run fewer denoising steps. 0 starts from full noise; 0.6 is a useful starting point; must be less than 1. Only used with reference_image.",
     )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def validate_tags(cls, value):
+        return image_catalog.normalize_tags(value)
 
     @field_validator("reference_image")
     @classmethod
@@ -150,6 +156,7 @@ class GenerateRequest(BaseModel):
 
 
 class ImageResult(BaseModel):
+    tags: list[str] = Field(default_factory=list)
     seed: int
     size: str = Field(description="Actual saved PNG dimensions, WIDTHxHEIGHT. With a reference, these follow its oriented aspect ratio and may differ from the request size.")
     width: int = Field(description="Actual saved PNG width in pixels.")
@@ -286,7 +293,7 @@ def generate_with_geometry(payload, geometry):
         elapsed = round(time.monotonic() - started, 2)
         metadata = {
             "model": API_MODEL, "source": MODEL_ID, "revision": MODEL_REVISION,
-            "created": int(time.time()),
+            "created": int(time.time()), "tags": payload.tags,
             "prompt": payload.prompt, "seed": seed, "size": f"{output_width}x{output_height}",
             "requested_size": payload.size, "generation_size": f"{width}x{height}",
             "reference_size": list(geometry.reference_size) if geometry.reference_size else None,
@@ -300,9 +307,7 @@ def generate_with_geometry(payload, geometry):
         }
         path.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
         # Persist custom output locations so their image URLs survive a server restart.
-        index = ROOT / "image-index"
-        index.mkdir(exist_ok=True)
-        (index / f"{identifier}.json").write_text(json.dumps({"file_path": str(path)}) + "\n")
+        image_catalog.write_index(ROOT, identifier, path, payload.tags)
         return path, metadata
     except Exception:
         if path.exists() and path.stat().st_size == 0:
@@ -356,7 +361,7 @@ async def generations(payload: GenerateRequest, request: Request):
         log.exception("Generation failed")
         raise HTTPException(500, "Generation failed; see the server log. Try a smaller image.") from None
     output_width, output_height = map(int, metadata["size"].split("x"))
-    item = {"seed": metadata["seed"], "file_path": str(path), "metadata_path": str(path.with_suffix(".json")),
+    item = {"tags": metadata["tags"], "seed": metadata["seed"], "file_path": str(path), "metadata_path": str(path.with_suffix(".json")),
             "size": metadata["size"], "width": output_width, "height": output_height,
             "generation_size": metadata["generation_size"]}
     if payload.response_format == "b64_json":
@@ -376,6 +381,7 @@ def image(identifier: str):
 
 
 class CatalogImage(BaseModel):
+    tags: list[str] = Field(default_factory=list, description="Current editable image tags, stored in the local image index.")
     id: str
     created: int = Field(description="Saved timestamp in Unix seconds; older files use their modification time.")
     url: str
@@ -404,6 +410,10 @@ class CatalogResponse(BaseModel):
     object: Literal["list"] = "list"
     data: list[CatalogImage]
     total: int
+    limit: int
+    offset: int
+    has_previous: bool
+    previous_offset: int | None = None
     has_more: bool
     next_offset: int | None = None
 
@@ -422,20 +432,25 @@ def gallery():
 
 @app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
          summary="Browse saved generations",
-         description="Lists saved PNGs in the default images folder and custom locations recorded in image-index/. Reference uploads are excluded. Search matches prompts, seeds, dimensions, models and adapter labels. Missing files are skipped; images without readable metadata remain browsable. No GPU inference is performed.")
+         description="Lists saved PNGs in the default images folder and custom locations recorded in image-index/. Reference uploads are excluded. Search matches prompts, tags, seeds, dimensions, models and adapter labels. Repeated tag parameters require all exact labels (case-insensitive). Pagination uses limit/offset and returns totals and previous/next offsets. Missing files are skipped; images without readable metadata remain browsable. No GPU inference is performed.")
 def saved_images(request: Request, response: Response,
                  limit: int = Query(default=24, ge=1, le=100),
                  offset: int = Query(default=0, ge=0),
                  q: str = Query(default="", max_length=4000),
-                 sort: Literal["newest", "oldest"] = "newest"):
+                 sort: Literal["newest", "oldest"] = "newest",
+                 tag: list[str] | None = Query(default=None, max_length=32, description="Optional exact tag filters; repeat tag to require all labels. Combined with q.")):
     try:
-        records, total = image_catalog.list_images(ROOT, IMAGE_DIR, q, sort, limit, offset)
+        records, total = image_catalog.list_images(ROOT, IMAGE_DIR, q, sort, limit, offset, tag)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
     except OSError:
         raise HTTPException(503, "Cannot read the image library. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     next_offset = offset + len(records)
     return {'object': 'list', 'data': [catalog_urls(item, request) for item in records],
-            'total': total, 'has_more': next_offset < total,
+            'total': total, 'limit': limit, 'offset': offset,
+            'has_previous': offset > 0, 'previous_offset': max(0, offset - limit) if offset > 0 else None,
+            'has_more': next_offset < total,
             'next_offset': next_offset if next_offset < total else None}
 
 
@@ -446,6 +461,30 @@ def saved_image(identifier: str, request: Request, response: Response):
         record = image_catalog.image_record(ROOT, IMAGE_DIR, identifier)
     except (OSError, ValueError):
         raise HTTPException(404, "Saved image is unavailable") from None
+    response.headers['Cache-Control'] = 'no-store'
+    return catalog_urls(record, request)
+
+
+class ImageTagsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tags: list[str] = Field(max_length=32, description="Replace all current tags. Send [] to clear. At most 32 labels, each 1–64 characters; commas and control characters are disallowed. Case-insensitive duplicates are removed.")
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def validate_tags(cls, value):
+        return image_catalog.normalize_tags(value)
+
+
+@app.patch("/v1/images/{identifier}/tags", response_model=CatalogDetail, response_model_exclude_none=True,
+           summary="Replace a saved image's tags",
+           description="Stores editable tags atomically in the local image index. Original PNG and generation sidecar remain unchanged. Works for older default-folder images and indexed custom destinations. No inference is performed.")
+def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request, response: Response):
+    try:
+        record = image_catalog.update_tags(ROOT, IMAGE_DIR, identifier, payload.tags)
+    except FileNotFoundError:
+        raise HTTPException(404, "Saved image is unavailable") from None
+    except OSError:
+        raise HTTPException(503, "Cannot save image tags. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     return catalog_urls(record, request)
 

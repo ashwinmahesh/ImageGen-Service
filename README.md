@@ -87,9 +87,11 @@ The server runs in the foreground; Ctrl-C stops it. `make start` is equivalent t
 
 ## Saved-image gallery
 
-Open `http://127.0.0.1:8000/gallery`, or choose **Gallery** in the webpage navigation. It shows saved generations newest first, with search across prompts, seeds, dimensions, model names and style labels, an oldest-first option, and paginated loading. Open a thumbnail to view the original, prompt, settings, timestamp and absolute file path. You can download the PNG or its JSON metadata, copy the prompt/path, reuse settings, or select the image as a reference for a new variation. Reuse pre-fills the form for review; it never submits generation automatically. Unavailable adapters are reported and the base model is selected. Reusing settings from an image that originally used a reference requires that original reference file to remain available.
+Open `http://127.0.0.1:8000/gallery`, or choose **Gallery** in the webpage navigation. It shows saved generations newest first, with search across prompts, tags, seeds, dimensions, model names and style labels, an oldest-first option, and Previous/Next page controls. The page-size selector offers 12, 24, 48 or 96 images. Search/filter/sort changes start at the first page; the current query, tag filters, page size and offset are retained in the gallery URL. Open a thumbnail to view the original, prompt, settings, timestamp and absolute file path. You can download the PNG or its JSON metadata, copy the prompt/path, edit tags, reuse settings, or select the image as a reference for a new variation. Reuse pre-fills the form for review; it never submits generation automatically. Unavailable adapters are reported and the base model is selected. Reusing settings from an image that originally used a reference requires that original reference file to remain available.
 
 The gallery discovers service-generated UUID-named PNGs in `<project>/images` and custom destinations recorded in `<project>/image-index`. Older default-folder images without index records are included; uploaded references are excluded. Missing files are skipped. Images without readable sidecars are still shown, using their file modification time and image dimensions where possible. This is a library of this service’s outputs, not a recursive browser of arbitrary folders. Generate a new image, then refresh the gallery to see it.
+
+Image tags are editable in the image-detail dialog; separate them with commas and choose **Save tags**. Tags also appear on cards: click one to filter by that exact label, then use **Clear tag filter** to remove the filter. The generator has an optional **Image tags** field, and gallery reuse pre-fills the current tags.
 
 Small WebP previews are created on demand under ignored `cache/thumbnails/`, with a maximum 512-pixel edge and no GPU inference. Original files are unchanged. Cache keys follow the original file’s modification time and size; the cache can be deleted when the service is idle. Source images and readable sidecars must remain available for viewing/downloading. Browsing also works while a generation is running.
 
@@ -100,9 +102,22 @@ curl --fail --silent --show-error 'http://127.0.0.1:8000/v1/images?limit=24&offs
 curl --fail --silent --show-error 'http://127.0.0.1:8000/v1/images/<image-id>'
 ```
 
-Replace `<image-id>` with an `id` from the list, a 32-character lowercase hex identifier. `limit` is 1–100 (default 24), `offset` is nonnegative, `sort` is `newest` or `oldest`, and `q` is an optional case-insensitive substring, at most 4,000 characters. The list returns `object:"list"`, `data`, matching `total`, `has_more`, and `next_offset` when another page exists. Results describe existing disk files and may change between requests; refresh to restart pagination after new generations.
+Replace `<image-id>` with an `id` from the list, a 32-character lowercase hex identifier. `limit` is 1–100 (default 24), `offset` is nonnegative, `sort` is `newest` or `oldest`, and `q` is an optional case-insensitive substring, at most 4,000 characters. The list returns `object:"list"`, `data`, matching `total`, echoed `limit`/`offset`, `has_previous`, `previous_offset` when applicable, `has_more`, and `next_offset` when another page exists. Send a returned offset with the same limit, query, sort and tag filters to navigate pages. An out-of-range offset returns an empty page with the matching total. `q` also matches tag substrings; optional repeated `tag` parameters require all exact tag labels, case-insensitively (for example `?tag=castle&tag=campaign`). Both filters apply together. Results describe existing disk files and may change between requests; refresh to restart pagination after new generations.
 
-Each item includes `id`, `created` (Unix seconds), `file_path`, `file_size`, `metadata_available`, `url` (original PNG), and `thumbnail_url` (cached preview). Recorded `prompt`, `model`, `size`, `width`, `height`, `seed`, `steps`, `generation_seconds`, `lora`, `metadata_path`, and `metadata_url` are included when available. The detail endpoint also returns the saved sidecar as `metadata`. Use the returned URLs rather than constructing filesystem paths. Metadata downloads are JSON; custom-folder originals use the same image URL scheme. New generations store `created` in their JSON sidecars; older ones fall back to the PNG modification time. The detail endpoint returns 404 for an unavailable individual file; the list endpoint returns 503 if the project storage cannot be read. As with the generation API, paths refer to the server’s Mac.
+Each item includes current `tags` (an array, empty for untagged images), `id`, `created` (Unix seconds), `file_path`, `file_size`, `metadata_available`, `url` (original PNG), and `thumbnail_url` (cached preview). Recorded `prompt`, `model`, `size`, `width`, `height`, `seed`, `steps`, `generation_seconds`, `lora`, `metadata_path`, and `metadata_url` are included when available. The detail endpoint also returns the saved sidecar as `metadata`. Use the returned URLs rather than constructing filesystem paths. Metadata downloads are JSON; custom-folder originals use the same image URL scheme. New generations store `created` in their JSON sidecars; older ones fall back to the PNG modification time. The detail endpoint returns 404 for an unavailable individual file; the list endpoint returns 503 if the project storage cannot be read. As with the generation API, paths refer to the server’s Mac.
+
+Set initial tags with `tags:["castle","campaign"]` in a generation request, or replace an existing image's tags without inference:
+
+```sh
+curl --fail-with-body -X PATCH 'http://127.0.0.1:8000/v1/images/<image-id>/tags' \
+  -H 'Content-Type: application/json' \
+  -d '{"tags":["castle","campaign"]}'
+curl --fail --silent --show-error 'http://127.0.0.1:8000/v1/images?tag=campaign&limit=12&offset=12'
+```
+
+Replace `<image-id>` with an existing list item ID. The PATCH response is the updated image detail; `tags:[]` clears all tags. Maximum 32 labels, each 1–64 characters after trimming/collapsing whitespace; Unicode is normalized to NFC. Case-insensitive duplicates are removed while the first spelling is kept. Commas and control characters are disallowed within labels. Invalid input returns 422, a missing image returns 404, and an unwritable tag store returns 503. Tag updates replace the whole list; with multiple editors, the last successful update wins.
+
+Current tags are saved atomically in the ignored `image-index/<id>.json`, alongside its file location. This also works for legacy default-folder images without a readable sidecar. Tagging does not alter PNG bytes, file timestamps or the original generation JSON. New-generation sidecars record initial tags; current tags from the list/detail API may differ after editing. **Save metadata** downloads the original generation sidecar, so use the detail response's top-level `tags` for the current labels. Preserve `image-index/` with backups or edited tags and custom-folder URL records will be lost.
 
 The gallery is local to this service. Images, metadata, index records and previews remain ignored by Git and are not downloaded by setup.
 
@@ -128,6 +143,7 @@ Base URL: `http://127.0.0.1:8000`. No API key is required. This is a small OpenA
 
 | Field | Default | Contract |
 | --- | --- | --- |
+| `tags` | `[]` | Optional initial image tags; max 32 labels of 1–64 characters. Editable through PATCH `/v1/images/{id}/tags`. |
 | `prompt` | required | Nonblank string, at most 4,000 characters. Runtime processes 512 tokens including chat formatting; excess text is truncated. |
 | `model` | `z-image-turbo` | Only this model ID is accepted. |
 | `size` | `1024x1024` | WIDTHxHEIGHT; each dimension 256–2048 inclusive, multiple of 64. With a reference, only the long edge is used; the photo determines the aspect ratio. |

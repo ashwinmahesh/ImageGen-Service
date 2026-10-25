@@ -52,6 +52,7 @@
         </section>
         <div class="field"><label id="size-label" for="size">Image size</label><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint">9 steps is a good default. Reuse a seed to explore variations of the same idea.</p></details>
+        <details><summary>Image tags</summary><div class="field"><label for="tags">Tags <span class="optional">(optional)</span></label><input id="tags" type="text" maxlength="2110" placeholder="gothic, village, campaign"><p class="hint">Separate tags with commas. Search or edit them later in the gallery.</p></div></details>
         <details><summary>Save location</summary>
           <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: images folder on your SSD" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
         </details>
@@ -198,6 +199,7 @@
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
       const payload = {model: 'z-image-turbo', prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url'};
+      payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
       if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
       if ((selectedFile || referencePath) && payload.steps < 2) { showError('Use at least 2 steps with a reference photo.'); $('steps').closest('details').open = true; $('steps').focus(); return; }
@@ -270,7 +272,7 @@
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
         const url = new URL(item.url, location.origin);
         if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
-        $('prompt').value = item.prompt || '';
+        $('prompt').value = item.prompt || ''; $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
         if (Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= 12) $('steps').value = item.steps;
         if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
