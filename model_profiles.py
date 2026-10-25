@@ -31,19 +31,40 @@ RUNTIME_URL='https://github.com/leejet/stable-diffusion.cpp/releases/download/ma
 RUNTIME_SHA256='d183e8d87a1d1b26f376ff68f4d15f3322648805687cb01c25a97c9ac5acdc50'
 
 
-def select_model(explicit=None, *, interactive=None, prompt=input):
+def _show_unavailable(identifiers):
+    missing=[name for name in PROFILES if name not in identifiers]
+    if missing:
+        print('\nNot set up (not selectable):')
+        for name in missing:
+            print(f"  - {PROFILES[name]['name']} ({name}) — make setup MODEL={name}")
+        print('Run a model\'s setup command to add it to the numbered options, then run make serve again.')
+
+
+def select_model(explicit=None, *, interactive=None, prompt=input, choices=None):
+    identifiers=tuple(PROFILES if choices is None else (name for name in PROFILES if name in choices))
     selected=explicit or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
     if interactive is None:
         interactive=sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE') != '1'
+    if not identifiers:
+        if interactive:
+            print('No image models are set up.')
+            _show_unavailable(identifiers)
+        raise ValueError('No models are set up. Run make setup first, then make serve.')
+    default=DEFAULT_MODEL if DEFAULT_MODEL in identifiers else identifiers[0]
     if not selected and interactive:
-        print('Choose an image model:')
-        for index,(identifier,profile) in enumerate(PROFILES.items(),1):
+        print('Choose an image model:' if choices is None else 'Choose a set up image model:')
+        for index,identifier in enumerate(identifiers,1):
+            profile=PROFILES[identifier]
             print(f"  {index}. {profile['name']} ({identifier})")
-        answer=prompt('Model [1 / Z-Image Turbo]: ').strip()
-        selected=dict(enumerate(PROFILES,1)).get(int(answer)) if answer.isdigit() else answer
+        if choices is not None:
+            _show_unavailable(identifiers)
+        answer=prompt(f"Model [{identifiers.index(default)+1} / {PROFILES[default]['name']}]: ").strip()
+        selected=dict(enumerate(identifiers,1)).get(int(answer)) if answer.isdigit() else answer
         if answer and not selected:
             raise ValueError('Choose a listed model number or ID')
-    selected=selected or DEFAULT_MODEL
+    selected=selected or default
     if selected not in PROFILES:
         raise ValueError('Unknown model; choose '+', '.join(PROFILES))
+    if selected not in identifiers:
+        raise ValueError(f'{selected} is not set up; run make setup MODEL={selected} first')
     return selected

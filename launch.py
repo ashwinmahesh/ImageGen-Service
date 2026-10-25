@@ -31,25 +31,38 @@ def check_assets(selected):
     require_storage(folder)
     profile=PROFILES[selected]
     required=[folder/'download.json']
+    directories=[]
     if profile['backend']=='sd-cpp':
-        required += [folder/profile['filename'],ROOT/'runtime'/'sd-cli']
+        required += [folder/profile['filename'],ROOT/'runtime'/'sd-cli',ROOT/'runtime'/'libstable-diffusion.dylib']
         required += [store/'chroma1-hd'/'weights'/asset[2] for asset in SHARED_ASSETS]
     else:
-        required += [folder/name for name in ['transformer','text_encoder','tokenizer','vae']]
-    missing=[path for path in required if not path.exists()]
+        directories=[folder/name for name in ['transformer','text_encoder','tokenizer','vae']]
+    missing=[path for path in required if not path.is_file()]+[path for path in directories if not path.is_dir()]
     if missing:
         raise SystemExit(f'Model assets missing; run make setup MODEL={selected} first. Missing: {missing[0]}')
+
+
+def available_models():
+    ready=[]
+    for identifier in PROFILES:
+        try:
+            check_assets(identifier)
+        except SystemExit:
+            continue
+        ready.append(identifier)
+    return ready
 
 
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=5732)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
-    parser.add_argument('--model', choices=PROFILES, help='Choose a backend; omitted in a terminal opens the model menu')
+    parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
     args=parser.parse_args()
     try:
-        selected=select_model(args.model)
-    except ValueError as error:
+        explicit=args.model or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
+        selected=select_model(explicit,choices=None if explicit else available_models())
+    except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)
     if not port_free(args.port):

@@ -16,6 +16,7 @@ import config
 import server
 import chroma_engine
 import download
+import launch
 
 
 class SelectionTest(unittest.TestCase):
@@ -28,6 +29,31 @@ class SelectionTest(unittest.TestCase):
             for answer in ['4','bad']:
                 with self.assertRaises(ValueError):
                     model_profiles.select_model(interactive=True,prompt=lambda _: answer)
+
+    def test_filtered_menu_numbers_and_ready_default(self):
+        with patch.dict(os.environ,{},clear=True),contextlib.redirect_stdout(io.StringIO()) as output:
+            ready=['chroma1-hd','chroma1-flash']
+            self.assertEqual(model_profiles.select_model(choices=ready,interactive=True,prompt=lambda _: '2'),'chroma1-flash')
+            self.assertEqual(model_profiles.select_model(choices=ready,interactive=True,prompt=lambda _: ''),'chroma1-hd')
+            self.assertEqual(model_profiles.select_model(choices=['chroma1-flash'],interactive=False),'chroma1-flash')
+            self.assertEqual(model_profiles.select_model(choices=list(model_profiles.PROFILES),interactive=False),'z-image-turbo')
+            self.assertIn('1. Chroma1-HD',output.getvalue())
+            self.assertIn('2. Chroma1-Flash',output.getvalue())
+            self.assertIn('- Z-Image Turbo (z-image-turbo) — make setup MODEL=z-image-turbo',output.getvalue())
+            self.assertNotIn('1. Z-Image Turbo',output.getvalue())
+            with self.assertRaisesRegex(ValueError,'not set up'):
+                model_profiles.select_model(choices=ready,interactive=True,prompt=lambda _: 'z-image-turbo')
+            for options in [dict(choices=[]),dict(explicit='z-image-turbo',choices=ready)]:
+                with self.assertRaisesRegex(ValueError,'make setup'):
+                    model_profiles.select_model(interactive=False,**options)
+
+    def test_empty_serving_menu_shows_setup_commands_without_prompting(self):
+        with patch.dict(os.environ,{},clear=True),contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(ValueError,'No models are set up'):
+                model_profiles.select_model(choices=[],interactive=True,prompt=lambda _:self.fail('prompted with no ready models'))
+            for name in model_profiles.PROFILES:
+                self.assertIn('make setup MODEL='+name,output.getvalue())
+            self.assertNotIn('  1.',output.getvalue())
 
     def test_each_startup_model_has_own_schema_and_only_accepts_itself(self):
         script='''import server,json
@@ -48,6 +74,69 @@ print(json.dumps({'model':server.API_MODEL,'steps':request.steps,'root':str(serv
                 state=json.loads(result.stdout)
                 self.assertEqual(state['steps'],profile['steps'])
                 self.assertEqual(state['root'],str(Path(folder).resolve()/identifier))
+
+
+class InstalledModelMenuTest(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.root=Path(self.temp.name).resolve()
+        self.project=self.root/'project';self.project.mkdir()
+        self.store=self.root/'store';self.store.mkdir()
+        self.env=patch.dict(os.environ,{'DATA_DIR':str(self.store)},clear=True)
+        self.env.start()
+        self.location=patch.object(launch,'ROOT',self.project);self.location.start()
+
+    def tearDown(self):
+        self.location.stop();self.env.stop();self.temp.cleanup()
+
+    def z_image(self):
+        weights=self.store/'z-image-turbo/weights';weights.mkdir(parents=True)
+        (weights/'download.json').write_text('{}')
+        for name in ['transformer','text_encoder','tokenizer','vae']:(weights/name).mkdir()
+        return weights
+
+    def flash(self):
+        weights=self.store/'chroma1-flash/weights';weights.mkdir(parents=True)
+        (weights/'download.json').write_text('{}')
+        (weights/model_profiles.PROFILES['chroma1-flash']['filename']).touch()
+        runtime=self.project/'runtime';runtime.mkdir()
+        (runtime/'sd-cli').touch()
+        (runtime/'libstable-diffusion.dylib').touch()
+        for asset in model_profiles.SHARED_ASSETS:
+            path=self.store/'chroma1-hd/weights'/asset[2]
+            path.parent.mkdir(parents=True,exist_ok=True);path.touch()
+
+    def test_discovery_checks_shared_assets_and_does_not_require_hd_checkpoint_for_flash(self):
+        weights=self.z_image();self.flash()
+        self.assertEqual(launch.available_models(),['z-image-turbo','chroma1-flash'])
+        (weights/'download.json').unlink()
+        self.assertEqual(launch.available_models(),['chroma1-flash'])
+        shared=self.store/'chroma1-hd/weights'/model_profiles.SHARED_ASSETS[0][2]
+        shared.unlink()
+        self.assertEqual(launch.available_models(),[])
+
+    def test_completion_marker_alone_or_wrong_asset_type_is_not_ready(self):
+        weights=self.z_image()
+        (weights/'vae').rmdir();(weights/'vae').touch()
+        self.assertEqual(launch.available_models(),[])
+        (weights/'vae').unlink();(weights/'vae').mkdir()
+        (weights/'download.json').unlink();(weights/'download.json').mkdir()
+        self.assertEqual(launch.available_models(),[])
+
+    def test_no_setup_or_explicit_missing_model_leaves_existing_services_untouched(self):
+        for args,message in [([], 'No models are set up'),(['--model','chroma1-flash'],'make setup MODEL=chroma1-flash')]:
+            with patch.object(sys,'argv',['launch.py',*args]),patch.object(launch,'port_free') as port,patch.object(launch.os,'kill') as kill,patch.object(launch.os,'execv') as execute,contextlib.redirect_stderr(io.StringIO()) as errors:
+                with self.assertRaises(SystemExit) as stopped:launch.main()
+                if args:self.assertIn(message,str(stopped.exception))
+                else:
+                    self.assertEqual(stopped.exception.code,2)
+                    self.assertIn(message,errors.getvalue())
+                port.assert_not_called();kill.assert_not_called();execute.assert_not_called()
+
+    def test_missing_storage_mount_fails_without_creating_a_fallback(self):
+        with patch.dict(os.environ,{'DATA_DIR':'/Volumes/model-menu-test-unmounted/models'}),patch('storage_paths.Path.is_mount',return_value=False),patch.object(Path,'mkdir') as mkdir:
+            with self.assertRaisesRegex(RuntimeError,'not mounted'):launch.available_models()
+            mkdir.assert_not_called()
 
 
 class CrossModelGalleryTest(unittest.TestCase):

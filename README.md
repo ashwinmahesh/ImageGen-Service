@@ -27,7 +27,7 @@ make test
 make serve
 ```
 
-Both **`make setup` and `make serve` show a model menu** in a terminal:
+**`make setup` lists all supported models** in a terminal:
 
 ```text
 Choose an image model:
@@ -37,7 +37,24 @@ Choose an image model:
 Model [1 / Z-Image Turbo]:
 ```
 
-Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads only the selected model's required assets; it does not start serving. Repeat setup to install another model. All models use the same environment and source code. Explicit selection skips the menu:
+Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads only the selected model's required assets; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
+
+**`make serve` numbers only models already set up.** Other supported models are shown separately without numbers, with the command to set each up. For example, with only Z-Image installed:
+
+```text
+Choose a set up image model:
+  1. Z-Image Turbo (z-image-turbo)
+
+Not set up (not selectable):
+  - Chroma1-HD (chroma1-hd) — make setup MODEL=chroma1-hd
+  - Chroma1-Flash (chroma1-flash) — make setup MODEL=chroma1-flash
+Run a model's setup command to add it to the numbered options, then run make serve again.
+Model [1 / Z-Image Turbo]:
+```
+
+Enter prefers Z-Image when ready, otherwise the first ready model in registry order. Menu numbers refer only to the ready list. A listed but unready model cannot be selected by ID either; set it up first. If none are ready, the launcher shows setup commands and exits without starting or stopping a server. Discovery checks the completion marker and required local paths, including Chroma's shared encoder/VAE and native runtime/library. It does not load GPU weights or perform a full checksum scan; startup remains the final loadability check. A missing external volume reports a mount error, not an empty fallback store.
+
+Explicit selection skips the menu and still validates the selected model's assets before touching a running server:
 
 ```sh
 make setup MODEL=z-image-turbo
@@ -47,7 +64,7 @@ make serve MODEL=chroma1-hd NO_LORAS=1
 make serve-no-loras MODEL=z-image-turbo
 ```
 
-Without a terminal, or with `NONINTERACTIVE=1`, an omitted model defaults to Z-Image Turbo. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=5733` changes the endpoint. Use `BOOTSTRAP_PYTHON=/absolute/path/to/python3.14` if `python3.14` is installed elsewhere. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
+Without a terminal, or with `NONINTERACTIVE=1`, setup/download default to Z-Image Turbo. Serving defaults to Z-Image when ready, otherwise the first ready model, or exits with setup guidance if none are ready. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=5733` changes the endpoint. Use `BOOTSTRAP_PYTHON=/absolute/path/to/python3.14` if `python3.14` is installed elsewhere. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
 
 ## Model storage
 
