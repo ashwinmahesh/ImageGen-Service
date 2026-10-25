@@ -26,12 +26,13 @@ if __name__ == '__main__':
         os.environ['IMAGE_MODEL']=selected.model
 
 from model_profiles import PROFILES
-from config import GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
+from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
 import image_catalog
 from job_queue import JobStore, QueueWorker, QueueConflict, fingerprint, TERMINAL
+from queue_storage import initialize_queue
 
 # Downloads are an explicit separate step. Serving never needs the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -71,10 +72,9 @@ def load_model():
 
 def initialize_service():
     global job_store,job_worker
-    job_store=JobStore(ROOT/'queue'/'jobs.sqlite3')
-    job_store.initialize()
+    job_store=JobStore(QUEUE_DATABASE)
     job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE)
-    job_worker.acquire()
+    job_worker.acquire(prepare=lambda:initialize_queue(job_store,ROOT/'queue'/'jobs.sqlite3'))
     try:
         # Model loading and inference cooperate with the same cross-service GPU lock.
         gpu=job_worker.acquire_accelerator()
@@ -99,7 +99,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.1.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.1.1", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -116,7 +116,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1
 
 @app.exception_handler(sqlite3.Error)
 async def queue_storage_error(request,error):
-    return JSONResponse({'detail':'Queue storage is unavailable; reconnect it and retry.'},status_code=503)
+    return JSONResponse({'detail':'Project-local queue storage is unavailable; check its path and permissions, then retry.'},status_code=503)
 
 
 class GenerateRequest(BaseModel):

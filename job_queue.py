@@ -56,7 +56,7 @@ class JobStore:
             version=db.execute('PRAGMA user_version').fetchone()[0]
             if version not in (0,1):
                 raise RuntimeError('Unsupported queue database version; use a compatible server')
-            # Rollback journal avoids WAL shared-memory assumptions on external filesystems.
+            # Short rollback-journal transactions; all queue files stay project-local.
             db.execute('PRAGMA journal_mode=DELETE')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -209,7 +209,8 @@ class QueueWorker:
         self.gpu_lock_file=Path(gpu_lock_file) if gpu_lock_file else None
         self.stage='idle'
 
-    def acquire(self):
+    def acquire(self, *, prepare=None):
+        self.store.path.parent.mkdir(parents=True,exist_ok=True)
         self.lease=(self.store.path.parent/'worker.lock').open('a+')
         warned=False
         while True:
@@ -231,7 +232,13 @@ class QueueWorker:
                     self.lease.close(); self.lease=None
                     raise RuntimeError('This model queue already has a live worker; use its existing server') from None
         self.lease.seek(0); self.lease.truncate(); self.lease.write(str(os.getpid())); self.lease.flush()
-        self.store.recover()
+        try:
+            if prepare:
+                prepare()
+            self.store.recover()
+        except BaseException:
+            self.release()
+            raise
 
     def start(self,executor):
         self.future=executor.submit(self.run)

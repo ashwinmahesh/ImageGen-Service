@@ -3,10 +3,12 @@ import os
 from pathlib import Path
 from model_profiles import PROFILES, select_model, RUNTIME_RELEASE, RUNTIME_URL, RUNTIME_SHA256, SHARED_ASSETS
 from storage_paths import data_directory, require_storage
+from queue_storage import queue_database
 
 PROJECT_ROOT=Path(__file__).resolve().parent
 STORE_ROOT=data_directory(PROJECT_ROOT)
 API_MODEL=select_model(interactive=False)
+QUEUE_DATABASE=queue_database(PROJECT_ROOT,API_MODEL)
 PROFILE=PROFILES[API_MODEL]
 MODEL_ROOTS={identifier: STORE_ROOT/identifier for identifier in PROFILES}
 ROOT=MODEL_ROOTS[API_MODEL]

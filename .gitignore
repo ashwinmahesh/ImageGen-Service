@@ -19,7 +19,7 @@
 *.partial
 *.tmp
 
-# Image files are never source artifacts in this repository (any letter case)
+# Generated images stay private (any letter case); approved README screenshots are exceptions below.
 *.[pP][nN][gG]
 *.[jJ][pP][gG]
 *.[jJ][pP][eE][gG]
@@ -91,6 +91,7 @@ storage.json
 /chroma1-flash
 
 # Durable queue files and process locks
+/state
 *.sqlite
 *.sqlite3
 *.sqlite3-*
@@ -99,3 +100,8 @@ storage.json
 *.lock
 /queue
 /.model-services
+
+# Public UI documentation only; generated image folders remain ignored.
+!/docs/screenshots/generator.png
+!/docs/screenshots/queue.png
+!/docs/screenshots/gallery.png

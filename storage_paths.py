@@ -8,7 +8,7 @@ import tempfile
 from model_profiles import PROFILES
 
 DATA_FOLDERS = tuple(PROFILES)
-MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs', 'queue')
+MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs')
 
 
 def _absolute(value):
