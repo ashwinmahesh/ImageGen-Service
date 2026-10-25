@@ -1,17 +1,37 @@
 # Z-Image Turbo on Apple Silicon
 
-Local MFLUX/MLX image generation with 4-bit Z-Image Turbo. This README describes the installed HTTP API for humans and AI agents.
+Local MFLUX/MLX image generation with 4-bit Z-Image Turbo. This README is the setup and API entry point for humans and AI tools using a downloaded ZIP or Git checkout.
+
+## Hand off to another AI tool
+
+No chat history, Codex plugin, or preinstalled shell alias is needed. Give the AI the downloaded project folder and this instruction:
+
+> Read README.md and skill/z-image-turbo/SKILL.md in this source folder. Set up this checkout with make setup, verify it with make test, and start the requested serving mode in a persistent terminal. Wait for /health to report ready and model z-image-turbo. Report the URL, mode, and verification results. Keep generated images, reference photos, weights, and runtime data outside Git.
+
+The project root is the folder containing `Makefile`, `config.py`, and `server.py`, regardless of its name or location. In this document `<project>` means that folder's absolute path. Replace example paths with real paths on the machine running the server. The skill can be read directly by any AI tool; installation into a tool's skill directory is optional.
 
 ## One-time setup from source
 
 Requires an Apple Silicon Mac with a working Metal GPU, Git, Make, and Python 3.14. On a Homebrew installation, install the prerequisite with `brew install python@3.14`. This project uses pinned packages for the tested Python 3.14 runtime. The existing 24 GB Mac setup uses a 4-bit checkpoint.
 
-From this repository folder:
+From the downloaded project folder (replace the path below):
 
 ```sh
+cd "/absolute/path/to/downloaded-checkout"
 make setup
+make test
 make serve
 ```
+
+`make setup` does not start the server. `make test` verifies API/setup behavior with fake generators and fake downloads; it does not download weights or run GPU inference. `make serve` stays in the foreground, so an AI tool should retain that terminal/session and use another session for readiness checks. Startup loads the model before accepting requests.
+
+After `Application startup complete`:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8000/health
+```
+
+Expect `status:ready`, `model:z-image-turbo`, and inspect `busy` and `loras_enabled`. Open `http://127.0.0.1:8000/` for the UI. For an optional actual GPU check, run `make smoke` from another terminal; it generates and validates a 512×512 PNG stored locally in the ignored images folder. Distinguish this from the fake-generator unit tests when reporting verification.
 
 `make setup` creates the Python environment if missing, installs `requirements.lock.txt`, then downloads the base model from [filipstrand/Z-Image-Turbo-mflux-4bit](https://huggingface.co/filipstrand/Z-Image-Turbo-mflux-4bit) at revision `b3a8f31115a11f2f9e2fa0bfbc8d78dcc3e6568b`. Model files are roughly 6 GB and go directly into this checkout’s ignored `weights/` folder. Hugging Face resumes partial downloads and reuses completed files when setup is repeated. After setup, serving is offline; there is no model download during startup.
 
@@ -29,6 +49,20 @@ make serve-no-loras
 
 The tracked `lora-catalog.json` contains only adapter names, source revisions and checksums. A fresh clone uses that catalog automatically; an existing local `loras/catalog.json` takes precedence. Downloaded adapter files and local catalog overrides are ignored by Git. The shell aliases below are conveniences on this Mac; `make serve` works without installing any alias.
 
+## Setup recovery and completion checks
+
+| Situation | Action |
+| --- | --- |
+| Wrong platform | This runtime targets Apple Silicon macOS with Metal; do not treat Intel, Linux, or Windows as a working MLX setup. |
+| Bootstrap Python not found | Install Python 3.14 or set `BOOTSTRAP_PYTHON` to its executable. For a custom environment path, use the same `VENV` for setup, tests, serving, and downloads. |
+| Dependency installation fails | Read the pip error. Keep the pinned versions; use a fresh internal-storage environment if an unrelated or older environment was selected. |
+| Download interrupted or weights missing | Rerun `make setup`, or `make download` if dependencies are already installed. Hugging Face resumes existing downloads. Fix network/disk/access errors rather than creating `weights/download.json` manually. |
+| Port already occupied | Inspect `/health`. The launcher may reuse a matching instance and can switch an idle managed server; it refuses to interrupt a busy generation or replace an unrelated service. Keep one GPU model instance on the original 24 GB Mac. |
+| Server starting, health connection refused | Keep its terminal alive and wait for startup to finish; inspect its logs instead of starting duplicates. |
+| Metal unavailable or memory error | Confirm Apple Silicon/Metal availability, inspect server logs, and reduce image size if memory is the cause. A passing unit suite alone does not establish working GPU inference. |
+
+For setup-only work, report the project path, actual environment path, and setup/unit-test results. If serving was requested, also report a successful health check, the actual URL/port, and whether LoRAs are enabled. Report a GPU smoke result only if `make smoke` or a real generation ran. Do not restart an existing active generation merely to verify a documentation/setup change.
+
 ## What belongs in Git
 
 This is a source-only repository. `.gitignore` excludes generated images, uploaded reference photos, image sidecars and URL records, model weights, downloaded LoRAs, caches, logs, virtual environments, credentials and macOS metadata. Image extensions are ignored throughout the repository, including inside source folders and with uppercase filenames. The UI’s small inline SVG icon is source markup; no separate image assets are tracked. Existing photos and model files remain local on disk.
@@ -37,22 +71,23 @@ Before committing, use `git status --short` and `git ls-files` to inspect the so
 
 ## Start and use
 
+From the actual checkout root after setup:
+
 ```sh
-serve-z-image-turbo
-# Equivalent, including in noninteractive shells where aliases are unavailable:
-cd /Volumes/ASH-SSD/models/z-image-turbo
 make serve
 ```
 
+The original Mac has `serve-z-image-turbo` and `serve-z-image-turbo-no-loras` aliases pointing to `/Volumes/ASH-SSD/models/z-image-turbo`. Those are optional conveniences specific to that installation. A clone/ZIP needs no alias or shell-profile changes; use its Makefile directly.
+
 Wait for `Application startup complete`. Open http://127.0.0.1:8000/ for the webpage, http://127.0.0.1:8000/docs for interactive API docs, or http://127.0.0.1:8000/openapi.json for the machine-readable schema. The page supports prompts, sizes, seeds, steps, a visible reference-photo picker (with preview and remove controls), a reference file-path alternative, and a save folder. It previews the image and shows its saved path, with download, reuse-seed, and Make a variation buttons.
 
-The three model aliases switch between Z-Image Turbo, Chroma1-HD and Chroma1-Flash on the shared port 8000 when the current service is idle. If it is generating, the launcher refuses to interrupt it; retry after it finishes.
+The original Mac's three model aliases switch between Z-Image Turbo, Chroma1-HD and Chroma1-Flash on the shared port 8000 when the current service is idle. If it is generating, the launcher refuses to interrupt it; retry after it finishes.
 
-The server runs in the foreground; Ctrl-C stops it. `make start` is equivalent to `make serve`. `make serve PORT=8001` changes the port. The SSD must remain mounted. Do not start a second instance on this 24 GB Mac. The zsh alias is available in newly opened shells (or after `source ~/.zshrc`).
+The server runs in the foreground; Ctrl-C stops it. `make start` is equivalent to `make serve`. `make serve PORT=8001` changes the port. The storage containing the checkout and weights must remain available. Do not start a second instance on this 24 GB Mac. The zsh alias is available in newly opened shells (or after `source ~/.zshrc`).
 
 ## Serve without LoRAs
 
-Run `serve-z-image-turbo-no-loras` in a new zsh session, or reload your aliases with `source ~/.zshrc` first. From this project folder, the equivalent commands are:
+From this project folder:
 
 ```sh
 make serve-no-loras
@@ -60,9 +95,9 @@ make serve-no-loras
 make serve NO_LORAS=1
 ```
 
-Both pass `--no-loras` through `launch.py` to `server.py`. `PORT=8001` works with either Make target. This mode serves only the base model: the webpage hides adapter controls and displays a base-model notice, `GET /health` returns `loras_enabled:false`, and `GET /v1/loras` returns `enabled:false` with an empty `data` list. Requests with a non-null `lora` fail with HTTP 422 before inference. Omit `lora` or send null; reference photos and all other settings remain available.
+Both pass `--no-loras` through `launch.py` to `server.py`. `PORT=8001` works with either Make target; also use it for `make health`, `make smoke`, and the client URL. A custom `VENV=...` must be supplied consistently too. This mode serves only the base model: the webpage hides adapter controls and displays a base-model notice, `GET /health` returns `loras_enabled:false`, and `GET /v1/loras` returns `enabled:false` with an empty `data` list. Requests with a non-null `lora` fail with HTTP 422 before inference. Omit `lora` or send null; reference photos and all other settings remain available.
 
-Use `serve-z-image-turbo` or `make serve` to restore the LoRA selector. The launcher restarts an idle managed server when the requested mode changes, including for the same model. It refuses to switch modes while an image is generating. Ordinary serving already uses the unmodified base model whenever **None** is selected; the new startup mode additionally prevents adapter use for the entire process.
+Use `make serve` to restore the LoRA selector. The launcher restarts an idle managed server when the requested mode changes, including for the same model. It refuses to switch modes while an image is generating. Ordinary serving already uses the unmodified base model whenever **None** is selected; the new startup mode additionally prevents adapter use for the entire process.
 
 ## API contract
 
@@ -81,7 +116,7 @@ Base URL: `http://127.0.0.1:8000`. No API key is required. This is a small OpenA
 | `lora` | null | Named adapter from `GET /v1/loras`; null/omitted disables adapters. |
 | `lora_strength` | catalog default | Optional influence 0–2, only with `lora`; all installed adapters default to 0.8. |
 | `response_format` | `b64_json` | `url` or `b64_json`; both save a PNG and metadata on disk. |
-| `output_dir` | `/Volumes/ASH-SSD/models/z-image-turbo/images` | Absolute directory on this Mac; `~/` is expanded. Missing directories are created if writable. This changes only the current request. |
+| `output_dir` | `<project>/images` | Absolute directory on this Mac; `~/` is expanded. Missing directories are created if writable. This changes only the current request. |
 | `reference_image` | `null` | One absolute local image file path; `~/` is expanded. PNG, JPEG, WebP and other Pillow-readable formats. The webpage can upload a photo first and pass its saved local path here. No URLs, lists, masks, or multiple reference photos in this field. |
 | `image_strength` | `0.6` | Number >=0 and <1, only valid with `reference_image`. Higher values preserve MORE of the source and perform fewer denoising steps (MFLUX semantics). 0 starts from full noise. |
 
@@ -104,7 +139,7 @@ The Realism trigger word is added automatically. Write scene descriptions in `pr
 
 MFLUX applies the adapter without baking it into the quantized base weights. Changing the selected adapter, changing its strength, or selecting None releases the previous model and reloads clean weights, with at most one GPU model resident. Repeated requests with the same selection reuse the loaded model. This adds some time when switching and avoids residual effects from the previous adapter. Model reload time is included in `generation_seconds`.
 
-Files live in `/Volumes/ASH-SSD/models/z-image-turbo/loras/`; `lora-catalog.json` supplies the source defaults; a local `loras/catalog.json` overrides names and compatibility. Run `make download-loras` to download/resume the pinned catalogued adapters and verify their checksums. Already verified files are reused. Downloads occur separately from the offline server. To import another compatible adapter, add an entry to `lora-catalog.json` (or the local override) then run `make install-lora FILE=/absolute/path/to/adapter.safetensors LORA_ID=its-id`. Refresh the UI after catalog changes; a server restart is not needed.
+Files live in `<project>/loras/`; `lora-catalog.json` supplies the source defaults; a local `loras/catalog.json` overrides names and compatibility. Run `make download-loras` to download/resume the pinned catalogued adapters and verify their checksums. Already verified files are reused. Downloads occur separately from the offline server. To import another compatible adapter, add an entry to `lora-catalog.json` (or the local override) then run `make install-lora FILE=/absolute/path/to/adapter.safetensors LORA_ID=its-id`. Refresh the UI after catalog changes; a server restart is not needed.
 
 Installed adapter sources and pins:
 
@@ -138,7 +173,7 @@ Replace the example reference path with an existing photo on this Mac:
 ```sh
 curl --fail-with-body --max-time 1800 http://127.0.0.1:8000/v1/images/generations \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"A watercolor painting of a fox among snowy pine trees","size":"512x512","steps":9,"seed":42,"reference_image":"/Volumes/ASH-SSD/photos/fox.jpg","image_strength":0.6,"output_dir":"/Volumes/ASH-SSD/my-project/images","response_format":"url"}'
+  -d '{"prompt":"A watercolor painting of a fox among snowy pine trees","size":"512x512","steps":9,"seed":42,"reference_image":"/absolute/path/to/reference.jpg","image_strength":0.6,"output_dir":"/absolute/path/to/output","response_format":"url"}'
 ```
 
 This uses the photo as the starting image for image-to-image generation. Describe the desired final image. It is not a dedicated instruction editor or identity-preserving model. The output automatically follows the oriented reference aspect ratio, using the longer requested size dimension as its output long edge. Try 0.6 first; raise it to retain more of the source, lower it for more change. The step count is a full sampling schedule; reference preservation skips part of it, so actual denoising iterations are fewer and strength changes can be discrete. This convention is different from APIs where a higher denoising strength means more change.
@@ -155,7 +190,7 @@ Read `data[0].size`, `width`, and `height` for the **actual saved dimensions**, 
 
 The **Reference photo** section appears directly below the prompt. Click **Choose photo**, pick one PNG/JPEG/WebP photo, and check its thumbnail. Use **Change photo** or the × remove button to replace or remove it. **Keep the original** controls preservation (default 0.6). **Or use a file path** accepts an existing absolute path without making an upload copy. Selecting a photo and typing a path are alternatives; the most recent choice is used.
 
-The selected photo is uploaded only when you generate. It is saved as an oriented RGB PNG copy in `/Volumes/ASH-SSD/models/z-image-turbo/references/`; the original is unchanged. The browser reuses that saved reference for subsequent generations until you choose another photo or reload the page. Copies remain on the SSD for reuse, including when a generation fails. Removing a photo in the form clears its selection, not its saved copy. There is no cloud upload. Maximum upload: 20 MiB and 40 megapixels. PNG, JPEG and WebP are recommended; HEIC is not supported by the installed decoder.
+The selected photo is uploaded only when you generate. It is saved as an oriented RGB PNG copy in `<project>/references/`; the original is unchanged. The browser reuses that saved reference for subsequent generations until you choose another photo or reload the page. Copies remain in the project for reuse, including when a generation fails. Removing a photo in the form clears its selection, not its saved copy. There is no cloud upload. Maximum upload: 20 MiB and 40 megapixels. PNG, JPEG and WebP are recommended; HEIC is not supported by the installed decoder.
 
 After generating, click **Make a variation** under the result. The existing PNG becomes the reference (no extra upload), with the previous prompt selected for rewriting and preservation reset to 0.6. Describe the desired final image, adjust **Keep the original**, and generate again. Each pass saves a new PNG/JSON; earlier versions stay on disk. This is whole-image image-to-image refinement, so small edits may alter other details. Masked inpainting and exact instruction edits are not exposed by this model wrapper.
 
@@ -164,7 +199,7 @@ Agents may also upload a reference via `POST /v1/reference-images` with **raw im
 ```sh
 curl --fail-with-body http://127.0.0.1:8000/v1/reference-images \
   -H 'Content-Type: image/jpeg' \
-  --data-binary '@/Volumes/ASH-SSD/photos/fox.jpg'
+  --data-binary '@/absolute/path/to/reference.jpg'
 ```
 
 The 201 response contains `file_path`, `url`, `width`, and `height`. Pass its `file_path` as `reference_image` in the normal generation request. The URL serves the normalized reference PNG while the server is running. Invalid images return 400; oversized files/images return 413. This upload route does not generate an image or load another model.
@@ -182,8 +217,8 @@ Example shape (illustrative values):
     "width": 512,
     "height": 512,
     "generation_size": "512x512",
-    "file_path": "/Volumes/ASH-SSD/my-project/images/0123456789abcdef0123456789abcdef.png",
-    "metadata_path": "/Volumes/ASH-SSD/my-project/images/0123456789abcdef0123456789abcdef.json",
+    "file_path": "/absolute/path/to/output/0123456789abcdef0123456789abcdef.png",
+    "metadata_path": "/absolute/path/to/output/0123456789abcdef0123456789abcdef.json",
     "url": "http://127.0.0.1:8000/images/0123456789abcdef0123456789abcdef.png"
   }],
   "generation_seconds": 19.02
@@ -192,11 +227,11 @@ Example shape (illustrative values):
 
 Use the actual `data[0].file_path` and `metadata_path`, not a constructed filename. With `b64_json`, `data[0].b64_json` replaces `url` and contains base64 PNG bytes (no data-URL prefix). Both absolute paths are always returned. The JSON sidecar records prompt, actual seed, size, requested steps, model source/revision, elapsed seconds, reference path/strength, and output paths. Reference pixels are not copied into metadata.
 
-The server keeps `image-index/<UUID>.json` records on the SSD so custom-directory image URLs keep working after restart. The server must be running, and the saved image and SSD must remain accessible. Moving or deleting a PNG breaks its URL. Images created before this index feature remain available in the default image directory.
+The server keeps `image-index/<UUID>.json` records in the project so custom-directory image URLs keep working after restart. The server must be running, and the saved image and project storage must remain accessible. Moving or deleting a PNG breaks its URL. Images created before this index feature remain available in the default image directory.
 
 ### Readiness, errors, and retries
 
-- `GET /health`: `{"status":"ready","model":"z-image-turbo","busy":false}` when usable. Startup loads the model before accepting requests; connection refusal during startup is expected.
+- `GET /health`: `{"status":"ready","model":"z-image-turbo","busy":false,"loras_enabled":true}` when usable. Startup loads the model before accepting requests; connection refusal during startup is expected.
 - `GET /v1/models`: available model ID.
 - `GET /images/{UUID}.png`: fetch an existing output, or 404 if absent.
 - HTTP 400: reference cannot be read/decoded, or destination cannot be written. Fix the path.
@@ -208,7 +243,9 @@ One generation is allowed at a time; there is no job queue. Allow several minute
 
 ## AI agent skill
 
-The reusable `z-image-turbo` skill is installed at `~/.codex/skills/z-image-turbo/SKILL.md`; a portable copy is kept in `skill/z-image-turbo/`. Invoke it as `$z-image-turbo` in a new Codex chat if the current chat has not refreshed its skill list. It explains startup, reference inputs, destination paths, request defaults, and how to return the actual saved image. Other agents can read this README and `/openapi.json` directly.
+The portable skill is `skill/z-image-turbo/SKILL.md`, with optional UI metadata in `skill/z-image-turbo/agents/openai.yaml`. It covers project discovery, prerequisites, first-time setup, verification, server startup, references, adapters, output paths, and retry behavior. Any AI tool can read it as a normal Markdown instruction file; no Codex-specific tool is required to set up or call this service.
+
+If the tool supports installable skills, install/copy the entire `skill/z-image-turbo/` folder using that tool's normal skill installation mechanism. If it does not, ask it to read the file directly as shown in the handoff prompt above. A globally installed copy must locate the actual checkout before running commands; its own skill folder is not the server project. On the original Mac a copy is already installed at `~/.codex/skills/z-image-turbo/`. Once serving, consult `/openapi.json` for the live schema rather than assuming another installation has identical fields.
 
 ## Underlying model controls
 
@@ -218,8 +255,8 @@ ControlNet structural guidance requires a compatible additional ControlNet model
 
 ## Storage and reproducibility
 
-- Project, weights (`weights/`), caches (`cache/`), default images (`images/`), uploaded reference copies (`references/`), and URL records (`image-index/`) are under `/Volumes/ASH-SSD/models/z-image-turbo`.
-- Python environment: `~/Documents/models/z-image-turbo/.venv` on internal storage, because the SSD is exFAT and Python environments use symlinks.
+- Project, weights (`weights/`), caches (`cache/`), default images (`images/`), uploaded reference copies (`references/`), and URL records (`image-index/`) are under `<project>` (derived from the directory containing `config.py`).
+- Default Python environment: `~/Documents/models/z-image-turbo/.venv` on internal storage. This also works when the project is on an exFAT SSD, where environment symlinks are unsuitable. Override with `VENV=...` when needed.
 - Original model: https://huggingface.co/Tongyi-MAI/Z-Image-Turbo (Apache 2.0).
 - Quantized distribution: https://huggingface.co/filipstrand/Z-Image-Turbo-mflux-4bit . Its own repository metadata/model notes are retained in `weights/README.md`.
 - Pinned revision: `b3a8f31115a11f2f9e2fa0bfbc8d78dcc3e6568b`.

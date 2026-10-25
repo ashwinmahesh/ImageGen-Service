@@ -1,35 +1,73 @@
 ---
 name: z-image-turbo
-description: Generate images with the user's locally installed Z-Image Turbo server on this Mac, including reference-photo variations and custom output folders. Use when the user chooses local Z-Image Turbo, not for unrelated image-generation services.
+description: Set up and use the local Z-Image Turbo server from a downloaded or cloned source folder on an Apple Silicon Mac, including image generation, reference-photo variations, and custom output folders. Use when the user chooses this local server.
 ---
 
-# Local Z-Image Turbo
+# Z-Image Turbo: setup and local generation
 
-Project: `/Volumes/ASH-SSD/models/z-image-turbo`. Read its `README.md` for the full API contract and current setup; if the service is running, `/openapi.json` is authoritative for accepted fields.
+This skill works from a downloaded source folder as well as the original Mac installation. Any AI tool can read it directly; a Codex installation or shell alias is not required.
 
-Check `http://127.0.0.1:8000/health`. If unavailable, verify the SSD is mounted and start `make serve` from the project in a retained terminal. Do not launch a duplicate model instance: this Mac has 24 GB of memory. The shell alias `serve-z-image-turbo` may be unavailable in noninteractive shells. The UI is `/`, interactive API docs `/docs`. Chroma1-HD shares port 8000; verify the health model ID. `make serve` can switch from an idle managed Chroma service but refuses to interrupt a generation.
+## Locate the project
 
-Send JSON to `POST http://127.0.0.1:8000/v1/images/generations`. A useful default is:
+Use the checkout supplied by the user or the current working directory. Confirm it contains `Makefile`, `README.md`, `config.py`, `server.py`, and `requirements.lock.txt`. Inside the repository this skill is at `skill/z-image-turbo/SKILL.md`, two directories below the project root. If the skill was installed separately, locate the actual checkout first; the installed skill folder is not the server project.
 
-```json
-{"prompt":"Describe the desired final image here","size":"1024x1024","steps":9,"response_format":"url"}
+Read the project's `README.md` for detailed setup and the API contract. Paths such as `<project>/images` mean this checkout's absolute path, derived by `config.py`; they are not literal request values. The original installation is `/Volumes/ASH-SSD/models/z-image-turbo`, but another machine or checkout need not use that path. Use `make` from the actual project root rather than relying on the original Mac's aliases.
+
+## First-time setup
+
+The runtime requires macOS on Apple Silicon (`Darwin`, `arm64`) with an available Metal GPU. Git, Make, and Python 3.14 are prerequisites. The default bootstrap Python is `/opt/homebrew/bin/python3.14`; Homebrew users can install it with `brew install python@3.14`. If the platform or prerequisite is missing, identify it before attempting the MLX installation.
+
+From the project root:
+
+```sh
+make setup
+make test
 ```
 
-Use 512×512 for a quick draft. Dimensions are multiples of 64, 256–2048 each. The UI includes 1536 and 2048 sizes. Above 1024, VAE tiling is automatic; larger sizes cost more time/memory. Prefer 1024 for a first pass and 1536 for higher resolution on this 24 GB Mac. Only `n:1` is supported. Supply an integer seed to reproduce a variation; otherwise the server selects and returns one. The API accepts 4,000 characters, but the installed tokenizer truncates at 512 tokens including chat formatting; keep essential details first.
+`make setup` creates the environment if missing, installs pinned dependencies, and downloads the pinned Hugging Face base checkpoint into `weights/`. It needs network access and space for roughly 6 GB of weights plus the Python runtime and dependencies. Downloads resume and reuse completed files on retries. `make test` uses fake generators and downloads; it does not require model weights or a running GPU server.
 
-For a reference photo, add `reference_image` with one existing absolute local path and `image_strength:0.6`. Higher values preserve MORE of the original and use fewer denoising steps; valid range is 0 inclusive to 1 exclusive. At least 2 steps are required with a reference. This is image-to-image initialization, not precise editing or guaranteed identity preservation. The output aspect ratio follows the oriented source automatically; only the longer requested size dimension sets its long edge. The generation field accepts a file path, not a URL, mask, or list. The webpage has a visible Choose photo picker. To upload programmatically, POST raw image bytes (not multipart) to `/v1/reference-images` (20 MiB, 40 megapixels maximum), then use the returned `file_path` as `reference_image`. Uploaded RGB PNG copies are kept in the project’s `references/` folder; existing local paths avoid an extra copy.
+The default environment is `~/Documents/models/z-image-turbo/.venv` on internal storage. For another location, pass the same `VENV=/absolute/internal/path/.venv` to every Make command. An external exFAT volume can hold the checkout and weights, while the environment stays on internal storage. If needed, set `BOOTSTRAP_PYTHON=/path/to/python3.14` during setup. `make setup-env` installs only dependencies; `make download` downloads only the base model once the environment exists. Never fabricate `weights/download.json` to bypass an incomplete download.
 
-To refine a previously generated image, use its returned `file_path` as `reference_image` in a new generation request. Describe the desired final result and choose preservation strength; each pass saves a new output. The UI’s Make a variation button sets this up directly. This is whole-image refinement; masks and precise instruction editing are not supported.
+LoRAs are optional. If requested, use `make setup WITH_LORAS=1` or run `make download-loras` after setup. `lora-catalog.json` supplies tracked defaults; an ignored `loras/catalog.json` can override them. Images, reference photos, weights, adapters, caches, logs, and runtime records must stay ignored by Git; do not force-add them.
 
-Default save directory: `/Volumes/ASH-SSD/models/z-image-turbo/images`. If the user chooses another destination, supply `output_dir` as an absolute local directory (`~/` supported). Missing directories are created; unique PNG and JSON filenames are generated. No output filename parameter exists.
+## Start and verify
 
-Allow up to 30 minutes for the HTTP request. Only one generation runs at a time. On 429, wait for health `busy:false`; on 400/422 fix the reported input. A timeout/disconnect does not cancel generation: check health and the destination for a newly saved image/sidecar before retrying. On 500 inspect logs rather than repeatedly resubmitting.
+Start the requested mode in a retained terminal/session:
 
-Read `data[0].file_path` and `metadata_path` from the response; both exist even with `response_format:b64_json`. Verify the PNG and show it using its absolute local path when the client supports image display. Return the actual path and seed, not an invented filename. The `url` works only while the server and saved file are available. The JSON sidecar retains the prompt and generation settings for reproducibility.
+```sh
+make serve
+# Base model only, with adapters disabled for the entire server:
+make serve-no-loras
+```
 
+The default port is 8000. Use `PORT=8001` consistently with serving, health checks, smoke tests, and API URLs if another port is chosen. If using a custom environment, include `VENV=...` as well. Keep only one model instance on the original 24 GB Mac.
+
+Wait for `Application startup complete`, then check:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8000/health
+```
+
+Require `status:ready` and `model:z-image-turbo`; inspect `busy` before submitting work. Connection refusal during model loading is expected. `loras_enabled:false` identifies base-only mode. Existing matching services can be reused. The launcher refuses to interrupt a busy generation or replace an unrelated service; do not bypass that refusal by killing a process. The webpage is `/`, interactive docs `/docs`, and `/openapi.json` is authoritative for the running instance.
+
+For an optional real GPU generation check, run `make smoke` after readiness. It generates and validates a 512×512 PNG, saved locally outside Git. Report setup/test results, the serving URL and mode, and any actual generated file paths. Do not claim a GPU smoke test ran when only `make test` was used.
+
+## Generate and use references
+
+POST JSON to `/v1/images/generations`, for example:
+
+```json
+{"model":"z-image-turbo","prompt":"A small red fox resting beneath snowy pine trees, soft winter light","size":"512x512","steps":9,"response_format":"url"}
+```
+
+Only `n:1` is supported. Requested dimensions are multiples of 64, 256–2048 per side; default size is 1024×1024. Above 1024, VAE tiling is automatic. Seed is an optional unsigned 32-bit integer. The API accepts 4,000 characters, but the tokenizer truncates at 512 tokens including formatting; essential details go first.
+
+For a reference, pass one existing absolute local `reference_image` path and `image_strength:0.6`. Higher strength preserves MORE of the source; valid range is 0 inclusive to 1 exclusive, with at least two steps. Output follows the EXIF-oriented source aspect ratio automatically: the longer requested size dimension sets its long edge. Model padding is trimmed, so saved dimensions can differ from the request. Read returned `size`, `width`, and `height`. This is whole-image variation, not masked inpainting, exact instruction editing, or guaranteed identity preservation.
+
+The webpage accepts a photo picker or local path. Programmatic upload uses raw PNG/JPEG/WebP bytes, not multipart, at `/v1/reference-images` (20 MiB and 40 MP maximum); use the returned `file_path` in the generation request. Reuse a generated image's actual `file_path` as the next reference for refinement.
+
+Default outputs go to `<project>/images`. Optional `output_dir` must be an absolute directory on the server's Mac (`~/` is supported). Filenames are unique PNG/JSON pairs. Read `data[0].file_path`, `metadata_path`, and `seed`; show the verified saved PNG with its absolute path when supported. Do not invent filenames or assume another checkout's output path. URLs require the service and saved file to remain available.
 
 For adapters, inspect `GET /v1/loras`: choose an `available:true` ID only when `enabled:true`. Send `lora:<id>` and optional `lora_strength` (0–2, catalog defaults currently 0.8); omit/null disables adapters. One per request. Required trigger text is added automatically; `<lora:...>` prompt tags are rejected. Base-only mode rejects non-null adapters with 422. Adapter or strength changes reload clean model weights.
 
-With `reference_image`, preserve its EXIF-oriented aspect ratio automatically: `size:1024x1024` means a 1024px long edge, not a square crop. The UI offers Reference resolution. The server pads a temporary input to the model grid and trims only that padding from the result; output short edges are rounded to whole pixels and can be below 256 or not divisible by 64. Local references are limited to 40 MP. Read actual `data[0].size`, `width`, `height`; `generation_size` is the internal canvas. Sidecars also record `requested_size` and oriented `reference_size`. Without a reference, size is used unchanged.
-
-For a base-only server, use `serve-z-image-turbo-no-loras` or `make serve-no-loras` (`make serve NO_LORAS=1` is equivalent). The CLI flag is `--no-loras`. Check `/health` `loras_enabled`; false means no adapter can be requested, the UI hides adapter controls, and `/v1/loras` has `enabled:false` and no entries. Non-null `lora` requests fail with 422. Normal `make serve` restores adapter support, switching an idle server if necessary; never interrupt a busy generation.
+Allow a long client timeout (up to 30 minutes for large jobs). On 429, wait for `busy:false`. On 400/422, correct the reported input. A timeout/disconnect does not cancel generation: inspect health and the destination for a new PNG/sidecar before retrying. On 500, inspect server logs and memory pressure rather than repeatedly submitting the same job. See README for setup recovery and the complete schema.
