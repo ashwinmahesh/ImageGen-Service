@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Z-Image Turbo"
+  short_description: "Generate images locally on this Mac"
+  default_prompt: "Use $z-image-turbo to generate an image on my Mac and show the saved result."

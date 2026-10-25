@@ -1,0 +1,68 @@
+# Downloaded model assets and local adapter overrides
+/weights/
+/loras/
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Generated outputs, reference photos, metadata and runtime state
+/images/
+/references/
+/image-index/
+/cache/
+/logs/
+/outputs/
+*.log
+*.partial
+*.tmp
+
+# Image files are never source artifacts in this repository (any letter case)
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[jJ][fF][iI][fF]
+*.[wW][eE][bB][pP]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[aA][vV][iI][fF]
+*.[hH][eE][iI][cC]
+*.[hH][eE][iI][fF]
+*.[sS][vV][gG]
+*.[iI][cC][oO]
+*.[jJ][xX][lL]
+*.[pP][sS][dD]
+*.[dD][nN][gG]
+*.[rR][aA][wW]
+
+# Python environments, build output and editor state
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.idea/
+.vscode/
+
+# Credentials and local machine settings
+.env
+.env.*
+!.env.example
+
+# macOS metadata, including external-drive AppleDouble files
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/

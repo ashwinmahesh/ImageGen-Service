@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Z-Image — Local studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ddedb0'/%3E%3Cpath d='M9 10h14L9 22h14' stroke='%231d2515' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+  <style>
+    :root{color-scheme:dark;--bg:#151716;--panel:#1e211f;--line:#353a35;--muted:#a4aea3;--text:#eef1e9;--accent:#ddedb0}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:wait;opacity:.5}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}header{max-width:1320px;margin:auto;padding:28px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:20px}
+    .brand{display:flex;align-items:center;gap:12px}.mark{width:35px;height:35px;background:var(--accent);color:#1d2515;border-radius:10px;display:grid;place-items:center;font-size:23px;font-weight:700}.brand strong{font-size:18px;letter-spacing:-.5px}.brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:1.3px;text-transform:uppercase}
+    .status{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;background:#778174;border-radius:50%}.status[data-state=ready] .dot{background:var(--accent)}.status[data-state=busy] .dot{background:#edc28c}.status[data-state=offline] .dot{background:#ed9696}
+    main{max-width:1320px;margin:auto;padding:40px 36px 20px}.intro{display:flex;justify-content:space-between;align-items:baseline;gap:18px;margin-bottom:26px}h1{font-size:30px;line-height:1.2;font-weight:550;letter-spacing:-1px;margin:0}.intro p{color:var(--muted);margin:8px 0 0;font-size:14px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--muted);white-space:nowrap}
+    .workspace{display:grid;grid-template-columns:340px minmax(0,1fr);gap:24px;align-items:start}.controls{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:16px}label{display:block;font-size:13px;font-weight:550;margin-bottom:9px}.label-row{display:flex;align-items:center;justify-content:space-between}.label-row button{border:0;background:none;color:var(--accent);font-size:12px;padding:0 0 9px}textarea,input,select{width:100%;color:var(--text);background:#171a18;border:1px solid #41473f;border-radius:9px;padding:11px 12px}textarea{resize:vertical;min-height:190px;line-height:1.6;font-size:14px}textarea::placeholder,input::placeholder{color:#7d897b}.hint{font-size:12px;color:var(--muted);margin:8px 0 22px}.field{margin-top:20px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}summary{cursor:pointer;font-size:13px;color:var(--muted);padding:20px 0 0}details .hint{margin-bottom:0}
+    .generate{background:var(--accent);color:#1d2515;border:0;border-radius:10px;width:100%;padding:13px 16px;font-weight:650;margin-top:25px;display:flex;align-items:center;justify-content:space-between}.generate:hover:not(:disabled){background:#e9f5c8}.shortcut{font-size:11px;color:var(--muted);text-align:center;margin:10px 0 0}.error{margin:18px 0 0;padding:12px;border-radius:8px;border:1px solid #79514a;background:#332421;color:#f7c6bc;font-size:13px;overflow-wrap:anywhere}.error[hidden]{display:none}
+    .preview{position:relative;min-height:530px;background:#1b1e1b;border:1px solid var(--line);border-radius:16px;overflow:hidden;display:grid;place-items:center;background-image:radial-gradient(#353b32 .7px,transparent .7px);background-size:20px 20px}.empty{text-align:center;padding:50px 25px;max-width:400px}.empty svg{color:#99a78a;margin-bottom:20px}.empty h2{font-size:19px;font-weight:500;margin:0 0 9px;letter-spacing:-.3px}.empty p{color:var(--muted);font-size:13px;margin:0}.preview img{display:block;max-width:100%;max-height:690px;object-fit:contain;background:#1b1e1b}.preview img[hidden],.empty[hidden],.working[hidden]{display:none}.working{position:absolute;inset:0;background:#151716e8;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;backdrop-filter:blur(8px)}.working strong{font-size:18px;font-weight:500;margin:20px 0 6px}.working p{color:var(--muted);font-size:13px;margin:0}.spinner{width:33px;height:33px;border:2px solid #47503e;border-top-color:var(--accent);border-radius:50%;animation:spin 1.2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    .result-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;margin-top:16px;min-height:38px}.result-info{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.actions{display:flex;flex-wrap:wrap;gap:10px}.actions[hidden]{display:none}.secondary{display:inline-block;border:1px solid #49513f;background:#242a20;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text);text-decoration:none;white-space:nowrap}.secondary:hover{background:#343e2b}
+    .reference-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}.reference-title{font-size:13px;font-weight:550;margin:0 0 10px}.optional{font-weight:400;color:var(--muted)}.choose-photo{width:100%;padding:13px;border:1px dashed #69745c;border-radius:9px;background:#242a20;color:var(--accent);text-align:center}.choose-photo:hover{background:#303a27}.reference-card{display:flex;gap:12px;align-items:center;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:9px;min-width:0}.reference-card[hidden],.reference-options[hidden]{display:none}.reference-card img{width:64px;height:64px;object-fit:cover;border-radius:5px}.reference-description{min-width:0;flex:1}.reference-description strong{display:block;font-size:12px;overflow-wrap:anywhere}.reference-description small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.remove-photo{border:0;background:none;color:var(--muted);padding:5px;font-size:18px}.reference-section .hint{margin-bottom:0}.reference-path summary{padding-top:12px;font-size:12px}.reference-options{margin-top:16px}.reference-options input{padding:9px 12px}.reference-section input[type=file][hidden]{display:none}
+    footer{max-width:1320px;margin:18px auto 0;padding:22px 36px 30px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:16px;line-height:1.8}footer code{font-family:ui-monospace,monospace;font-size:10px;overflow-wrap:anywhere}footer a{white-space:nowrap}#announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}header,footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
+    @media(max-width:640px){header{padding:20px}.brand strong{font-size:16px}main{padding:27px 18px 10px}h1{font-size:27px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:22px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
+    @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+  </style>
+</head>
+<body>
+  <header><div class="brand"><span class="mark" aria-hidden="true">Z</span><div><strong>Z-Image Turbo</strong><small>Local studio</small></div></div><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></header>
+  <main>
+    <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
+    <div class="workspace">
+      <form class="controls" id="form">
+        <div class="label-row"><label for="prompt">Your prompt</label><button type="button" id="example">Try an example ↗</button></div>
+        <textarea id="prompt" required maxlength="4000" placeholder="Describe the subject, setting, light, and style you have in mind…"></textarea>
+        <p class="hint">Put key details first. Only the first 512 tokens are processed; longer prompts are truncated.</p>
+        <p class="hint" id="base-only-mode" hidden>Base model only · LoRAs disabled for this server.</p>
+        <div class="field" id="lora-section">
+          <label for="lora">Style LoRA</label>
+          <select id="lora" aria-describedby="lora-hint"><option value="">None — original model</option></select>
+          <p class="hint" id="lora-hint">Loading local styles…</p>
+          <div id="lora-options" hidden><label for="lora-strength">LoRA strength</label><input id="lora-strength" type="number" min="0" max="2" step="0.05" value="0.8"><p class="hint">Lower values give a lighter style influence. Separate from keeping a reference photo.</p></div>
+        </div>
+        <section class="reference-section" aria-label="Reference photo">
+          <h2 class="reference-title">Reference photo <span class="optional">(optional)</span></h2>
+          <input id="reference-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" aria-label="Choose reference photo file" hidden>
+          <button type="button" id="choose-photo" class="choose-photo">＋ Choose photo</button>
+          <p class="hint">Use a photo as the starting point. PNG, JPEG or WebP, up to 20 MB. Processed locally on your Mac.</p>
+          <div id="reference-card" class="reference-card" hidden><img id="reference-preview" alt="Selected reference photo"><div class="reference-description"><strong id="reference-name"></strong><small id="reference-info"></small></div><button id="remove-photo" class="remove-photo" type="button" aria-label="Remove reference photo">×</button></div>
+          <details class="reference-path"><summary>Or use a file path</summary><div class="field"><label for="reference">Reference photo path</label><input id="reference" type="text" placeholder="/Volumes/ASH-SSD/photos/reference.jpg" autocomplete="off"></div></details>
+          <div id="reference-options" class="reference-options" hidden><label for="strength">Keep the original</label><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
+        </section>
+        <div class="field"><label id="size-label" for="size">Image size</label><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
+        <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint">9 steps is a good default. Reuse a seed to explore variations of the same idea.</p></details>
+        <details><summary>Save location</summary>
+          <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: images folder on your SSD" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
+        </details>
+        <button class="generate" id="generate" type="submit" disabled><span id="button-text">Generate image</span><span aria-hidden="true">↗</span></button>
+        <p class="shortcut">⌘ / Ctrl + Enter to generate</p>
+        <p class="error" id="error" role="alert" hidden></p>
+      </form>
+      <section aria-label="Generated image">
+        <div class="preview" id="preview" aria-busy="false">
+          <div class="empty" id="empty"><svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="9" y="9" width="46" height="46" rx="9" stroke="currentColor" stroke-width="1.5"/><circle cx="25" cy="25" r="5" stroke="currentColor" stroke-width="1.5"/><path d="m12 48 16-13 9 7 9-18 8 15" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><h2>Room for your imagination.</h2><p>Your image will appear here.<br>Start with a prompt, or try an example.</p></div>
+          <img id="result" alt="" hidden>
+          <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Keep this page open while your image is created.</p></div>
+        </div>
+        <div class="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your SSD.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
+      </section>
+    </div>
+    <p id="announcement" role="status" aria-live="polite"></p>
+  </main>
+  <footer><div>Saved to <code id="saved-path">/Volumes/ASH-SSD/models/z-image-turbo/images</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
+  <script>
+    const $ = id => document.getElementById(id);
+    let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
+    let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
+    let usingReferenceSizing = false;
+    let loraCatalog = [], lorasEnabled = true;
+    function setLoRAMode(enabled) {
+      lorasEnabled = enabled;
+      $('lora-section').hidden = !enabled;
+      $('base-only-mode').hidden = enabled;
+      if (!enabled) { $('lora').value = ''; $('lora-options').hidden = true; }
+    }
+    function updateLoRA(reset = true) {
+      const selected = loraCatalog.find(item => item.id === $('lora').value);
+      $('lora-options').hidden = !selected;
+      if (selected && reset) $('lora-strength').value = selected.default_strength;
+      $('lora-hint').textContent = selected ? `${selected.trigger_prompt ? 'Added to prompt automatically: ' + selected.trigger_prompt + '.' : 'The selected LoRA is loaded directly. No prompt keyword is configured.'} ${selected.note || ''}` :
+        loraCatalog.some(item => !item.available) ? 'Downloaded styles appear here. Import the compatible Z-Image weights first.' : 'Choose an installed style, or use the original model.';
+    }
+    async function loadLoRAs() {
+      try {
+        const response = await fetch('/v1/loras', {cache: 'no-store', signal: AbortSignal.timeout(5000)});
+        if (!response.ok) throw new Error('Unavailable');
+        const catalog = await response.json();
+        setLoRAMode(catalog.enabled !== false);
+        loraCatalog = catalog.data;
+        $('lora').replaceChildren(new Option('None — original model', ''));
+        for (const item of loraCatalog) {
+          const option = new Option(item.name + (item.available ? '' : ' (download required)'), item.id);
+          option.disabled = !item.available; $('lora').append(option);
+        }
+        updateLoRA();
+      } catch { $('lora-hint').textContent = 'Could not load styles. Reload after checking the server.'; }
+    }
+    $('lora').addEventListener('change', () => updateLoRA());
+    function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
+    function updateButton() { $('generate').disabled = generating || !ready || serverBusy; }
+    function showError(message) { $('error').textContent = message; $('error').hidden = false; }
+    function updateReferenceSizing() {
+      const hasReference = Boolean(referenceFile || $('reference').value.trim());
+      if (hasReference && !usingReferenceSizing) $('reference-size').value = String(Math.max(...$('size').value.split('x').map(Number)));
+      usingReferenceSizing = hasReference;
+      $('size').hidden = hasReference; $('size').disabled = hasReference;
+      $('reference-size').hidden = !hasReference; $('reference-size').disabled = !hasReference || generating;
+      $('size-label').textContent = hasReference ? 'Reference resolution' : 'Image size';
+      $('size-label').htmlFor = hasReference ? 'reference-size' : 'size';
+      $('reference-size-hint').hidden = !hasReference;
+      const longEdge = hasReference ? Number($('reference-size').value) : Math.max(...$('size').value.split('x').map(Number));
+      $('size-hint').hidden = longEdge <= 1024;
+      if (hasReference) {
+        let dimensions = '';
+        if (referenceDimensions) {
+          const [width, height] = referenceDimensions;
+          const scale = longEdge / Math.max(width, height);
+          dimensions = `${Math.max(1, Math.round(width * scale))} × ${Math.max(1, Math.round(height * scale))} · `;
+        }
+        $('reference-size-hint').textContent = `${dimensions}Matches the photo’s aspect ratio automatically.`;
+      }
+    }
+    $('reference-size').addEventListener('change', updateReferenceSizing);
+    function clearPhoto() {
+      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = '';
+      if (referencePreviewURL) URL.revokeObjectURL(referencePreviewURL);
+      referencePreviewURL = null; $('reference-preview').removeAttribute('src');
+      $('reference-card').hidden = true; $('choose-photo').textContent = '＋ Choose photo';
+      $('reference-options').hidden = !$('reference').value.trim();
+      updateReferenceSizing();
+    }
+    $('choose-photo').addEventListener('click', () => $('reference-file').click());
+    $('reference-file').addEventListener('change', () => {
+      const file = $('reference-file').files[0]; if (!file) return;
+      if (file.size > 20 * 1024 * 1024) { $('reference-file').value = ''; showError('Choose a photo smaller than 20 MB.'); return; }
+      clearPhoto(); referenceFile = file; $('reference').value = ''; $('error').hidden = true; updateReferenceSizing();
+      referencePreviewURL = URL.createObjectURL(file);
+      const previewURL = referencePreviewURL, candidate = new Image();
+      candidate.onload = () => {
+        if (referenceFile !== file) return;
+        referenceDimensions = [candidate.naturalWidth, candidate.naturalHeight]; updateReferenceSizing();
+        $('reference-preview').src = previewURL;
+        $('reference-name').textContent = file.name; $('reference-info').textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB · ready to use`;
+        $('reference-card').hidden = false; $('reference-options').hidden = false; $('choose-photo').textContent = 'Change photo';
+      };
+      candidate.onerror = () => { if (referenceFile === file) { clearPhoto(); showError('This photo cannot be previewed. Choose a PNG, JPEG or WebP image.'); } };
+      candidate.src = previewURL;
+    });
+    $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
+    $('reference').addEventListener('input', () => { if (referenceFile) clearPhoto(); referenceDimensions = null; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
+    async function checkHealth() {
+      try {
+        const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
+        if (!response.ok) throw new Error('Unavailable');
+        const data = await response.json();
+        if (typeof data.loras_enabled === 'boolean' && data.loras_enabled !== lorasEnabled) {
+          setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
+        }
+        ready = data.status === 'ready'; serverBusy = data.busy;
+        if (!generating) status(serverBusy ? 'Generating an image' : ready ? 'Ready on your Mac' : 'Loading model…', serverBusy ? 'busy' : ready ? 'ready' : 'checking');
+      } catch { ready = false; if (!generating) status('Server offline', 'offline'); }
+      updateButton();
+    }
+    $('size').addEventListener('change', updateReferenceSizing);
+    $('example').addEventListener('click', () => {
+      $('prompt').value = 'A small red fox resting in fresh snow beneath pine trees, soft winter light, detailed wildlife photograph, calm atmosphere.';
+      $('prompt').focus();
+    });
+    $('reuse').addEventListener('click', () => { if (lastSeed !== null) { $('seed').value = lastSeed; $('seed').closest('details').open = true; $('seed').focus(); } });
+    $('edit').addEventListener('click', () => {
+      if (!lastResult || generating) return;
+      clearPhoto(); $('reference').value = lastResult.file_path;
+      $('reference-preview').src = lastResult.url; $('reference-name').textContent = 'Your generated image';
+      $('reference-info').textContent = `${lastResult.size.replace('x', ' × ')} · selected for editing`;
+      $('reference-card').hidden = false; $('reference-options').hidden = false; $('strength').value = '0.6';
+      $('choose-photo').textContent = 'Change photo'; $('prompt').value = lastResult.prompt;
+      referenceDimensions = lastResult.size.split('x').map(Number);
+      updateReferenceSizing(); $('reference-size').value = String(Math.max(...referenceDimensions)); updateReferenceSizing();
+      $('announcement').textContent = 'Image selected for editing. Update the prompt to describe your desired result, then generate a new version.';
+      $('lora').value = lastResult.lora; updateLoRA(false);
+      if (lastResult.lora) $('lora-strength').value = lastResult.lora_strength;
+      $('prompt').focus(); $('prompt').select();
+    });
+    $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
+    $('form').addEventListener('submit', async event => {
+      event.preventDefault(); if (generating || !ready || serverBusy) return;
+      const prompt = $('prompt').value.trim();
+      if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
+      const payload = {model: 'z-image-turbo', prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url'};
+      if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
+      const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
+      if ((selectedFile || referencePath) && payload.steps < 2) { showError('Use at least 2 steps with a reference photo.'); $('steps').closest('details').open = true; $('steps').focus(); return; }
+      const imageStrength = Number($('strength').value);
+      if ($('seed').value !== '') payload.seed = Number($('seed').value);
+      if ($('output-dir').value.trim()) payload.output_dir = $('output-dir').value.trim();
+      if (referencePath) { payload.reference_image = referencePath; payload.image_strength = imageStrength; }
+      generating = true; updateButton(); $('error').hidden = true; $('working').hidden = false; $('preview').setAttribute('aria-busy', 'true'); $('button-text').textContent = 'Generating…'; status('Generating on your Mac', 'busy');
+      // Keep the submitted reference stable while upload and generation are running.
+      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = true;
+      $('announcement').textContent = 'Generating your image.';
+      const started = Date.now(); $('elapsed').textContent = 'Starting…';
+      const timer = setInterval(() => { $('elapsed').textContent = `${Math.floor((Date.now() - started) / 1000)} seconds elapsed`; }, 1000);
+      try {
+        if (selectedFile) {
+          let uploaded = savedReference;
+          if (!uploaded) {
+            $('button-text').textContent = 'Preparing photo…';
+            const upload = await fetch('/v1/reference-images', {method: 'POST', headers: {'Content-Type': selectedFile.type || 'application/octet-stream'}, body: selectedFile});
+            uploaded = await upload.json();
+            if (!upload.ok) throw new Error(uploaded.detail || 'Could not prepare the reference photo.');
+            referenceUpload = uploaded;
+          }
+          payload.reference_image = uploaded.file_path; payload.image_strength = imageStrength;
+          $('button-text').textContent = 'Generating…';
+        }
+        const response = await fetch('/v1/images/generations', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+        const data = await response.json();
+        if (!response.ok) { const detail = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail; throw new Error(detail || `Generation failed (${response.status}).`); }
+        const item = data.data[0];
+        const url = new URL(item.url, location.origin);
+        if (url.origin !== location.origin) throw new Error('The server returned an unexpected image URL.');
+        const preloaded = new Image();
+        await new Promise((resolve, reject) => { preloaded.onload = resolve; preloaded.onerror = () => reject(new Error('The image was generated, but its preview could not load. Check the images folder on your SSD.')); preloaded.src = url.href; });
+        $('result').src = url.href; $('result').alt = prompt; $('result').hidden = false; $('empty').hidden = true;
+        lastSeed = item.seed;
+        const actualSize = item.size || `${preloaded.naturalWidth}x${preloaded.naturalHeight}`;
+        lastResult = {file_path: item.file_path, url: url.href, prompt, size: actualSize, lora: payload.lora || '', lora_strength: payload.lora_strength};
+        $('result-info').textContent = `${actualSize.replace('x', ' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
+        $('download').href = url.href; $('download').download = `z-image-turbo-${lastSeed}.png`; $('actions').hidden = false;
+        $('saved-path').textContent = item.file_path;
+        $('announcement').textContent = 'Your image is ready and saved to your SSD.';
+      } catch (error) {
+        $('error').textContent = error instanceof TypeError ? 'Could not reach the server. Check that it is running and the SSD is connected. If the connection dropped during generation, the image may still finish saving.' : error.message;
+        $('error').hidden = false;
+      } finally {
+        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = false;
+        clearInterval(timer); generating = false; $('working').hidden = true; $('preview').setAttribute('aria-busy', 'false'); $('button-text').textContent = 'Generate image'; await checkHealth();
+      }
+    });
+    updateReferenceSizing(); loadLoRAs(); checkHealth(); setInterval(checkHealth, 15000);
+  </script>
+</body>
+</html>

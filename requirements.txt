@@ -1,0 +1,4 @@
+mflux==0.23.0
+fastapi==0.162.0
+uvicorn==0.54.0
+pillow==12.3.0

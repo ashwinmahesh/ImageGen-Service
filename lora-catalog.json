@@ -1,0 +1,19 @@
+[
+  {
+    "id": "realism",
+    "name": "Realism — suayptalha",
+    "filename": "z-image-turbo-realism.safetensors",
+    "models": [
+      "z-image-turbo"
+    ],
+    "default_strength": 0.8,
+    "trigger_prompt": "Realism",
+    "source": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA",
+    "repository": "suayptalha/Z-Image-Turbo-Realism-LoRA",
+    "revision": "8dc179cb56844d4ddc6e4527c30e98347eeae971",
+    "remote_filename": "pytorch_lora_weights.safetensors",
+    "sha256": "b38b074964f1f6564c22fee42125accd7a218a916966b5d0f0b2f63d4939c2f7",
+    "bytes": 85094800,
+    "note": "A photographic style adapter trained for Z-Image Turbo. 0.8 is our initial test strength; adjust to taste."
+  }
+]
