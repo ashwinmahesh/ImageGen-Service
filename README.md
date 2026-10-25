@@ -76,7 +76,7 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 ## Start, switch and stop
 
-`make serve` runs in the foreground; keep the terminal open. Ctrl-C stops it gracefully. AI tools should retain the terminal session and use another session for checks.
+`make serve` runs in the foreground; keep the terminal open. Ctrl-C stops it gracefully. AI tools should retain the terminal session and use another session for checks. When an AI tool starts a temporary server for maintenance/testing, it should stop that server when checks finish unless asked to leave it running. On the original Mac the user starts ImageGen manually; leave agent-started test instances stopped. Preserve pre-existing user-started services and active generation.
 
 - Webpage: <http://127.0.0.1:5732/>
 - All-model image gallery: <http://127.0.0.1:5732/gallery>
