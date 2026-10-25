@@ -53,7 +53,7 @@ class ChromaResult:
             raise FileExistsError(path)
         logs=ROOT/'logs'
         logs.mkdir(exist_ok=True)
-        log_path=logs/(path.stem+'.log')
+        log_path=logs/(self.settings.get('job_id',path.stem)+'.log')
         scratch=ROOT/'cache'/'jobs'
         scratch.mkdir(parents=True,exist_ok=True)
         s=self.settings
@@ -93,7 +93,7 @@ class ChromaResult:
             with log_path.open('w') as log:
                 log.write(f'Runtime: {RUNTIME_RELEASE}\n')
                 log.flush()
-                process=subprocess.run(command,cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=3600)
+                process=subprocess.run(command,cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=3600,pass_fds=tuple(s.get('inherited_fds',())))
             if process.returncode != 0:
                 raise RuntimeError(f'Chroma runtime exited {process.returncode}; see {log_path}')
             if not destination.is_file():

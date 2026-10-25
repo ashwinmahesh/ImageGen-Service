@@ -8,7 +8,7 @@ import tempfile
 from model_profiles import PROFILES
 
 DATA_FOLDERS = tuple(PROFILES)
-MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs')
+MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs', 'queue')
 
 
 def _absolute(value):
@@ -77,7 +77,8 @@ def configure_storage(project, directory=None):
     settings = project / 'storage.json'
     with tempfile.NamedTemporaryFile(dir=project, prefix='storage-', suffix='.tmp', mode='w', delete=False) as stream:
         temporary = Path(stream.name)
-        json.dump({'data_dir': str(data)}, stream, indent=2)
+        previous=json.loads(settings.read_text()) if settings.is_file() else {}
+        json.dump({**previous,'data_dir':str(data)}, stream, indent=2)
         stream.write('\n')
     try:
         temporary.replace(settings)

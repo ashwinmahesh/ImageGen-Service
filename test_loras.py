@@ -1,4 +1,5 @@
 """Exercise adapter selection and reset without loading a GPU model."""
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
@@ -37,6 +38,12 @@ class LoRATest(unittest.TestCase):
             patch.object(server, "ROOT", self.root), patch.object(server, "model", self.fake)]
         for item in self.patches:
             item.start()
+        self.store=server.JobStore(self.root/'queue/jobs.sqlite3'); self.store.initialize()
+        self.worker=server.QueueWorker(self.store,server.execute_job,busy=server.busy,loras_enabled=lambda:server.app.state.loras_enabled)
+        self.worker.acquire(); self.job_executor=ThreadPoolExecutor(max_workers=1)
+        for item in [patch.object(server,'job_store',self.store),patch.object(server,'job_worker',self.worker)]:
+            item.start(); self.patches.append(item)
+        self.worker.start(self.job_executor)
         self.client = TestClient(server.app, base_url="http://127.0.0.1")
 
     def write_catalog(self):
@@ -44,6 +51,7 @@ class LoRATest(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self.worker.stop(); self.job_executor.shutdown(wait=True)
         for item in reversed(self.patches):
             item.stop()
         self.temp.cleanup()
@@ -51,6 +59,18 @@ class LoRATest(unittest.TestCase):
     def post(self, **settings):
         return self.client.post("/v1/images/generations", json={"prompt": "A haunted castle", "size": "256x256",
             "output_dir": str(self.root / "images"), "response_format": "url", **settings})
+
+    def test_idempotent_lookup_of_accepted_adapter_job_survives_base_only_mode(self):
+        self.store.pause(True)
+        body={'prompt':'A castle','lora':'test-style','output_dir':str(self.root/'images')}
+        headers={'Idempotency-Key':'accepted-adapter-job'}
+        first=self.client.post('/v1/jobs',json=body,headers=headers)
+        self.assertEqual(first.status_code,202,first.text)
+        with patch.object(server.app.state,'loras_enabled',False):
+            repeated=self.client.post('/v1/jobs',json=body,headers=headers)
+            self.assertEqual(repeated.status_code,202,repeated.text)
+            self.assertEqual(first.json()['id'],repeated.json()['id'])
+            self.assertEqual(self.client.post('/v1/jobs',json=body).status_code,422)
 
     def test_catalog_selection_default_strength_and_reset(self):
         listed = self.client.get("/v1/loras").json()["data"]

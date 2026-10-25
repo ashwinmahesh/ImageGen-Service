@@ -5,6 +5,8 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import json
+import hashlib
+import sqlite3
 import io
 import logging
 import os
@@ -24,18 +26,19 @@ if __name__ == '__main__':
         os.environ['IMAGE_MODEL']=selected.model
 
 from model_profiles import PROFILES
-from config import PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
+from config import GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
 import image_catalog
+from job_queue import JobStore, QueueWorker, QueueConflict, fingerprint, TERMINAL
 
 # Downloads are an explicit separate step. Serving never needs the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -43,6 +46,8 @@ log = logging.getLogger("image-model-server")
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="image-inference")
 busy = threading.Lock()
 model = None
+job_store = None
+job_worker = None
 
 
 def load_model():
@@ -64,15 +69,37 @@ def load_model():
     log.info("Model ready")
 
 
+def initialize_service():
+    global job_store,job_worker
+    job_store=JobStore(ROOT/'queue'/'jobs.sqlite3')
+    job_store.initialize()
+    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE)
+    job_worker.acquire()
+    try:
+        # Model loading and inference cooperate with the same cross-service GPU lock.
+        gpu=job_worker.acquire_accelerator()
+        try:
+            load_model()
+        finally:
+            if gpu: gpu.close()
+    except BaseException:
+        job_worker.release()
+        raise
+
+
 @asynccontextmanager
 async def lifespan(app):
-    await asyncio.get_running_loop().run_in_executor(executor, load_model)
-    yield
-    executor.shutdown(wait=True)
+    await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
+    job_worker.start(executor)
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(job_worker.stop)
+        executor.shutdown(wait=True)
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.0.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.1.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -85,6 +112,11 @@ app = FastAPI(
 )
 app.state.loras_enabled = True
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
+
+
+@app.exception_handler(sqlite3.Error)
+async def queue_storage_error(request,error):
+    return JSONResponse({'detail':'Queue storage is unavailable; reconnect it and retry.'},status_code=503)
 
 
 class GenerateRequest(BaseModel):
@@ -101,6 +133,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
+    generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
     n: Literal[1] = 1
     steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned.")
@@ -196,7 +229,7 @@ class GenerateResponse(BaseModel):
 
 
 class LocalFileError(Exception):
-    pass
+    http_status=400
 
 
 MAX_REFERENCE_BYTES = 20 * 1024**2
@@ -270,7 +303,7 @@ def reference_photo(identifier: str):
     return FileResponse(path, media_type="image/png")
 
 
-def generate(payload):
+def generate(payload, job=None):
     try:
         require_storage(ROOT)
         require_storage(payload.output_dir)
@@ -278,12 +311,12 @@ def generate(payload):
         raise LocalFileError(str(error)) from error
     try:
         with prepare_geometry(payload.reference_image, payload.size, ROOT / "cache" / "scratch") as geometry:
-            return generate_with_geometry(payload, geometry)
+            return generate_with_geometry(payload, geometry, job)
     except ReferenceError as exc:
         raise LocalFileError(str(exc)) from exc
 
 
-def generate_with_geometry(payload, geometry):
+def generate_with_geometry(payload, geometry, job=None):
     try:
         if payload.lora is not None and not app.state.loras_enabled:
             raise ValueError("LoRAs are disabled for this server; restart without --no-loras to enable them")
@@ -293,13 +326,17 @@ def generate_with_geometry(payload, geometry):
     seed = payload.seed if payload.seed is not None else secrets.randbelow(2**32)
     width, height = geometry.model_size
     output_width, output_height = geometry.output_size
-    identifier = uuid.uuid4().hex
+    identifier = job['id'] if job else uuid.uuid4().hex
     output_dir = Path(payload.output_dir)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
         # Check writability before spending GPU time; retain the reserved unique filename.
-        path = output_dir / f"{identifier}.png"
-        with path.open("xb"):
+        final_path = output_dir / f"{identifier}.png"
+        if final_path.exists():
+            raise LocalFileError('An output already occupies this job ID; refusing to overwrite it')
+        path=output_dir/f'.{identifier}.working.png' if job else final_path
+        # Only the same interrupted job may replace its own private working file.
+        with path.open('wb' if job else 'xb'):
             pass
     except OSError as exc:
         raise LocalFileError(f"Cannot write to output_dir {output_dir}: {exc.strerror}") from exc
@@ -317,6 +354,7 @@ def generate_with_geometry(payload, geometry):
         result = model.generate_image(
             seed=seed, prompt=payload.prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
+            **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and PROFILE['backend']=='sd-cpp' else {}),
             image_path=geometry.image_path,
             image_strength=payload.image_strength if payload.reference_image is not None else None,
         )
@@ -331,14 +369,21 @@ def generate_with_geometry(payload, geometry):
             "requested_size": payload.size, "generation_size": f"{width}x{height}",
             "reference_size": list(geometry.reference_size) if geometry.reference_size else None,
             "steps": payload.steps, "seconds": elapsed,
-            "file_path": str(path), "metadata_path": str(path.with_suffix(".json")),
+            "file_path": str(final_path), "metadata_path": str(final_path.with_suffix(".json")),
             "reference_image": payload.reference_image,
             "image_strength": payload.image_strength if payload.reference_image is not None else None,
             "vae_tiling": tiled, "lora": selection,
             "effective_prompt": effective_prompt(payload.prompt, selection),
             "loras_enabled": app.state.loras_enabled,
         }
-        path.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
+        if job:
+            metadata.update(job_id=identifier,request_fingerprint=fingerprint(job['request']))
+        temporary=output_dir/f'.{identifier}.metadata.tmp'
+        temporary.write_text(json.dumps(metadata,indent=2)+'\n')
+        temporary.replace(final_path.with_suffix('.json'))
+        if job:
+            path.replace(final_path)
+        path=final_path
         # Persist custom output locations so their image URLs survive a server restart.
         image_catalog.write_index(ROOT, identifier, path, payload.tags)
         return path, metadata
@@ -364,6 +409,16 @@ def health():
     state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
     if state['busy'] and hasattr(model,'progress'):
         state['progress']=model.progress()
+    if job_store:
+        try:
+            state['queue']=job_store.summary()
+            state['busy']=state['busy'] or bool(state['queue']['running'])
+            state['queue']['stage']=job_worker.stage if job_worker else 'idle'
+            state['queue']['blocked_reason']='Next job requires LoRAs; restart with adapters enabled or cancel it.' if state['queue']['next_requires_lora'] and not app.state.loras_enabled else None
+            state['queue']['error']=job_worker.error if job_worker else None
+            if state['queue']['error']: state['status']='error'
+        except (OSError,RuntimeError,sqlite3.Error):
+            state.update(status='error',queue={'error':'Queue storage unavailable'})
     return state
 
 
@@ -372,7 +427,7 @@ def capabilities():
             'default_steps':PROFILE['steps'],'max_steps':PROFILE['max_steps'],
             'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
             'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
-            'loras_enabled':app.state.loras_enabled}
+            'loras_enabled':app.state.loras_enabled,'persistent_queue':True,'immediate_generation':True}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -390,37 +445,211 @@ def models():
         for identifier,profile in PROFILES.items()]}
 
 
-@app.post(
-    "/v1/images/generations", response_model=GenerateResponse, response_model_exclude_none=True,
-    summary="Generate and save an image",
-    description="Always saves a PNG plus JSON metadata. Returns their absolute local paths together with a URL or base64 image. output_dir changes only this request's destination. With a reference, its oriented aspect ratio is preserved automatically; size sets the long edge. Returned size/width/height are the saved PNG dimensions.",
-    responses={400: {"description": "Output/reference path is invalid, or the selected LoRA is unknown, unavailable, or has changed."},
-               429: {"description": "Another image is generating. Retry when /health busy is false."}},
-)
-async def generations(payload: GenerateRequest, request: Request):
-    if payload.lora is not None and not app.state.loras_enabled:
-        raise HTTPException(422, "LoRAs are disabled for this server; restart without --no-loras to enable them.")
-    if not busy.acquire(blocking=False):
-        raise HTTPException(429, "One image is already generating. Try again when /health reports busy=false.", headers={"Retry-After": "10"})
-    future = executor.submit(generate, payload)
-    # A disconnected client must not unlock GPU access while its image is still running.
-    future.add_done_callback(lambda _: busy.release())
+class SyncGenerateRequest(GenerateRequest):
+    generate_immediately: bool=Field(default=True,strict=True,description='Synchronous route defaults to immediate priority (next free slot); false waits in ordinary FIFO order.')
+
+
+def normalized_request(payload):
+    data=payload.model_dump()
+    if data['reference_image'] is None:
+        data.pop('image_strength',None)
+    return data
+
+
+def queue_ready(require_worker=True):
+    if job_store is None:
+        raise HTTPException(503,'Queue storage is not ready; check health')
+    if require_worker and (job_worker is None or job_worker.error):
+        raise HTTPException(503,'Queue worker is not ready; check health and server logs')
+
+
+def submit_job(payload,key=None,retry_of=None):
+    queue_ready()
+    data=normalized_request(payload)
+    request_hash=fingerprint(data)
     try:
-        path, metadata = await asyncio.shield(asyncio.wrap_future(future))
-    except LocalFileError as exc:
-        raise HTTPException(400, str(exc)) from None
-    except Exception:
-        log.exception("Generation failed")
-        raise HTTPException(500, "Generation failed; see the server log. Try a smaller image.") from None
-    output_width, output_height = map(int, metadata["size"].split("x"))
-    item = {"tags": metadata["tags"], "seed": metadata["seed"], "file_path": str(path), "metadata_path": str(path.with_suffix(".json")),
-            "size": metadata["size"], "width": output_width, "height": output_height,
-            "generation_size": metadata["generation_size"]}
-    if payload.response_format == "b64_json":
-        item["b64_json"] = base64.b64encode(path.read_bytes()).decode("ascii")
+        existing=job_store.existing(key,request_hash)
+        if existing: return existing
+        if payload.lora is not None and not app.state.loras_enabled:
+            raise HTTPException(422,'LoRAs are disabled for this server; restart without --no-loras to enable them.')
+        require_storage(ROOT); require_storage(payload.output_dir)
+        # Check input headers without resizing/re-encoding every waiting request.
+        if payload.reference_image:
+            from PIL import Image
+            try:
+                with Image.open(payload.reference_image) as photo:
+                    if photo.width*photo.height>MAX_REFERENCE_PIXELS:
+                        raise ValueError('Reference photo must be at most 40 megapixels')
+                    photo.verify()
+            except (OSError,ValueError,Image.DecompressionBombError) as error:
+                raise ReferenceError(f'Cannot read reference_image: {error}') from error
+        selection=resolve_lora(payload.lora,payload.lora_strength)
+        if selection: data['lora_strength']=selection['strength']
+        data['seed']=payload.seed if payload.seed is not None else secrets.randbelow(2**32)
+        record=job_store.enqueue(data,request_hash,key=key,adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
+        job_worker.wake.set()
+        return record
+    except QueueConflict as error:
+        raise HTTPException(409,str(error)) from None
+    except (ReferenceError,ValueError) as error:
+        raise HTTPException(400,str(error)) from None
+    except (OSError,RuntimeError,sqlite3.Error) as error:
+        raise HTTPException(503,'Cannot persist the job. Check storage before retrying.') from error
+
+
+def execute_job(job):
+    payload=GenerateRequest.model_validate(job['request'])
+    path=Path(payload.output_dir)/(job['id']+'.png')
+    metadata=image_catalog.read_metadata(path.with_suffix('.json'))
+    if path.is_file() and metadata:
+        # A committed PNG/sidecar may predate the SQL success commit after a crash.
+        if metadata.get('job_id')!=job['id'] or metadata.get('request_fingerprint')!=fingerprint(job['request']):
+            raise LocalFileError('Existing output does not match this queued job; refusing to overwrite it')
+        from PIL import Image
+        with Image.open(path) as image:
+            if image.format!='PNG' or list(image.size)!=list(map(int,metadata['size'].split('x'))):
+                raise LocalFileError('Saved output is invalid; it was left untouched')
+            image.verify()
+        index=ROOT/'image-index'/(job['id']+'.json')
+        if not index.is_file(): image_catalog.write_index(ROOT,job['id'],path,metadata['tags'])
     else:
-        item["url"] = str(request.url_for("image", identifier=path.stem))
-    return {"created": int(time.time()), "data": [item], "generation_seconds": metadata["seconds"]}
+        selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
+        if selection and selection['sha256']!=job.get('_adapter_sha'):
+            raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
+        path,metadata=generate(payload,job)
+    return metadata
+
+
+def generation_response(path,metadata,request,response_format='url'):
+    width,height=map(int,metadata['size'].split('x'))
+    item={'tags':metadata['tags'],'seed':metadata['seed'],'file_path':str(path),'metadata_path':str(path.with_suffix('.json')),
+          'size':metadata['size'],'width':width,'height':height,'generation_size':metadata['generation_size']}
+    if response_format=='b64_json':
+        item['b64_json']=base64.b64encode(path.read_bytes()).decode('ascii')
+    else:
+        item['url']=str(request.url_for('image',identifier=path.stem))
+    return {'created':metadata['created'],'data':[item],'generation_seconds':metadata['seconds']}
+
+
+class JobResponse(BaseModel):
+    id: str
+    model: str
+    status: Literal['queued','running','succeeded','failed','cancelled']
+    created: float
+    started: float | None=None
+    finished: float | None=None
+    attempts: int
+    generate_immediately: bool
+    request: dict
+    error: str | None=None
+    retry_of: str | None=None
+    result: GenerateResponse | None=None
+
+
+class JobList(BaseModel):
+    data: list[JobResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    next_offset: int | None=None
+    has_previous: bool
+    previous_offset: int | None=None
+
+
+def job_response(job,request,*,include_result=True):
+    item={**job,'model':job['request']['model']}
+    metadata=job['result']
+    item['result']=generation_response(Path(metadata['file_path']),metadata,request,job['request']['response_format']) if metadata and include_result else None
+    return item
+
+
+@app.post('/v1/jobs',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
+          summary='Persist an image job',description='Default generate_immediately=false adds FIFO work. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Only the startup model is accepted.')
+def enqueue_job(payload:GenerateRequest,request:Request,
+                idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
+    return job_response(submit_job(payload,idempotency_key),request)
+
+
+@app.get('/v1/jobs',response_model=JobList,response_model_exclude_none=True,summary='List persisted jobs',
+         description='Current model queue. Running first, then waiting jobs in execution order, then recent finished jobs. Full results are returned by the detail endpoint. Pagination uses limit/offset.')
+def list_jobs(request:Request,limit:int=Query(24,ge=1,le=100),offset:int=Query(0,ge=0),
+              status:Literal['pending','queued','running','succeeded','failed','cancelled']|None=None):
+    queue_ready(require_worker=False)
+    records,total=job_store.listing(limit,offset,status)
+    following=offset+len(records)
+    return {'data':[job_response(job,request,include_result=False) for job in records],'total':total,'limit':limit,'offset':offset,
+            'has_more':following<total,'next_offset':following if following<total else None,
+            'has_previous':offset>0,'previous_offset':max(0,offset-limit) if offset else None}
+
+
+def find_job(identifier):
+    queue_ready(require_worker=False)
+    if not image_catalog.valid_identifier(identifier): raise HTTPException(404,'Unknown job ID')
+    try:
+        return job_store.get(identifier)
+    except FileNotFoundError:
+        raise HTTPException(404,'Unknown job ID') from None
+
+
+@app.get('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Read job status and result')
+def get_job(identifier:str,request:Request):
+    return job_response(find_job(identifier),request)
+
+
+@app.delete('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Cancel one waiting job',
+            description='Retains its cancelled record. Running inference cannot be cancelled and returns 409.')
+def cancel_job(identifier:str,request:Request):
+    find_job(identifier)
+    try:
+        item=job_store.cancel(identifier)
+    except QueueConflict as error:
+        raise HTTPException(409,str(error)) from None
+    job_worker.wake.set()
+    return job_response(item,request)
+
+
+@app.delete('/v1/jobs',summary='Clear waiting jobs',description='Cancels all waiting jobs for the active model. Running work and completed records/files are preserved.')
+def clear_jobs():
+    queue_ready(require_worker=False)
+    count=job_store.clear(); job_worker.wake.set()
+    return {'cancelled':count}
+
+
+@app.post('/v1/jobs/{identifier}/retry',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
+          summary='Retry a failed or cancelled job',description='Creates a new FIFO job with the saved settings/seed and a new output identity.')
+def retry_job(identifier:str,request:Request):
+    item=find_job(identifier)
+    if item['status'] not in ['failed','cancelled']: raise HTTPException(409,'Only failed or cancelled jobs can be retried')
+    data={**item['request'],'generate_immediately':False}
+    return job_response(submit_job(GenerateRequest.model_validate(data),retry_of=identifier),request)
+
+
+class QueueSettings(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    paused:bool=Field(strict=True)
+
+
+@app.patch('/v1/queue',summary='Pause or resume ordinary FIFO work',description='Persisted across restarts. An active image finishes. Explicit immediate requests may still run while FIFO work is paused.')
+def queue_settings(payload:QueueSettings):
+    queue_ready(require_worker=False)
+    state=job_store.pause(payload.paused); job_worker.wake.set()
+    return state
+
+
+@app.post('/v1/images/generations',response_model=GenerateResponse,response_model_exclude_none=True,
+          summary='Generate and wait for the saved image',description='Compatibility synchronous endpoint backed by the same persistent worker. Defaults to generate_immediately=true (next free slot ahead of ordinary queued jobs). false waits for a FIFO turn. Use POST /v1/jobs for a promptly returned durable job ID and restart-safe polling.')
+async def generations(payload:SyncGenerateRequest,request:Request,
+                      idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
+    record=await asyncio.to_thread(submit_job,payload,idempotency_key)
+    while record['status'] not in TERMINAL:
+        await asyncio.sleep(.1)
+        record=await asyncio.to_thread(job_store.get,record['id'])
+        if job_worker.error: raise HTTPException(503,job_worker.error)
+    if record['status']!='succeeded':
+        raise HTTPException(400 if record['status']=='cancelled' else (record.get('error_status') or 500),record['error'] or 'Job was cancelled')
+    metadata=record['result']
+    return generation_response(Path(metadata['file_path']),metadata,request,payload.response_format)
 
 
 def catalog_roots():

@@ -25,3 +25,9 @@ for name,relative in [('HF_HOME','cache/huggingface'),('XDG_CACHE_HOME','cache')
 os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY','1')
 os.environ.setdefault('HF_HUB_DISABLE_XET','1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM','false')
+
+import json
+_settings=json.loads((PROJECT_ROOT/'storage.json').read_text()) if (PROJECT_ROOT/'storage.json').is_file() else {}
+GPU_LOCK_FILE=Path(os.environ.get('GPU_LOCK_FILE',_settings.get('gpu_lock_file',str(STORE_ROOT/'.model-services'/'gpu.lock')))).expanduser()
+if not GPU_LOCK_FILE.is_absolute():
+    raise ValueError('GPU_LOCK_FILE must be an absolute path')

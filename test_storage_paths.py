@@ -23,6 +23,11 @@ class StoragePathsTest(unittest.TestCase):
         self.environment.stop()
         self.temporary.cleanup()
 
+    def test_storage_reconfiguration_preserves_the_shared_gpu_lock(self):
+        (self.project/'storage.json').write_text(json.dumps({'data_dir':str(self.project),'gpu_lock_file':'/absolute/shared/gpu.lock'}))
+        configure_storage(self.project)
+        self.assertEqual(json.loads((self.project/'storage.json').read_text())['gpu_lock_file'],'/absolute/shared/gpu.lock')
+
     def test_fresh_checkout_needs_no_external_drive(self):
         self.assertEqual(data_directory(self.project), self.project)
         self.assertEqual(configure_storage(self.project), self.project)

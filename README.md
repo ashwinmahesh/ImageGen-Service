@@ -40,9 +40,9 @@ Without a terminal, or with `NONINTERACTIVE=1`, an omitted model defaults to Z-I
 First setup also asks for a model store folder. **Blank/Enter uses the project directory**; another absolute directory (or `~/...`) stores data there and creates per-model symlinks in the project. The chosen store contains one folder per model:
 
 ```text
-<store>/z-image-turbo/{weights,images,references,image-index,cache,loras,logs}
-<store>/chroma1-hd/{weights,images,references,image-index,cache,loras,logs}
-<store>/chroma1-flash/{weights,images,references,image-index,cache,loras,logs}
+<store>/z-image-turbo/{weights,images,references,image-index,cache,loras,logs,queue}
+<store>/chroma1-hd/{weights,images,references,image-index,cache,loras,logs,queue}
+<store>/chroma1-flash/{weights,images,references,image-index,cache,loras,logs,queue}
 ```
 
 Source, Git, UI, the native runtime, and `.venv` stay in the project. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
@@ -69,7 +69,7 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 - API docs and live schema: <http://127.0.0.1:8000/docs> and `/openapi.json`
 - Readiness: `make health` or `GET /health`
 
-Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, and model `capabilities`. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
+Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, model `capabilities`, and durable `queue` counts/state/database path. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
 
 To switch, stop the server and run `make serve` again, or run `make serve MODEL=...` in another terminal. The launcher reuses an identical instance or gracefully replaces a **verified managed idle** service. It refuses to interrupt generation or replace unrelated listeners. It never hot-swaps models inside an inference request. A request's `model`, if specified, must equal the active model; mismatches return 422. Serving never downloads models. If assets are missing, run `make setup MODEL=<id>` first.
 
@@ -104,6 +104,7 @@ curl --fail-with-body http://127.0.0.1:8000/v1/images/generations \
 | `steps` | Active model's default and range above; references require at least 2. |
 | `seed` | Omit/null for random; integer 0–4294967295. Returned and saved. |
 | `n` | Only 1. |
+| `generate_immediately` | UI defaults true. true runs next, ahead of ordinary FIFO jobs; equal-priority jobs remain FIFO. Never preempts the active image. POST `/v1/jobs` defaults false; the synchronous compatibility endpoint defaults true. |
 | `response_format` | `b64_json` or `url`; default `b64_json`. |
 | `output_dir` | Default `<store>/<active-model>/images`; optional absolute folder or `~/...`. Created if writable; unique filenames never overwrite originals. |
 | `reference_image` | Optional absolute local path to one Pillow-readable photo; HTTP URLs are not accepted. |
@@ -112,9 +113,47 @@ curl --fail-with-body http://127.0.0.1:8000/v1/images/generations \
 | `lora_strength` | 0–2; requires `lora`; omitted uses catalog default. |
 | `tags` | Up to 32 text labels, each 1–64 normalized characters; duplicates removed case-insensitively. No commas/control characters. |
 
-Unknown fields and invalid combinations return 422. A busy server returns 429 with `Retry-After`; check `/health` before retrying. Invalid local paths/adapter selections return 400. Backend failures return 500 with details in local logs. This synchronous endpoint can take minutes; use a long client timeout (e.g. 1800 seconds). **Disconnecting or timing out does not cancel inference**; capacity remains held until it finishes. Check health and the gallery before retrying to avoid duplicate images. There is no queue, cancellation API, or idempotency guarantee.
+Unknown fields and invalid combinations return 422. Invalid input/adapter selections return 400; unavailable queue storage returns 503. The synchronous compatibility endpoint waits for its persisted job and returns the existing image response; backend failures surface there with the job error. Use a long timeout (e.g. 1800 seconds). **Disconnecting or timing out does not cancel a persisted job**. Prefer the asynchronous job API below for promptly returned IDs and polling, and reuse an `Idempotency-Key` after uncertain submissions. Both routes use the same queue worker; a busy worker accepts pending work without starting overlapping inference.
 
 Generation metadata records requested/effective dimensions, prompt, effective trigger prompt, active model/revision/backend, sampler settings, seed, steps, timing, reference path, adapter, initial tags, and output paths. The original file and generation record remain unchanged when tags are edited later.
+
+## Persistent generation queue
+
+Each startup model has its own SQLite database at **`<store>/<model-id>/queue/jobs.sqlite3`**. On the original Mac, Z-Image uses `/Volumes/ASH-SSD/models/z-image-turbo/queue/jobs.sqlite3`. The same queue is read automatically whenever that model starts. Changing the startup model leaves the other model's waiting jobs persisted until it is served again; models are not hot-swapped per job.
+
+The worker executes one image at a time. Ordinary jobs are FIFO. **`generate_immediately:true` means the next free slot ahead of ordinary jobs**, with FIFO order among immediate jobs. It never interrupts the current image. The webpage checks “Generate immediately” by default; uncheck it to add ordinary FIFO work. You can keep submitting while an image runs. The queue panel lists jobs, removes waiting entries, clears waiting work, retries failed/cancelled jobs, and provides pagination and a persistent pause toggle. Pause stops ordinary jobs only; the active image finishes and explicitly immediate jobs may still run.
+
+```sh
+# Persist an ordinary FIFO job and promptly receive its ID (HTTP 202).
+curl --fail-with-body http://127.0.0.1:8000/v1/jobs \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: my-first-image' \
+  -d '{"prompt":"A fox beneath snowy pine trees","size":"512x512","response_format":"url","generate_immediately":false}'
+
+# Submit to the next immediate slot instead (same settings, distinct request key).
+curl --fail-with-body http://127.0.0.1:8000/v1/jobs \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: my-next-image' \
+  -d '{"prompt":"A lantern in a misty forest","size":"512x512","response_format":"url","generate_immediately":true}'
+
+curl 'http://127.0.0.1:8000/v1/jobs?status=pending&limit=24&offset=0'
+curl 'http://127.0.0.1:8000/v1/jobs/<job-id>'
+curl --request DELETE 'http://127.0.0.1:8000/v1/jobs/<job-id>'
+curl --request DELETE 'http://127.0.0.1:8000/v1/jobs'
+curl --request POST 'http://127.0.0.1:8000/v1/jobs/<job-id>/retry'
+curl --request PATCH 'http://127.0.0.1:8000/v1/queue' \
+  -H 'Content-Type: application/json' -d '{"paused":true}'
+```
+
+A job response includes `id`, `model`, `status`, normalized `request`, `generate_immediately`, timestamps, `attempts`, optional `error`, and `result` when complete. Statuses are `queued`, `running`, `succeeded`, `failed`, `cancelled`. A 202 acknowledges the database commit, not image completion. Poll GET `/v1/jobs/{id}`; a successful `result` has the usual generation response with actual image/metadata paths and URL/base64 according to `response_format`. List responses omit result blobs and include `total`, `limit`, `offset`, `has_more`, `next_offset`, `has_previous`, `previous_offset`. `status=pending` selects waiting/running jobs; other statuses select that exact state. Omit status for history. Limit is 1–100 (default24); offset is nonnegative. Running comes first, waiting work follows execution order, then finished history newest first.
+
+DELETE of one entry cancels **waiting work only**; deleting a running/finished job returns409. Clearing cancels all waiting work for the active model and preserves the running image, completed files and job history. This removes entries from the active queue, not from the audit history. Failed/cancelled jobs can be explicitly retried as new ordinary FIFO jobs with the saved seed/settings and a new ID; restore missing references/adapters first. Failed jobs do not block later jobs or retry forever. A base-only server preserves a queued adapter job at the head until adapters are enabled or that waiting entry is removed.
+
+`Idempotency-Key` is optional on both submission routes (1–128 ASCII letters/digits/`._:-`). Reuse the **same key and settings** after a network timeout to get the original job, including its originally chosen random seed. A changed request with that key returns409. A new key intentionally creates another image. The UI remembers its unacknowledged submission key in session storage, and its followed job ID across page reloads. Idempotency does not deduplicate intentionally different keys.
+
+Shutdown finishes the active image and leaves waiting jobs on disk. If the process is abruptly killed during inference, startup retries the interrupted job using its original ID, effective settings and seed; it starts sampling again, not from an intermediate diffusion step. Outputs are published from private working files. If a complete matching PNG and metadata were published before the database success commit, recovery validates/adopts that artifact instead of generating another image. The custom-output index is restored if needed. References and adapter files must remain available; image bytes are not stored inside SQLite. Native subprocesses inherit worker/GPU leases so killing their Python parent cannot permit overlapping native inference; a restarting worker waits for the old native process to exit before recovery. Completed history is not automatically rerun.
+
+SQLite uses short transactions, a rollback journal and `synchronous=FULL`; inference runs outside database transactions. The database, journals and lock files are ignored by Git. Back up the database while the service is stopped or with SQLite's backup API, together with output/reference/index files. This protects against process restarts; it does not replace SSD backups or guarantee survival of disk failure. Missing SSDs fail clearly without creating an internal fallback.
+
+The worker cooperates with other local services through a configurable filesystem GPU lock. `GPU_LOCK_FILE=/absolute/path/gpu.lock` or ignored `storage.json` key `gpu_lock_file` selects it; the portable default is `<store>/.model-services/gpu.lock`. This Mac explicitly shares `/Volumes/ASH-SSD/models/.voice-studio/gpu.lock` with the voice services. A contended accelerator makes pending jobs wait, rather than fail; they remain removable until inference begins. Model loading also holds this lock. Serializing inference does not evict idle resident weights; stop/unload unused models if memory is tight. `/health.queue.stage` distinguishes waiting for the accelerator from generating, and storage failures appear as errors without discarding accepted jobs.
 
 ## Reference photos and variations
 
@@ -160,7 +199,7 @@ Public downloads use only tracked `lora-catalog.json`, never personal catalogs. 
 
 ## Verification, recovery and AI handoff
 
-`make test` runs fake-backend/storage/download tests without weights/GPU work. `make smoke` calls the running model, creates a real 512px image with its default steps, decodes it and rejects a blank result. This can be slow for Chroma. Health and gallery are responsive during inference. Native generation logs are under the active model's `logs/`.
+`make test` runs fake-backend/storage/download tests without weights/GPU work. `make smoke` calls the running model, creates a real 512px image with its default steps, decodes it and rejects a blank result. This can be slow for Chroma. Health and gallery are responsive during inference. Queue checks cover ordering, restart recovery, artifact reconciliation, idempotency, cross-process ownership, shared-GPU contention and waiting-only delete/clear. Native generation logs are under the active model's `logs/`.
 
 If a download is interrupted, rerun `make setup MODEL=<id>` or `make download MODEL=<id>`; files are reused/resumed. An incomplete setup has no new completion marker. For a missing SSD, reconnect it; do not remove broken links or choose a fallback to hide the problem. A port conflict should be resolved with `PORT=...` or by stopping the identified service. Avoid multiple GPU services on a memory-constrained Mac. If setup cannot create symlinks, use a symlink-capable project filesystem or project-local storage. Local model paths and the native runtime are verified before inference; startup does not fetch network resources.
 

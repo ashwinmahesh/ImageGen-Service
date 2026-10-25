@@ -89,3 +89,13 @@ storage.json
 /z-image-turbo
 /chroma1-hd
 /chroma1-flash
+
+# Durable queue files and process locks
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.lock
+/queue
+/.model-services

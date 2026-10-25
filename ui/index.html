@@ -23,6 +23,7 @@
     @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}header,footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
     @media(max-width:640px){header{padding:20px;flex-wrap:wrap}.header-actions{gap:12px;flex-wrap:wrap}.nav a{padding:6px 10px}.brand strong{font-size:16px}main{padding:27px 18px 10px}h1{font-size:27px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:22px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
     @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+    .queue-panel{margin-top:30px;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--panel)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:8px}.queue-item{padding:13px 0;border-top:1px solid var(--line);flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500}.queue-copy small{color:var(--muted);font-size:12px}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
   </style>
 </head>
 <body>
@@ -56,6 +57,8 @@
         <details><summary>Save location</summary>
           <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: selected data folder" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
         </details>
+        <label class="immediate-choice"><input id="generate-immediately" type="checkbox" checked>Generate immediately</label>
+        <p class="queue-help">Runs next, ahead of ordinary queued images. Turn off to add to the FIFO queue. Your current image will finish first.</p>
         <button class="generate" id="generate" type="submit" disabled><span id="button-text">Generate image</span><span aria-hidden="true">↗</span></button>
         <p class="shortcut">⌘ / Ctrl + Enter to generate</p>
         <p class="hint" id="import-note" role="status" hidden></p>
@@ -65,16 +68,24 @@
         <div class="preview" id="preview" aria-busy="false">
           <div class="empty" id="empty"><svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="9" y="9" width="46" height="46" rx="9" stroke="currentColor" stroke-width="1.5"/><circle cx="25" cy="25" r="5" stroke="currentColor" stroke-width="1.5"/><path d="m12 48 16-13 9 7 9-18 8 15" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><h2>Room for your imagination.</h2><p>Your image will appear here.<br>Start with a prompt, or try an example.</p></div>
           <img id="result" alt="" hidden>
-          <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Keep this page open while your image is created.</p></div>
+          <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Your request is saved. You can close this page and return later.</p></div>
         </div>
         <div class="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your selected folder.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
       </section>
     </div>
+    <section class="queue-panel" aria-label="Image generation queue">
+      <div class="queue-heading"><h2>Generation queue</h2><span class="queue-count" id="queue-summary">Connecting…</span></div>
+      <p class="queue-help">Saved on disk and resumed after a server restart. This queue belongs to the active model.</p>
+      <div class="queue-tools"><button class="secondary" id="pause-queue" type="button">Pause FIFO queue</button><button class="secondary" id="clear-queue" type="button">Clear waiting</button><label for="queue-filter" style="margin:0">Show</label><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
+      <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
+      <div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
+    </section>
     <p id="announcement" role="status" aria-live="polite"></p>
   </main>
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
+    let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null;
     let activeModel = null, defaultSteps = 9, maxSteps = 12;
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
@@ -110,7 +121,7 @@
     }
     $('lora').addEventListener('change', () => updateLoRA());
     function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
-    function updateButton() { $('generate').disabled = generating || !ready || serverBusy; }
+    function updateButton() { $('generate').disabled = generating || !ready; if (!generating) $('button-text').textContent = $('generate-immediately').checked ? 'Generate image' : 'Add to queue'; }
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
@@ -170,7 +181,7 @@
         const cap = data.capabilities;
         if (!cap || typeof cap.default_steps !== 'number') throw new Error('Missing model capabilities');
         if (activeModel !== data.model) {
-          activeModel = data.model; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
+          activeModel = data.model; watchingJob = localStorage.getItem('imagegen-watching:' + activeModel); queueOffset = 0; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
           $('model-name').textContent = cap.name; document.title = cap.name + ' — Image Studio';
           $('steps').value = defaultSteps; $('steps').max = maxSteps;
           $('steps-hint').textContent = `${defaultSteps} steps is the default for ${cap.name}. Reuse a seed to explore variations.`;
@@ -208,10 +219,10 @@
     });
     $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
     $('form').addEventListener('submit', async event => {
-      event.preventDefault(); if (generating || !ready || serverBusy) return;
+      event.preventDefault(); if (generating || !ready) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
-      const payload = {model: activeModel, prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url'};
+      const payload = {model: activeModel, prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
       if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
@@ -220,12 +231,10 @@
       if ($('seed').value !== '') payload.seed = Number($('seed').value);
       if ($('output-dir').value.trim()) payload.output_dir = $('output-dir').value.trim();
       if (referencePath) { payload.reference_image = referencePath; payload.image_strength = imageStrength; }
-      generating = true; updateButton(); $('error').hidden = true; $('working').hidden = false; $('preview').setAttribute('aria-busy', 'true'); $('button-text').textContent = 'Generating…'; status('Generating on your Mac', 'busy');
+      generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
       for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = true;
-      $('announcement').textContent = 'Generating your image.';
-      const started = Date.now(); $('elapsed').textContent = 'Starting…';
-      const timer = setInterval(() => { $('elapsed').textContent = `${Math.floor((Date.now() - started) / 1000)} seconds elapsed`; }, 1000);
+      $('announcement').textContent = 'Saving your image request…';
       try {
         if (selectedFile) {
           let uploaded = savedReference;
@@ -239,30 +248,108 @@
           payload.reference_image = uploaded.file_path; payload.image_strength = imageStrength;
           $('button-text').textContent = 'Generating…';
         }
-        const response = await fetch('/v1/images/generations', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-        const data = await response.json();
-        if (!response.ok) { const detail = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail; throw new Error(detail || `Generation failed (${response.status}).`); }
-        const item = data.data[0];
-        const url = new URL(item.url, location.origin);
-        if (url.origin !== location.origin) throw new Error('The server returned an unexpected image URL.');
-        const preloaded = new Image();
-        await new Promise((resolve, reject) => { preloaded.onload = resolve; preloaded.onerror = () => reject(new Error('The image was generated, but its preview could not load. Check the images folder on your SSD.')); preloaded.src = url.href; });
-        $('result').src = url.href; $('result').alt = prompt; $('result').hidden = false; $('empty').hidden = true;
-        lastSeed = item.seed;
-        const actualSize = item.size || `${preloaded.naturalWidth}x${preloaded.naturalHeight}`;
-        lastResult = {file_path: item.file_path, url: url.href, prompt, size: actualSize, lora: payload.lora || '', lora_strength: payload.lora_strength};
-        $('result-info').textContent = `${actualSize.replace('x', ' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
-        $('download').href = url.href; $('download').download = `${activeModel}-${lastSeed}.png`; $('actions').hidden = false;
-        $('saved-path').textContent = item.file_path;
-        $('announcement').textContent = 'Your image is ready and saved to your selected folder.';
+        const body = JSON.stringify(payload), remembered = JSON.parse(sessionStorage.getItem('imagegen-pending') || 'null');
+        const key = remembered && remembered.body === body ? remembered.key : crypto.randomUUID();
+        sessionStorage.setItem('imagegen-pending', JSON.stringify({body, key}));
+        const response = await fetch('/v1/jobs', {method:'POST', headers:{'Content-Type':'application/json', 'Idempotency-Key':key}, body});
+        const job = await response.json();
+        if (!response.ok) { const detail = Array.isArray(job.detail) ? job.detail.map(item => item.msg).join('; ') : job.detail; throw new Error(detail || `Submission failed (${response.status}).`); }
+        sessionStorage.removeItem('imagegen-pending');
+        if (payload.generate_immediately) followJob(job.id);
+        $('announcement').textContent = payload.generate_immediately ? 'Image request saved. It will run in the next immediate slot.' : 'Image added to the persisted FIFO queue.';
+        $('import-note').textContent = $('announcement').textContent; $('import-note').hidden = false;
+        queueOffset = 0; await refreshQueue();
       } catch (error) {
-        $('error').textContent = error instanceof TypeError ? 'Could not reach the server. Check that it is running and the SSD is connected. If the connection dropped during generation, the image may still finish saving.' : error.message;
+        $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
       } finally {
         for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = false;
-        clearInterval(timer); generating = false; $('working').hidden = true; $('preview').setAttribute('aria-busy', 'false'); $('button-text').textContent = 'Generate image'; await checkHealth();
+        generating = false; updateButton(); await checkHealth();
       }
     });
+    $('generate-immediately').addEventListener('change', updateButton);
+    function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching:' + activeModel, id); }
+    async function displayJob(job) {
+      const data = job.result, item = data.data[0], payload = job.request;
+      const url = new URL(item.url, location.origin);
+      if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
+      const preloaded = new Image();
+      await new Promise((resolve,reject) => { preloaded.onload=resolve; preloaded.onerror=() => reject(new Error('Image saved, but its preview could not load. Open it in the gallery.')); preloaded.src=url.href; });
+      $('result').src=url.href; $('result').alt=payload.prompt; $('result').hidden=false; $('empty').hidden=true;
+      lastSeed=item.seed;
+      lastResult={file_path:item.file_path,url:url.href,prompt:payload.prompt,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
+      $('result-info').textContent=`${item.size.replace('x',' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
+      $('download').href=url.href; $('download').download=`${activeModel}-${lastSeed}.png`; $('actions').hidden=false;
+      $('saved-path').textContent=item.file_path; $('announcement').textContent='Your image is ready and saved.';
+    }
+    async function requestJSON(url, options = {}) {
+      const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
+      const data=await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Queue request failed.');
+      return data;
+    }
+    async function queueAction(url, options) {
+      try { await requestJSON(url,options); await refreshQueue(); }
+      catch(error) { showError(error.message); }
+    }
+    function renderQueueJob(job) {
+      const row=document.createElement('div'); row.className='queue-item';
+      const copy=document.createElement('div'); copy.className='queue-copy';
+      const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
+      const detail=document.createElement('small'); detail.textContent=`${job.status} · ${job.generate_immediately ? 'Immediate priority' : 'FIFO'} · ${job.request.size} · Attempt ${job.attempts}`;
+      copy.append(title,detail);
+      if (job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.error; copy.append(error); }
+      row.append(copy);
+      const action=document.createElement('button'); action.className='secondary'; action.type='button';
+      if (job.status==='queued') { action.textContent='Remove'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); }
+      else if (job.status==='succeeded') { action.textContent='View'; action.addEventListener('click',async() => { try { await displayJob(await requestJSON('/v1/jobs/'+job.id)); } catch(error) { showError(error.message); } }); }
+      else if (['failed','cancelled'].includes(job.status)) { action.textContent='Retry'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); }
+      else { action.textContent='Follow'; action.addEventListener('click',() => { followJob(job.id); refreshQueue(); }); }
+      row.append(action); return row;
+    }
+    async function refreshQueue() {
+      if (pollingQueue || !activeModel) return;
+      pollingQueue=true;
+      try {
+        const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
+        if ($('queue-filter').value) params.set('status',$('queue-filter').value);
+        const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health')]);
+        if (health.model !== activeModel) { await checkHealth(); return; }
+        const summary=health.queue || {};
+        queuePaused=!!summary.paused;
+        $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · FIFO paused' : ''}`;
+        $('pause-queue').textContent=queuePaused ? 'Resume FIFO queue' : 'Pause FIFO queue';
+        $('clear-queue').disabled=!summary.queued;
+        $('queue-notice').textContent=summary.error || summary.blocked_reason || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
+        $('queue-notice').hidden=!$('queue-notice').textContent;
+        if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
+        const version=JSON.stringify(list.data);
+        if (version!==queueListVersion) {
+          $('queue-list').replaceChildren(...list.data.map(renderQueueJob)); queueListVersion=version;
+          if (!list.total) { const empty=document.createElement('p'); empty.className='queue-help'; empty.textContent='No jobs in this view.'; $('queue-list').append(empty); }
+        }
+        queueNext=list.next_offset ?? null; queuePrevious=list.previous_offset ?? null;
+        $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
+        $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
+        if (watchingJob) {
+          const job=await requestJSON('/v1/jobs/'+watchingJob);
+          const finished=['succeeded','failed','cancelled'].includes(job.status);
+          $('working').hidden=finished; $('preview').setAttribute('aria-busy',String(!finished));
+          $('elapsed').textContent=job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed`) : 'Saved · waiting for the next slot…';
+          if (finished) {
+            if (job.status==='succeeded') await displayJob(job);
+            else showError(job.error || 'The followed job was cancelled.');
+            localStorage.removeItem('imagegen-watching:'+activeModel); watchingJob=null;
+          }
+        }
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; }
+      finally { pollingQueue=false; }
+    }
+    $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
+    $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
+    $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
+    $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });
+    $('queue-previous').addEventListener('click',() => { if (queuePrevious!==null) { queueOffset=queuePrevious; refreshQueue(); } });
     function selectSize(value) {
       if (typeof value !== 'string' || !/^\d+x\d+$/.test(value)) return false;
       const dimensions = value.split('x').map(Number);
@@ -319,8 +406,8 @@
         $('prompt').focus();
       } catch (error) { showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth()]); await importSavedImage(); }
-    initialize(); setInterval(checkHealth, 15000);
+    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth()]); await importSavedImage(); await refreshQueue(); }
+    initialize(); setInterval(checkHealth, 15000); setInterval(refreshQueue, 2000);
   </script>
 </body>
 </html>

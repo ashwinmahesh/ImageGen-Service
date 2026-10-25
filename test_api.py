@@ -1,4 +1,5 @@
 """API integration tests with a tiny fake generator; no weights or GPU required."""
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import json
 import io
@@ -49,13 +50,22 @@ class APITest(unittest.TestCase):
         ]
         for p in self.patches:
             p.start()
-        # No context manager: skip real model startup/lifespan.
+        self.store=server.JobStore(self.root/'queue/jobs.sqlite3')
+        self.store.initialize()
+        self.worker=server.QueueWorker(self.store,server.execute_job,busy=server.busy,loras_enabled=lambda:server.app.state.loras_enabled)
+        self.worker.acquire()
+        self.job_executor=ThreadPoolExecutor(max_workers=1)
+        for p in [patch.object(server,'job_store',self.store),patch.object(server,'job_worker',self.worker)]:
+            p.start(); self.patches.append(p)
+        self.worker.start(self.job_executor)
+        # No context manager: skip real GPU startup/lifespan.
         self.client = TestClient(server.app, base_url='http://127.0.0.1')
         self.payload = {'prompt': 'A fox', 'size': '256x256', 'seed': 42,
                         'output_dir': str(self.root / 'custom' / 'nested'), 'response_format': 'url'}
 
     def tearDown(self):
         self.client.close()
+        self.worker.stop(); self.job_executor.shutdown(wait=True)
         for p in reversed(self.patches):
             p.stop()
         self.temp.cleanup()
@@ -132,11 +142,6 @@ class APITest(unittest.TestCase):
                 self.assertEqual(self.post(**change).status_code, 422)
 
     def test_busy_and_missing_image(self):
-        server.busy.acquire()
-        try:
-            self.assertEqual(self.post().status_code, 429)
-        finally:
-            server.busy.release()
         self.assertEqual(self.client.get('/images/invalid.png').status_code, 404)
         self.assertEqual(self.client.get('/images/' + 'a' * 32 + '.png').status_code, 404)
 
