@@ -70,7 +70,7 @@ make storage DATA_DIR="/Volumes/MySSD/models"
 make setup MODEL=z-image-turbo NONINTERACTIVE=1
 ```
 
-`DATA_DIR` means the **store containing model folders**, not one model's weights folder. On the original Mac, the single serving project is `~/Documents/models/ImageGen-Service`, and the store is `/Volumes/ASH-SSD/models`. Existing model, output, tag and custom-location index paths are reused in place. A fresh clone needs no external SSD or original user's home path. Prior separate source folders can be retained as backups; use the consolidated project for new changes.
+`DATA_DIR` means the **store containing model folders**, not one model's weights folder. On the original Mac, the single serving project is `~/Documents/models/ImageGen-Service`, and the store is `/Volumes/ASH-SSD/models`. Existing model, output, tag and custom-location index paths are reused in place. A fresh clone needs no external SSD or original user's home path. Use the consolidated project for all image models. The former local source projects `~/Documents/models/z-image-turbo`, `chroma1-hd` and `chroma1-flash` have been retired on the original Mac; their same-named SSD model/data folders remain active and must be preserved. The shared project owns its environment and native runtime without depending on the retired source folders.
 
 Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and one native runtime in `<project>/runtime`. **Flash setup does not download the HD diffusion checkpoint.** Back up the actual SSD data, including indexes and tags, **and the project-local `state/` folder**; symlinks are not backups.
 
