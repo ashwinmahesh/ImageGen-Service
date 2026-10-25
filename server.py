@@ -18,12 +18,13 @@ from typing import Literal
 from config import API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
+import image_catalog
 
 # Downloads are an explicit separate step. Serving never needs the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -58,7 +59,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="Local Z-Image Turbo", version="1.6.0", lifespan=lifespan,
+    title="Local Z-Image Turbo", version="1.7.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -66,7 +67,7 @@ app = FastAPI(
         "These are server-local filesystem paths; `url` is the browser-accessible PNG. "
         "Use `reference_image` for one local reference photo (image-to-image); `image_strength` "
         "controls how strongly the starting image is preserved. The webpage can also upload a photo "
-        "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`."
+        "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`."
     ),
 )
 app.state.loras_enabled = True
@@ -285,6 +286,7 @@ def generate_with_geometry(payload, geometry):
         elapsed = round(time.monotonic() - started, 2)
         metadata = {
             "model": API_MODEL, "source": MODEL_ID, "revision": MODEL_REVISION,
+            "created": int(time.time()),
             "prompt": payload.prompt, "seed": seed, "size": f"{output_width}x{output_height}",
             "requested_size": payload.size, "generation_size": f"{width}x{height}",
             "reference_size": list(geometry.reference_size) if geometry.reference_size else None,
@@ -366,18 +368,106 @@ async def generations(payload: GenerateRequest, request: Request):
 
 @app.get("/images/{identifier}.png", name="image")
 def image(identifier: str):
-    if len(identifier) != 32 or any(c not in "0123456789abcdef" for c in identifier):
-        raise HTTPException(404)
-    path = IMAGE_DIR / f"{identifier}.png"
-    record = ROOT / "image-index" / f"{identifier}.json"
-    if record.is_file():
-        try:
-            path = Path(json.loads(record.read_text())["file_path"])
-        except (OSError, ValueError, KeyError, TypeError):
-            raise HTTPException(404) from None
-    if not path.is_file():
-        raise HTTPException(404)
+    try:
+        path = image_catalog.resolve_image(ROOT, IMAGE_DIR, identifier)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Saved image is unavailable") from None
     return FileResponse(path, media_type="image/png")
+
+
+class CatalogImage(BaseModel):
+    id: str
+    created: int = Field(description="Saved timestamp in Unix seconds; older files use their modification time.")
+    url: str
+    thumbnail_url: str
+    metadata_url: str | None = None
+    file_path: str
+    metadata_path: str | None = None
+    metadata_available: bool
+    prompt: str | None = None
+    model: str | None = None
+    size: str | None = None
+    width: int | None = None
+    height: int | None = None
+    seed: int | None = None
+    steps: int | None = None
+    generation_seconds: float | None = None
+    lora: dict | None = None
+    file_size: int
+
+
+class CatalogDetail(CatalogImage):
+    metadata: dict | None = Field(default=None, description="Saved generation settings from the JSON sidecar, when readable.")
+
+
+class CatalogResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[CatalogImage]
+    total: int
+    has_more: bool
+    next_offset: int | None = None
+
+
+def catalog_urls(record, request):
+    identifier = record['id']
+    return {**record, 'url': str(request.url_for('image', identifier=identifier)),
+            'thumbnail_url': str(request.url_for('image_thumbnail', identifier=identifier)) + '?v=' + record['_version'],
+            'metadata_url': str(request.url_for('image_metadata', identifier=identifier)) if record['metadata_available'] else None}
+
+
+@app.get("/gallery", include_in_schema=False)
+def gallery():
+    return FileResponse(ROOT / "ui" / "gallery.html", media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
+         summary="Browse saved generations",
+         description="Lists saved PNGs in the default images folder and custom locations recorded in image-index/. Reference uploads are excluded. Search matches prompts, seeds, dimensions, models and adapter labels. Missing files are skipped; images without readable metadata remain browsable. No GPU inference is performed.")
+def saved_images(request: Request, response: Response,
+                 limit: int = Query(default=24, ge=1, le=100),
+                 offset: int = Query(default=0, ge=0),
+                 q: str = Query(default="", max_length=4000),
+                 sort: Literal["newest", "oldest"] = "newest"):
+    try:
+        records, total = image_catalog.list_images(ROOT, IMAGE_DIR, q, sort, limit, offset)
+    except OSError:
+        raise HTTPException(503, "Cannot read the image library. Check the project storage.") from None
+    response.headers['Cache-Control'] = 'no-store'
+    next_offset = offset + len(records)
+    return {'object': 'list', 'data': [catalog_urls(item, request) for item in records],
+            'total': total, 'has_more': next_offset < total,
+            'next_offset': next_offset if next_offset < total else None}
+
+
+@app.get("/v1/images/{identifier}", response_model=CatalogDetail, response_model_exclude_none=True,
+         summary="Read a saved generation", description="Returns saved settings, actual file paths, and local preview/download URLs for a gallery image.")
+def saved_image(identifier: str, request: Request, response: Response):
+    try:
+        record = image_catalog.image_record(ROOT, IMAGE_DIR, identifier)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Saved image is unavailable") from None
+    response.headers['Cache-Control'] = 'no-store'
+    return catalog_urls(record, request)
+
+
+@app.get("/thumbnails/{identifier}.webp", name="image_thumbnail", include_in_schema=False)
+def image_thumbnail(identifier: str):
+    try:
+        path = image_catalog.thumbnail(ROOT, IMAGE_DIR, identifier)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Image preview is unavailable") from None
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/images/{identifier}.json", name="image_metadata", include_in_schema=False)
+def image_metadata(identifier: str):
+    try:
+        path = image_catalog.resolve_image(ROOT, IMAGE_DIR, identifier).with_suffix('.json')
+        if image_catalog.read_metadata(path) is None:
+            raise FileNotFoundError()
+    except (OSError, ValueError):
+        raise HTTPException(404, "Saved metadata is unavailable") from None
+    return FileResponse(path, media_type="application/json", filename=path.name)
 
 
 if __name__ == "__main__":

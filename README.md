@@ -85,6 +85,27 @@ The original Mac's three model aliases switch between Z-Image Turbo, Chroma1-HD 
 
 The server runs in the foreground; Ctrl-C stops it. `make start` is equivalent to `make serve`. `make serve PORT=8001` changes the port. The storage containing the checkout and weights must remain available. Do not start a second instance on this 24 GB Mac. The zsh alias is available in newly opened shells (or after `source ~/.zshrc`).
 
+## Saved-image gallery
+
+Open `http://127.0.0.1:8000/gallery`, or choose **Gallery** in the webpage navigation. It shows saved generations newest first, with search across prompts, seeds, dimensions, model names and style labels, an oldest-first option, and paginated loading. Open a thumbnail to view the original, prompt, settings, timestamp and absolute file path. You can download the PNG or its JSON metadata, copy the prompt/path, reuse settings, or select the image as a reference for a new variation. Reuse pre-fills the form for review; it never submits generation automatically. Unavailable adapters are reported and the base model is selected. Reusing settings from an image that originally used a reference requires that original reference file to remain available.
+
+The gallery discovers service-generated UUID-named PNGs in `<project>/images` and custom destinations recorded in `<project>/image-index`. Older default-folder images without index records are included; uploaded references are excluded. Missing files are skipped. Images without readable sidecars are still shown, using their file modification time and image dimensions where possible. This is a library of this service’s outputs, not a recursive browser of arbitrary folders. Generate a new image, then refresh the gallery to see it.
+
+Small WebP previews are created on demand under ignored `cache/thumbnails/`, with a maximum 512-pixel edge and no GPU inference. Original files are unchanged. Cache keys follow the original file’s modification time and size; the cache can be deleted when the service is idle. Source images and readable sidecars must remain available for viewing/downloading. Browsing also works while a generation is running.
+
+The API provides the same catalog:
+
+```sh
+curl --fail --silent --show-error 'http://127.0.0.1:8000/v1/images?limit=24&offset=0&sort=newest&q=castle'
+curl --fail --silent --show-error 'http://127.0.0.1:8000/v1/images/<image-id>'
+```
+
+Replace `<image-id>` with an `id` from the list, a 32-character lowercase hex identifier. `limit` is 1–100 (default 24), `offset` is nonnegative, `sort` is `newest` or `oldest`, and `q` is an optional case-insensitive substring, at most 4,000 characters. The list returns `object:"list"`, `data`, matching `total`, `has_more`, and `next_offset` when another page exists. Results describe existing disk files and may change between requests; refresh to restart pagination after new generations.
+
+Each item includes `id`, `created` (Unix seconds), `file_path`, `file_size`, `metadata_available`, `url` (original PNG), and `thumbnail_url` (cached preview). Recorded `prompt`, `model`, `size`, `width`, `height`, `seed`, `steps`, `generation_seconds`, `lora`, `metadata_path`, and `metadata_url` are included when available. The detail endpoint also returns the saved sidecar as `metadata`. Use the returned URLs rather than constructing filesystem paths. Metadata downloads are JSON; custom-folder originals use the same image URL scheme. New generations store `created` in their JSON sidecars; older ones fall back to the PNG modification time. The detail endpoint returns 404 for an unavailable individual file; the list endpoint returns 503 if the project storage cannot be read. As with the generation API, paths refer to the server’s Mac.
+
+The gallery is local to this service. Images, metadata, index records and previews remain ignored by Git and are not downloaded by setup.
+
 ## Serve without LoRAs
 
 From this project folder:

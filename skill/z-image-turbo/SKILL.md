@@ -48,9 +48,17 @@ Wait for `Application startup complete`, then check:
 curl --fail --silent --show-error http://127.0.0.1:8000/health
 ```
 
-Require `status:ready` and `model:z-image-turbo`; inspect `busy` before submitting work. Connection refusal during model loading is expected. `loras_enabled:false` identifies base-only mode. Existing matching services can be reused. The launcher refuses to interrupt a busy generation or replace an unrelated service; do not bypass that refusal by killing a process. The webpage is `/`, interactive docs `/docs`, and `/openapi.json` is authoritative for the running instance.
+Require `status:ready` and `model:z-image-turbo`; inspect `busy` before submitting work. Connection refusal during model loading is expected. `loras_enabled:false` identifies base-only mode. Existing matching services can be reused. The launcher refuses to interrupt a busy generation or replace an unrelated service; do not bypass that refusal by killing a process. The generator webpage is `/`, saved-image gallery `/gallery`, interactive docs `/docs`, and `/openapi.json` is authoritative for the running instance.
 
 For an optional real GPU generation check, run `make smoke` after readiness. It generates and validates a 512×512 PNG, saved locally outside Git. Report setup/test results, the serving URL and mode, and any actual generated file paths. Do not claim a GPU smoke test ran when only `make test` was used.
+
+## Browse saved generations
+
+Use `/gallery` to search saved outputs, inspect prompts/settings and file paths, download PNG/JSON, or pre-fill a variation/reuse form. The library includes default-folder UUID PNGs and indexed custom destinations, excluding reference uploads. Legacy files without readable metadata still appear. Refresh after a generation; browsing uses CPU thumbnails and can run while inference is busy.
+
+Programmatic access: `GET /v1/images?limit=24&offset=0&sort=newest&q=castle`. `limit` is 1–100, `offset` nonnegative, `sort` newest/oldest, and optional `q` searches prompts, seeds, dimensions, models and adapter labels. Read `data`, `total`, `has_more` and `next_offset`; use each item's returned `id`, `file_path`, `url`, `thumbnail_url`, and optional `metadata_url`. `GET /v1/images/{id}` adds saved `metadata` when available. Fields absent from old sidecars are omitted; timestamps fall back to PNG modification time. An individual missing file returns 404; unavailable project storage returns 503. Read the live OpenAPI schema for full fields.
+
+Reusing gallery settings does not start generation, guarantee an identical output, or install a missing adapter. Respect the current serving mode; an original reference must still exist if its path is reused. Keep outputs, sidecars, index records, and `cache/thumbnails/` out of Git. Deleting the thumbnail cache only removes previews; it never deletes originals.
 
 ## Generate and use references
 

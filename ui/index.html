@@ -12,7 +12,7 @@
     button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:wait;opacity:.5}
     :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}header{max-width:1320px;margin:auto;padding:28px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:20px}
     .brand{display:flex;align-items:center;gap:12px}.mark{width:35px;height:35px;background:var(--accent);color:#1d2515;border-radius:10px;display:grid;place-items:center;font-size:23px;font-weight:700}.brand strong{font-size:18px;letter-spacing:-.5px}.brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:1.3px;text-transform:uppercase}
-    .status{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;background:#778174;border-radius:50%}.status[data-state=ready] .dot{background:var(--accent)}.status[data-state=busy] .dot{background:#edc28c}.status[data-state=offline] .dot{background:#ed9696}
+    .header-actions{display:flex;align-items:center;gap:24px}.nav{display:flex;gap:5px;padding:4px;background:#1c201b;border:1px solid var(--line);border-radius:10px}.nav a{text-decoration:none;padding:7px 15px;font-size:12px;border-radius:6px;color:var(--muted)}.nav a[aria-current]{background:#313c27;color:var(--accent)}.status{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;background:#778174;border-radius:50%}.status[data-state=ready] .dot{background:var(--accent)}.status[data-state=busy] .dot{background:#edc28c}.status[data-state=offline] .dot{background:#ed9696}
     main{max-width:1320px;margin:auto;padding:40px 36px 20px}.intro{display:flex;justify-content:space-between;align-items:baseline;gap:18px;margin-bottom:26px}h1{font-size:30px;line-height:1.2;font-weight:550;letter-spacing:-1px;margin:0}.intro p{color:var(--muted);margin:8px 0 0;font-size:14px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--muted);white-space:nowrap}
     .workspace{display:grid;grid-template-columns:340px minmax(0,1fr);gap:24px;align-items:start}.controls{padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:16px}label{display:block;font-size:13px;font-weight:550;margin-bottom:9px}.label-row{display:flex;align-items:center;justify-content:space-between}.label-row button{border:0;background:none;color:var(--accent);font-size:12px;padding:0 0 9px}textarea,input,select{width:100%;color:var(--text);background:#171a18;border:1px solid #41473f;border-radius:9px;padding:11px 12px}textarea{resize:vertical;min-height:190px;line-height:1.6;font-size:14px}textarea::placeholder,input::placeholder{color:#7d897b}.hint{font-size:12px;color:var(--muted);margin:8px 0 22px}.field{margin-top:20px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}summary{cursor:pointer;font-size:13px;color:var(--muted);padding:20px 0 0}details .hint{margin-bottom:0}
     .generate{background:var(--accent);color:#1d2515;border:0;border-radius:10px;width:100%;padding:13px 16px;font-weight:650;margin-top:25px;display:flex;align-items:center;justify-content:space-between}.generate:hover:not(:disabled){background:#e9f5c8}.shortcut{font-size:11px;color:var(--muted);text-align:center;margin:10px 0 0}.error{margin:18px 0 0;padding:12px;border-radius:8px;border:1px solid #79514a;background:#332421;color:#f7c6bc;font-size:13px;overflow-wrap:anywhere}.error[hidden]{display:none}
@@ -21,12 +21,12 @@
     .reference-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}.reference-title{font-size:13px;font-weight:550;margin:0 0 10px}.optional{font-weight:400;color:var(--muted)}.choose-photo{width:100%;padding:13px;border:1px dashed #69745c;border-radius:9px;background:#242a20;color:var(--accent);text-align:center}.choose-photo:hover{background:#303a27}.reference-card{display:flex;gap:12px;align-items:center;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:9px;min-width:0}.reference-card[hidden],.reference-options[hidden]{display:none}.reference-card img{width:64px;height:64px;object-fit:cover;border-radius:5px}.reference-description{min-width:0;flex:1}.reference-description strong{display:block;font-size:12px;overflow-wrap:anywhere}.reference-description small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.remove-photo{border:0;background:none;color:var(--muted);padding:5px;font-size:18px}.reference-section .hint{margin-bottom:0}.reference-path summary{padding-top:12px;font-size:12px}.reference-options{margin-top:16px}.reference-options input{padding:9px 12px}.reference-section input[type=file][hidden]{display:none}
     footer{max-width:1320px;margin:18px auto 0;padding:22px 36px 30px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:16px;line-height:1.8}footer code{font-family:ui-monospace,monospace;font-size:10px;overflow-wrap:anywhere}footer a{white-space:nowrap}#announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
     @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}header,footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
-    @media(max-width:640px){header{padding:20px}.brand strong{font-size:16px}main{padding:27px 18px 10px}h1{font-size:27px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:22px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
+    @media(max-width:640px){header{padding:20px;flex-wrap:wrap}.header-actions{gap:12px;flex-wrap:wrap}.nav a{padding:6px 10px}.brand strong{font-size:16px}main{padding:27px 18px 10px}h1{font-size:27px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:22px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
     @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
   </style>
 </head>
 <body>
-  <header><div class="brand"><span class="mark" aria-hidden="true">Z</span><div><strong>Z-Image Turbo</strong><small>Local studio</small></div></div><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></header>
+  <header><div class="brand"><span class="mark" aria-hidden="true">Z</span><div><strong>Z-Image Turbo</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
     <div class="workspace">
@@ -57,6 +57,7 @@
         </details>
         <button class="generate" id="generate" type="submit" disabled><span id="button-text">Generate image</span><span aria-hidden="true">↗</span></button>
         <p class="shortcut">⌘ / Ctrl + Enter to generate</p>
+        <p class="hint" id="import-note" role="status" hidden></p>
         <p class="error" id="error" role="alert" hidden></p>
       </form>
       <section aria-label="Generated image">
@@ -111,7 +112,7 @@
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
-      if (hasReference && !usingReferenceSizing) $('reference-size').value = String(Math.max(...$('size').value.split('x').map(Number)));
+      if (hasReference && !usingReferenceSizing) selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
       usingReferenceSizing = hasReference;
       $('size').hidden = hasReference; $('size').disabled = hasReference;
       $('reference-size').hidden = !hasReference; $('reference-size').disabled = !hasReference || generating;
@@ -157,7 +158,7 @@
       candidate.src = previewURL;
     });
     $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
-    $('reference').addEventListener('input', () => { if (referenceFile) clearPhoto(); referenceDimensions = null; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
+    $('reference').addEventListener('input', () => { if (referenceFile || !$('reference-card').hidden) clearPhoto(); referenceDimensions = null; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
     async function checkHealth() {
       try {
         const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
@@ -247,7 +248,62 @@
         clearInterval(timer); generating = false; $('working').hidden = true; $('preview').setAttribute('aria-busy', 'false'); $('button-text').textContent = 'Generate image'; await checkHealth();
       }
     });
-    updateReferenceSizing(); loadLoRAs(); checkHealth(); setInterval(checkHealth, 15000);
+    function selectSize(value) {
+      if (typeof value !== 'string' || !/^\d+x\d+$/.test(value)) return false;
+      const dimensions = value.split('x').map(Number);
+      if (!dimensions.every(n => n >= 256 && n <= 2048 && n % 64 === 0)) return false;
+      if (![...$('size').options].some(option => option.value === value)) $('size').add(new Option(value.replace('x', ' × '), value));
+      $('size').value = value; return true;
+    }
+    function selectLongEdge(value) {
+      if (!Number.isInteger(value) || value < 256 || value > 2048 || value % 64) return;
+      if (![...$('reference-size').options].some(option => Number(option.value) === value)) $('reference-size').add(new Option(`${value} px long edge`, String(value)));
+      $('reference-size').value = String(value);
+    }
+    async function importSavedImage() {
+      const params = new URLSearchParams(location.search), id = params.get('generation'), mode = params.get('mode');
+      if (!id) return;
+      if (!/^[0-9a-f]{32}$/.test(id) || !['reference', 'settings'].includes(mode)) { showError('This gallery link is invalid. Open the image from the gallery again.'); return; }
+      try {
+        const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
+        if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
+        const item = await response.json(), metadata = item.metadata || {}, warnings = [];
+        const url = new URL(item.url, location.origin);
+        if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
+        $('prompt').value = item.prompt || '';
+        if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
+        if (Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= 12) $('steps').value = item.steps;
+        if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
+        $('lora').value = '';
+        if (item.lora) {
+          const adapter = loraCatalog.find(entry => entry.id === item.lora.id && entry.available);
+          if (lorasEnabled && adapter) { $('lora').value = adapter.id; if (Number.isFinite(item.lora.strength)) $('lora-strength').value = item.lora.strength; }
+          else warnings.push('The saved style is unavailable in this server mode; the original model is selected.');
+        }
+        updateLoRA(false);
+        clearPhoto();
+        if (mode === 'reference') {
+          $('reference').value = item.file_path; referenceDimensions = [item.width, item.height].every(n => Number.isFinite(n) && n > 0) ? [item.width, item.height] : null;
+          $('reference-preview').src = url.href; $('reference-name').textContent = 'Saved gallery image';
+          $('reference-info').textContent = (item.size || 'PNG') + ' · ready for a variation';
+          $('reference-card').hidden = false; $('reference-options').hidden = false; $('choose-photo').textContent = 'Change photo'; $('strength').value = '0.6';
+          if (Number($('steps').value) < 2) $('steps').value = '9';
+          updateReferenceSizing(); selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
+        } else if (typeof metadata.reference_image === 'string' && metadata.reference_image) {
+          $('reference').value = metadata.reference_image; $('reference-options').hidden = false;
+          if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
+          warnings.push('This generation used a reference file; it must still exist at the saved path.');
+        }
+        updateReferenceSizing();
+        $('seed').closest('details').open = true;
+        $('import-note').textContent = (mode === 'reference' ? 'Gallery image selected. Describe the variation you want, then generate.' : 'Saved prompt and settings loaded. Review them before generating.') + (warnings.length ? ' ' + warnings.join(' ') : '');
+        $('import-note').hidden = false; $('announcement').textContent = $('import-note').textContent;
+        params.delete('generation'); params.delete('mode'); history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''));
+        $('prompt').focus();
+      } catch (error) { showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
+    }
+    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth()]); await importSavedImage(); }
+    initialize(); setInterval(checkHealth, 15000);
   </script>
 </body>
 </html>
