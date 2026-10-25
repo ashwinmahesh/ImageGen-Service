@@ -7,15 +7,18 @@ from storage_paths import require_storage
 import shutil
 import struct
 import tempfile
+from config import PROFILE, API_MODEL
 from lora_catalog import LORA_DIR, catalog
 
 
 def install(source, identifier):
     source = Path(source).expanduser().resolve()
-    entries = catalog()
+    # Keep other model entries in the shared local catalog when updating one adapter.
+    local=LORA_DIR/'catalog.json'
+    entries=json.loads(local.read_text()) if local.is_file() else catalog()
     require_storage(LORA_DIR)
     LORA_DIR.mkdir(parents=True, exist_ok=True)
-    entry = next((item for item in entries if item["id"] == identifier), None)
+    entry = next((item for item in entries if item["id"] == identifier and API_MODEL in item["models"]), None)
     if entry is None:
         raise ValueError("Unknown adapter ID; add a compatible entry to lora-catalog.json or loras/catalog.json first")
     # Parse the data-only format, rejecting an incorrect variant before copying.
@@ -31,10 +34,13 @@ def install(source, identifier):
     ]}).lower()
     if not keys or not any("lora" in key for key in keys):
         raise ValueError("This file does not contain LoRA tensors")
-    if any(word in metadata for word in ["chroma", "illustrious", "sdxl", "flux"]):
-        raise ValueError("Wrong model family: import the Z-Image Turbo version")
-    if not any("layers." in key and ".attention." in key for key in keys):
-        raise ValueError("Unrecognized Z-Image transformer adapter tensors")
+    if PROFILE['backend']=='mflux':
+        if any(word in metadata for word in ['chroma','illustrious','sdxl','flux']):
+            raise ValueError('Wrong model family: import the Z-Image Turbo version')
+        if not any('layers.' in key and '.attention.' in key for key in keys):
+            raise ValueError('Unrecognized Z-Image transformer adapter tensors')
+    elif any(word in metadata for word in ['zimage','z_image','illustrious','sdxl']) or not any('double_blocks' in key or 'single_blocks' in key or 'transformer_blocks' in key for key in keys):
+        raise ValueError('Unrecognized Chroma transformer adapter tensors')
     destination = LORA_DIR / entry["filename"]
     if source != destination.resolve():
         with tempfile.NamedTemporaryFile(dir=LORA_DIR, suffix=".partial", delete=False) as stream:

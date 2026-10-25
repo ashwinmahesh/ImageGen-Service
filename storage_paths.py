@@ -5,8 +5,10 @@ import os
 import sys
 from pathlib import Path
 import tempfile
+from model_profiles import PROFILES
 
-DATA_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs')
+DATA_FOLDERS = tuple(PROFILES)
+MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs')
 
 
 def _absolute(value):
@@ -27,7 +29,7 @@ def data_directory(project, *, use_environment=True):
         except (ValueError, KeyError, TypeError) as error:
             raise ValueError('Invalid storage.json; choose storage again with make storage DATA_DIR=/absolute/path') from error
     # Reuse an existing model link on this Mac without requiring a manifest.
-    weights = project / 'weights'
+    weights = project / DATA_FOLDERS[0]
     return weights.resolve().parent if weights.is_symlink() else project
 
 
@@ -62,6 +64,8 @@ def configure_storage(project, directory=None):
     for name in DATA_FOLDERS:
         target, link = data / name, project / name
         target.mkdir(exist_ok=True)
+        for folder in MODEL_FOLDERS:
+            (target/folder).mkdir(exist_ok=True)
         if data != project and not link.is_symlink():
             if link.exists():
                 link.rmdir()  # Preflight verified this directory is empty.
@@ -84,13 +88,13 @@ def configure_storage(project, directory=None):
 
 def setup_storage(project, directory=None, *, interactive=None, prompt=input):
     project = Path(project).resolve()
-    configured = (project / 'storage.json').is_file() or (project / 'weights').is_symlink()
+    configured = (project / 'storage.json').is_file() or (project / DATA_FOLDERS[0]).is_symlink()
     if interactive is None:
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE') != '1'
     if directory is None and 'DATA_DIR' not in os.environ and not configured and interactive:
         print('Choose where models and generated data will be stored.')
         print(f'Leave blank to use this project: {project}')
-        answer = prompt('Model/data folder: ').strip()
+        answer = prompt('Model store folder (one subfolder per model): ').strip()
         directory = answer.strip('"').strip("'") if answer else str(project)
     return configure_storage(project, directory)
 

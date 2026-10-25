@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Z-Image — Local studio</title>
+  <title>Image Studio — Local models</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ddedb0'/%3E%3Cpath d='M9 10h14L9 22h14' stroke='%231d2515' stroke-width='3' fill='none'/%3E%3C/svg%3E">
   <style>
     :root{color-scheme:dark;--bg:#151716;--panel:#1e211f;--line:#353a35;--muted:#a4aea3;--text:#eef1e9;--accent:#ddedb0}
@@ -26,14 +26,14 @@
   </style>
 </head>
 <body>
-  <header><div class="brand"><span class="mark" aria-hidden="true">Z</span><div><strong>Z-Image Turbo</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
+  <header><div class="brand"><span class="mark" aria-hidden="true">I</span><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
     <div class="workspace">
       <form class="controls" id="form">
         <div class="label-row"><label for="prompt">Your prompt</label><button type="button" id="example">Try an example ↗</button></div>
         <textarea id="prompt" required maxlength="4000" placeholder="Describe the subject, setting, light, and style you have in mind…"></textarea>
-        <p class="hint">Put key details first. Only the first 512 tokens are processed; longer prompts are truncated.</p>
+        <p class="hint" id="prompt-hint">Loading model settings…</p>
         <p class="hint" id="base-only-mode" hidden>Base model only · LoRAs disabled for this server.</p>
         <div class="field" id="lora-section">
           <label for="lora">Style LoRA</label>
@@ -51,7 +51,7 @@
           <div id="reference-options" class="reference-options" hidden><label for="strength">Keep the original</label><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
         <div class="field"><label id="size-label" for="size">Image size</label><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
-        <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint">9 steps is a good default. Reuse a seed to explore variations of the same idea.</p></details>
+        <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint" id="steps-hint">Reuse a seed to explore variations of the same idea.</p></details>
         <details><summary>Image tags</summary><div class="field"><label for="tags">Tags <span class="optional">(optional)</span></label><input id="tags" type="text" maxlength="2110" placeholder="gothic, village, campaign"><p class="hint">Separate tags with commas. Search or edit them later in the gallery.</p></div></details>
         <details><summary>Save location</summary>
           <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: selected data folder" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
@@ -75,6 +75,7 @@
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
+    let activeModel = null, defaultSteps = 9, maxSteps = 12;
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
@@ -165,6 +166,17 @@
         const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
         if (!response.ok) throw new Error('Unavailable');
         const data = await response.json();
+        const changed = activeModel && activeModel !== data.model;
+        const cap = data.capabilities;
+        if (!cap || typeof cap.default_steps !== 'number') throw new Error('Missing model capabilities');
+        if (activeModel !== data.model) {
+          activeModel = data.model; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
+          $('model-name').textContent = cap.name; document.title = cap.name + ' — Image Studio';
+          $('steps').value = defaultSteps; $('steps').max = maxSteps;
+          $('steps-hint').textContent = `${defaultSteps} steps is the default for ${cap.name}. Reuse a seed to explore variations.`;
+          $('prompt-hint').textContent = 'Put key details first. ' + cap.prompt_note;
+          if (changed) { lastResult = null; $('lora').value = ''; await loadLoRAs(); showError('The server model changed. Review your settings before generating.'); }
+        }
         if (!lastResult && typeof data.data_dir === 'string') { const folder = data.data_dir.replace(/\/$/, '') + '/images'; $('saved-path').textContent = folder; $('output-dir').placeholder = 'Default: ' + folder; }
         if (typeof data.loras_enabled === 'boolean' && data.loras_enabled !== lorasEnabled) {
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
@@ -199,7 +211,7 @@
       event.preventDefault(); if (generating || !ready || serverBusy) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
-      const payload = {model: 'z-image-turbo', prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url'};
+      const payload = {model: activeModel, prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url'};
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
       if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
@@ -240,7 +252,7 @@
         const actualSize = item.size || `${preloaded.naturalWidth}x${preloaded.naturalHeight}`;
         lastResult = {file_path: item.file_path, url: url.href, prompt, size: actualSize, lora: payload.lora || '', lora_strength: payload.lora_strength};
         $('result-info').textContent = `${actualSize.replace('x', ' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
-        $('download').href = url.href; $('download').download = `z-image-turbo-${lastSeed}.png`; $('actions').hidden = false;
+        $('download').href = url.href; $('download').download = `${activeModel}-${lastSeed}.png`; $('actions').hidden = false;
         $('saved-path').textContent = item.file_path;
         $('announcement').textContent = 'Your image is ready and saved to your selected folder.';
       } catch (error) {
@@ -271,14 +283,16 @@
         const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
+        const sameModel = !item.model || item.model === activeModel;
+        if (!sameModel) warnings.push(`This image used ${item.model}; the server currently runs ${activeModel}. Model-specific settings use current defaults.`);
         const url = new URL(item.url, location.origin);
         if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
         $('prompt').value = item.prompt || ''; $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
-        if (Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= 12) $('steps').value = item.steps;
+        if (sameModel && Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= maxSteps) $('steps').value = item.steps;
         if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
         $('lora').value = '';
-        if (item.lora) {
+        if (sameModel && item.lora) {
           const adapter = loraCatalog.find(entry => entry.id === item.lora.id && entry.available);
           if (lorasEnabled && adapter) { $('lora').value = adapter.id; if (Number.isFinite(item.lora.strength)) $('lora-strength').value = item.lora.strength; }
           else warnings.push('The saved style is unavailable in this server mode; the original model is selected.');
@@ -290,7 +304,7 @@
           $('reference-preview').src = url.href; $('reference-name').textContent = 'Saved gallery image';
           $('reference-info').textContent = (item.size || 'PNG') + ' · ready for a variation';
           $('reference-card').hidden = false; $('reference-options').hidden = false; $('choose-photo').textContent = 'Change photo'; $('strength').value = '0.6';
-          if (Number($('steps').value) < 2) $('steps').value = '9';
+          if (Number($('steps').value) < 2) $('steps').value = String(defaultSteps);
           updateReferenceSizing(); selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
         } else if (typeof metadata.reference_image === 'string' && metadata.reference_image) {
           $('reference').value = metadata.reference_image; $('reference-options').hidden = false;

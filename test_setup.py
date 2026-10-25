@@ -25,12 +25,16 @@ class SetupTest(unittest.TestCase):
 
     def test_make_setup_creates_environment_then_downloads_and_can_repeat(self):
         shutil.copyfile(ROOT / 'Makefile', self.root / 'Makefile')
+        for name in ['setup.py','model_profiles.py']:
+            shutil.copyfile(ROOT/name,self.root/name)
         log = self.root / 'calls.jsonl'
         fake = self.root / 'bootstrap'
         fake.write_text(f'''#!{sys.executable}
-import json, os, pathlib, sys
+import json, os, pathlib, sys, runpy
 with open(os.environ['SETUP_TEST_LOG'], 'a') as stream:
     stream.write(json.dumps(sys.argv[1:]) + '\\n')
+if sys.argv[1:2] == ['setup.py']:
+    runpy.run_path('setup.py',run_name='__main__')
 if sys.argv[1:3] == ['-m', 'venv']:
     python = pathlib.Path(sys.argv[3]) / 'bin/python'
     python.parent.mkdir(parents=True)
@@ -42,16 +46,16 @@ if sys.argv[1:3] == ['-m', 'venv']:
         env = {**os.environ, 'SETUP_TEST_LOG': str(log)}
         subprocess.run(command, cwd=self.root, env=env, capture_output=True, check=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(calls[0], ['storage_paths.py'])
-        calls = [call for call in calls if call != ['storage_paths.py']]
+        self.assertEqual(calls[0], ['setup.py'])
+        calls = [call for call in calls if call not in [['storage_paths.py'],['setup.py']]]
         self.assertEqual(calls[0][:2], ['-m', 'venv'])
         self.assertEqual(calls[1][:3], ['-m', 'pip', 'install'])
         self.assertEqual(calls[2], ['download.py'])
         log.write_text('')
         subprocess.run(command + ['WITH_REALISM=1'], cwd=self.root, env=env, capture_output=True, check=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(calls[0], ['storage_paths.py'])
-        calls = [call for call in calls if call != ['storage_paths.py']]
+        self.assertEqual(calls[0], ['setup.py'])
+        calls = [call for call in calls if call not in [['storage_paths.py'],['setup.py']]]
         self.assertEqual(calls[0][:3], ['-m', 'pip', 'install'])
         self.assertEqual(calls[1:], [['download.py'], ['download_loras.py', '--id', 'realism']])
 

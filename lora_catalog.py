@@ -3,9 +3,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from config import API_MODEL, PROJECT_ROOT as ROOT, ROOT as DATA_ROOT
+from config import API_MODEL, PROJECT_ROOT as ROOT, ROOT as DATA_ROOT, SHARED_ROOT, PROFILE
 
-LORA_DIR = DATA_ROOT / "loras"
+LORA_DIR = (SHARED_ROOT if PROFILE["backend"] == "sd-cpp" else DATA_ROOT) / "loras"
 _verified = {}
 
 
@@ -46,7 +46,7 @@ def resolve_lora(identifier, strength=None):
         raise ValueError("Unknown LoRA for this model; see GET /v1/loras")
     path = adapter_path(entry)
     if not path.is_file() or not entry.get("sha256"):
-        raise ValueError("LoRA is not installed. Import its Z-Image .safetensors file with make install-lora FILE=/absolute/path")
+        raise ValueError("LoRA is not installed. Import a compatible .safetensors file with make install-lora FILE=/absolute/path")
     stat = path.stat()
     key = (str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, entry["sha256"])
     if key not in _verified:

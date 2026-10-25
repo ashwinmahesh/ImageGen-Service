@@ -46,13 +46,13 @@ class ServingModeTest(unittest.TestCase):
 class LauncherModeTest(unittest.TestCase):
     def run_launcher(self, args, state=None):
         patches=[patch.object(sys,'argv',['launch.py',*args]), patch.object(launch.os,'chdir'),
-                 patch.object(launch.os,'execv'),patch.object(launch.os,'kill')]
+                 patch.object(launch.os,'execv'),patch.object(launch.os,'kill'),patch.object(launch,'check_assets')]
         if state is None:
             patches.append(patch.object(launch,'port_free',return_value=True))
         else:
             patches.extend([patch.object(launch,'port_free',side_effect=[False,True]),
                 patch.object(launch.urllib.request,'urlopen',return_value=io.BytesIO(json.dumps(state).encode())),
-                patch.object(launch.subprocess,'check_output',side_effect=['1234\n',f'n{launch.ROOT}\n'])])
+                patch.object(launch.subprocess,'check_output',side_effect=['1234\n',f'n{launch.ROOT}\n','python server.py'])])
         with contextlib.ExitStack() as stack:
             mocks=[stack.enter_context(item) for item in patches]
             with contextlib.redirect_stdout(io.StringIO()):

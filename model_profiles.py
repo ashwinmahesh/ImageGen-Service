@@ -1,0 +1,49 @@
+"""Pinned model identities and capabilities; no heavyweight imports."""
+import os
+import sys
+
+PROFILES = {
+    'z-image-turbo': dict(name='Z-Image Turbo', backend='mflux', steps=9, max_steps=12,
+        repository='filipstrand/Z-Image-Turbo-mflux-4bit', revision='b3a8f31115a11f2f9e2fa0bfbc8d78dcc3e6568b',
+        prompt_note='Only the first 512 tokens including chat formatting are processed; excess text is truncated.'),
+    'chroma1-hd': dict(name='Chroma1-HD', backend='sd-cpp', steps=40, max_steps=80,
+        repository='silveroxides/Chroma1-HD-GGUF', revision='d3b77bf4eb5b84c0b50e9a1e83f6e8074ed85f82',
+        filename='Chroma1-HD-Q4_K_M.gguf', sha256='086f561e371d442b82b2c3689149da75046754c62a35293932cda397fc2bf9d2',
+        sampling=['--cfg-scale','3','--sampling-method','euler'],
+        applied=dict(cfg_scale=3.0, sampler='euler'), prompt_note='Prompts are encoded by the bundled T5 text encoder.'),
+    'chroma1-flash': dict(name='Chroma1-Flash', backend='sd-cpp', steps=8, max_steps=40,
+        repository='silveroxides/Chroma1-Flash-GGUF', revision='b0a50e822dbd7ade978a76808a395cfb60c8f66f',
+        filename='Chroma1-HD-Flash-Q4_K_M.gguf', sha256='59b7ecbc09e8ebe6b260b01da93c9edf465289ef8650e510a637b58a144eaa49',
+        sampling=['--cfg-scale','1','--sampling-method','heun','--scheduler','beta',
+                  '--extra-sample-args','alpha=0.6,beta=0.6','--flow-shift','1'],
+        applied=dict(cfg_scale=1.0, sampler='heun', scheduler='beta', flow_shift=1.0),
+        prompt_note='Prompts are encoded by the bundled T5 text encoder.'),
+}
+DEFAULT_MODEL='z-image-turbo'
+SHARED_ASSETS=[
+    ('city96/t5-v1_1-xxl-encoder-gguf','005a6ea51a7d0b84d677b3e633bb52a8c85a83d9',
+     't5-v1_1-xxl-encoder-Q4_K_M.gguf','6be2b0b7e2de7cf2919340c88cb802a103a997ce46c53131cec91958c1db1af4'),
+    ('lodestones/Chroma1-HD','0e0c60ece1e82b17cb7f77342d765ba5024c40c0',
+     'vae/diffusion_pytorch_model.safetensors','f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3'),
+]
+RUNTIME_RELEASE='master-1005-ea209db'
+RUNTIME_URL='https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1005-ea209db/sd-master-ea209db-bin-Darwin-macOS-26.6.2-arm64.zip'
+RUNTIME_SHA256='d183e8d87a1d1b26f376ff68f4d15f3322648805687cb01c25a97c9ac5acdc50'
+
+
+def select_model(explicit=None, *, interactive=None, prompt=input):
+    selected=explicit or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
+    if interactive is None:
+        interactive=sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE') != '1'
+    if not selected and interactive:
+        print('Choose an image model:')
+        for index,(identifier,profile) in enumerate(PROFILES.items(),1):
+            print(f"  {index}. {profile['name']} ({identifier})")
+        answer=prompt('Model [1 / Z-Image Turbo]: ').strip()
+        selected=dict(enumerate(PROFILES,1)).get(int(answer)) if answer.isdigit() else answer
+        if answer and not selected:
+            raise ValueError('Choose a listed model number or ID')
+    selected=selected or DEFAULT_MODEL
+    if selected not in PROFILES:
+        raise ValueError('Unknown model; choose '+', '.join(PROFILES))
+    return selected

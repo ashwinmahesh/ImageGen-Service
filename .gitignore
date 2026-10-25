@@ -84,3 +84,8 @@ storage.json
 /loras
 /image-index
 /.venv
+
+# Per-model data roots (folders or external links)
+/z-image-turbo
+/chroma1-hd
+/chroma1-flash

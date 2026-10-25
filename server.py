@@ -15,7 +15,16 @@ import time
 import uuid
 from typing import Literal
 
-from config import API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
+# Direct CLI startup must choose the model before importing configuration.
+if __name__ == '__main__':
+    pre=argparse.ArgumentParser(add_help=False)
+    pre.add_argument('--model')
+    selected,_=pre.parse_known_args()
+    if selected.model:
+        os.environ['IMAGE_MODEL']=selected.model
+
+from model_profiles import PROFILES
+from config import PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
@@ -30,8 +39,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-log = logging.getLogger("z-image-turbo")
-executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
+log = logging.getLogger("image-model-server")
+executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="image-inference")
 busy = threading.Lock()
 model = None
 
@@ -40,15 +49,17 @@ def load_model():
     global model
     require_storage(ROOT)
     if not (MODEL_DIR / "download.json").exists():
-        raise RuntimeError("Model is missing or incomplete. Run `make download` first.")
-    import mlx.core as mx
-    from engine import ZImageEngine
-    if not mx.metal.is_available():
-        raise RuntimeError("Apple Metal GPU is unavailable in this process.")
-    # Bound cached allocations while leaving room for macOS and other applications.
-    mx.set_cache_limit(2 * 1024**3)
-    log.info("Loading 4-bit Z-Image Turbo from %s", MODEL_DIR)
-    model = ZImageEngine()
+        raise RuntimeError(f"Model is missing or incomplete. Run `make download MODEL={API_MODEL}` first.")
+    if PROFILE['backend']=='mflux':
+        import mlx.core as mx
+        from engine import ZImageEngine
+        if not mx.metal.is_available():
+            raise RuntimeError('Apple Metal GPU is unavailable in this process.')
+        mx.set_cache_limit(2 * 1024**3)
+        model=ZImageEngine()
+    else:
+        from chroma_engine import ChromaEngine
+        model=ChromaEngine()
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     log.info("Model ready")
 
@@ -61,7 +72,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="Local Z-Image Turbo", version="1.9.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.0.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -78,12 +89,20 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1
 
 class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: Literal["z-image-turbo"] = "z-image-turbo"
-    prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. The installed MFLUX tokenizer processes only 512 tokens including chat formatting; excess text is truncated. Put essential details first.")
+    model: Literal['z-image-turbo','chroma1-hd','chroma1-flash'] = API_MODEL
+
+    @field_validator('model')
+    @classmethod
+    def validate_model(cls,value):
+        if value != API_MODEL:
+            raise ValueError(f'This server runs {API_MODEL}; restart with make serve MODEL={value} to switch')
+        return value
+
+    prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     n: Literal[1] = 1
-    steps: int = Field(default=9, ge=1, le=12, strict=True, description="Sampling steps. 9 is recommended.")
+    steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned.")
     response_format: Literal["b64_json", "url"] = "b64_json"
     lora: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Optional installed adapter ID from GET /v1/loras. Requires /health loras_enabled=true; base-only servers reject non-null adapters. Omit or use null for no LoRA. One adapter per request; model families are not interchangeable.", examples=["realism"])
@@ -93,7 +112,7 @@ class GenerateRequest(BaseModel):
         description=("Directory on the server's Mac in which to save the PNG and JSON metadata. "
                      "Must be absolute (~/ is supported). Missing directories are created if writable. "
                      "Filenames are generated uniquely; existing images are not overwritten."),
-        examples=[str(IMAGE_DIR), "/Volumes/ASH-SSD/my-project/images"],
+        examples=[str(IMAGE_DIR), "/absolute/path/to/my-project/images"],
     )
     reference_image: str | None = Field(
         default=None, max_length=4096,
@@ -245,7 +264,7 @@ async def upload_reference(request: Request):
 def reference_photo(identifier: str):
     if len(identifier) != 32 or any(c not in "0123456789abcdef" for c in identifier):
         raise HTTPException(404)
-    path = ROOT / "references" / f"{identifier}.png"
+    path = next((folder/"references"/f"{identifier}.png" for folder in catalog_roots().values() if (folder/"references"/f"{identifier}.png").is_file()), ROOT/"references"/f"{identifier}.png")
     if not path.is_file():
         raise HTTPException(404)
     return FileResponse(path, media_type="image/png")
@@ -271,7 +290,6 @@ def generate_with_geometry(payload, geometry):
         selection = resolve_lora(payload.lora, payload.lora_strength) if app.state.loras_enabled else None
     except (ValueError, OSError) as exc:
         raise LocalFileError(str(exc)) from exc
-    import mlx.core as mx
     seed = payload.seed if payload.seed is not None else secrets.randbelow(2**32)
     width, height = geometry.model_size
     output_width, output_height = geometry.output_size
@@ -287,12 +305,15 @@ def generate_with_geometry(payload, geometry):
         raise LocalFileError(f"Cannot write to output_dir {output_dir}: {exc.strerror}") from exc
     started = time.monotonic()
     try:
-        tiled = max(width, height) > 1024
-        if tiled:
-            from mflux.models.common.vae.tiling_config import TilingConfig
-            model.tiling_config = TilingConfig()
+        tiled = PROFILE['backend']=='sd-cpp' or max(width,height)>1024
+        if PROFILE['backend']=='mflux':
+            if tiled:
+                from mflux.models.common.vae.tiling_config import TilingConfig
+                model.tiling_config=TilingConfig()
+            else:
+                model.tiling_config=None
         else:
-            model.tiling_config = None
+            model.active_log=ROOT/'logs'/(identifier+'.log')
         result = model.generate_image(
             seed=seed, prompt=payload.prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
@@ -303,6 +324,7 @@ def generate_with_geometry(payload, geometry):
         geometry.finish(path)
         elapsed = round(time.monotonic() - started, 2)
         metadata = {
+            "backend": PROFILE["backend"], **PROFILE.get("applied", {}),
             "model": API_MODEL, "source": MODEL_ID, "revision": MODEL_REVISION,
             "created": int(time.time()), "tags": payload.tags,
             "prompt": payload.prompt, "seed": seed, "size": f"{output_width}x{output_height}",
@@ -325,7 +347,11 @@ def generate_with_geometry(payload, geometry):
             path.unlink()
         raise
     finally:
-        mx.clear_cache()
+        if PROFILE['backend']=='mflux':
+            import mlx.core as mx
+            mx.clear_cache()
+        else:
+            model.active_log=None
 
 
 @app.get("/", include_in_schema=False)
@@ -335,7 +361,18 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled}
+    state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
+    if state['busy'] and hasattr(model,'progress'):
+        state['progress']=model.progress()
+    return state
+
+
+def capabilities():
+    return {'model':API_MODEL,'name':PROFILE['name'],'backend':PROFILE['backend'],
+            'default_steps':PROFILE['steps'],'max_steps':PROFILE['max_steps'],
+            'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
+            'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
+            'loras_enabled':app.state.loras_enabled}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -346,7 +383,11 @@ def loras():
 
 @app.get("/v1/models")
 def models():
-    return {"object": "list", "data": [{"id": API_MODEL, "object": "model", "owned_by": "local"}]}
+    return {'object':'list','active_model':API_MODEL,'data':[
+        {'id':identifier,'object':'model','owned_by':'local','name':profile['name'],
+         'active':identifier==API_MODEL,'downloaded':(MODEL_ROOTS[identifier]/'weights'/'download.json').is_file(),
+         'default_steps':profile['steps'],'max_steps':profile['max_steps']}
+        for identifier,profile in PROFILES.items()]}
 
 
 @app.post(
@@ -382,10 +423,28 @@ async def generations(payload: GenerateRequest, request: Request):
     return {"created": int(time.time()), "data": [item], "generation_seconds": metadata["seconds"]}
 
 
+def catalog_roots():
+    # ROOT may be redirected by embedding/tests; do not scan unrelated real data then.
+    if ROOT != MODEL_ROOTS[API_MODEL]:
+        return {API_MODEL:ROOT}
+    return MODEL_ROOTS
+
+
+def image_location(identifier):
+    for identifier_model,folder in catalog_roots().items():
+        images=IMAGE_DIR if folder==ROOT else folder/'images'
+        try:
+            path=image_catalog.resolve_image(folder,images,identifier)
+            return folder,images,path
+        except (OSError,ValueError):
+            continue
+    raise FileNotFoundError('Saved image is unavailable')
+
+
 @app.get("/images/{identifier}.png", name="image")
 def image(identifier: str):
     try:
-        path = image_catalog.resolve_image(ROOT, IMAGE_DIR, identifier)
+        _, _, path = image_location(identifier)
     except (OSError, ValueError):
         raise HTTPException(404, "Saved image is unavailable") from None
     return FileResponse(path, media_type="image/png")
@@ -451,10 +510,22 @@ def saved_images(request: Request, response: Response,
                  sort: Literal["newest", "oldest"] = "newest",
                  tag: list[str] | None = Query(default=None, max_length=32, description="Optional exact tag filters; repeat tag to require all labels. Combined with q.")):
     try:
-        records, total = image_catalog.list_images(ROOT, IMAGE_DIR, q, sort, limit, offset, tag)
+        records=[]
+        require_storage(ROOT)
+        for origin,folder in catalog_roots().items():
+            if not folder.is_dir():
+                if folder==ROOT:
+                    raise OSError('Active storage is unavailable')
+                continue
+            images=IMAGE_DIR if folder==ROOT else folder/'images'
+            items,_=image_catalog.list_images(folder,images,q,sort,2**63-1,0,tag)
+            records.extend({**item,'model':item['model'] or origin} for item in items)
+        records.sort(key=lambda item:(item['created'],item['id']),reverse=sort=='newest')
+        total=len(records)
+        records=records[offset:offset+limit]
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
-    except OSError:
+    except (OSError, RuntimeError):
         raise HTTPException(503, "Cannot read the image library. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     next_offset = offset + len(records)
@@ -469,7 +540,8 @@ def saved_images(request: Request, response: Response,
          summary="Read a saved generation", description="Returns saved settings, actual file paths, and local preview/download URLs for a gallery image.")
 def saved_image(identifier: str, request: Request, response: Response):
     try:
-        record = image_catalog.image_record(ROOT, IMAGE_DIR, identifier)
+        folder,images,_=image_location(identifier)
+        record = image_catalog.image_record(folder,images,identifier)
     except (OSError, ValueError):
         raise HTTPException(404, "Saved image is unavailable") from None
     response.headers['Cache-Control'] = 'no-store'
@@ -491,7 +563,8 @@ class ImageTagsRequest(BaseModel):
            description="Stores editable tags atomically in the local image index. Original PNG and generation sidecar remain unchanged. Works for older default-folder images and indexed custom destinations. No inference is performed.")
 def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request, response: Response):
     try:
-        record = image_catalog.update_tags(ROOT, IMAGE_DIR, identifier, payload.tags)
+        folder,images,_=image_location(identifier)
+        record = image_catalog.update_tags(folder,images,identifier,payload.tags)
     except FileNotFoundError:
         raise HTTPException(404, "Saved image is unavailable") from None
     except (OSError, RuntimeError):
@@ -503,7 +576,8 @@ def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request,
 @app.get("/thumbnails/{identifier}.webp", name="image_thumbnail", include_in_schema=False)
 def image_thumbnail(identifier: str):
     try:
-        path = image_catalog.thumbnail(ROOT, IMAGE_DIR, identifier)
+        folder,images,_=image_location(identifier)
+        path = image_catalog.thumbnail(folder,images,identifier)
     except (OSError, ValueError):
         raise HTTPException(404, "Image preview is unavailable") from None
     return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
@@ -512,7 +586,8 @@ def image_thumbnail(identifier: str):
 @app.get("/images/{identifier}.json", name="image_metadata", include_in_schema=False)
 def image_metadata(identifier: str):
     try:
-        path = image_catalog.resolve_image(ROOT, IMAGE_DIR, identifier).with_suffix('.json')
+        _,_,original=image_location(identifier)
+        path=original.with_suffix('.json')
         if image_catalog.read_metadata(path) is None:
             raise FileNotFoundError()
     except (OSError, ValueError):
@@ -525,6 +600,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
+    parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
     args = parser.parse_args()
     app.state.loras_enabled = not args.no_loras
     if args.no_loras:
