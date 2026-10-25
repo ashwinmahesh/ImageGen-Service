@@ -19,7 +19,7 @@ class GalleryTest(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.images = self.root / 'images'
         self.images.mkdir()
-        self.patches = [patch.object(server, 'ROOT', self.root), patch.object(server, 'IMAGE_DIR', self.images)]
+        self.patches = [patch.object(server, 'PROJECT_ROOT', self.root), patch.object(server, 'ROOT', self.root), patch.object(server, 'IMAGE_DIR', self.images)]
         for item in self.patches:
             item.start()
         self.client = TestClient(server.app, base_url='http://127.0.0.1')

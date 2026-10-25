@@ -1,9 +1,11 @@
 """Download a pinned MLX 4-bit checkpoint directly to the SSD, without symlinks."""
 import json
+from storage_paths import require_storage
 from config import MODEL_DIR, MODEL_ID, MODEL_REVISION
 from huggingface_hub import snapshot_download
 
 if __name__ == "__main__":
+    require_storage(MODEL_DIR)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     snapshot_download(
         repo_id=MODEL_ID,

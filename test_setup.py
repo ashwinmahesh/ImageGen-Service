@@ -42,12 +42,16 @@ if sys.argv[1:3] == ['-m', 'venv']:
         env = {**os.environ, 'SETUP_TEST_LOG': str(log)}
         subprocess.run(command, cwd=self.root, env=env, capture_output=True, check=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(calls[0], ['storage_paths.py'])
+        calls = [call for call in calls if call != ['storage_paths.py']]
         self.assertEqual(calls[0][:2], ['-m', 'venv'])
         self.assertEqual(calls[1][:3], ['-m', 'pip', 'install'])
         self.assertEqual(calls[2], ['download.py'])
         log.write_text('')
         subprocess.run(command + ['WITH_REALISM=1'], cwd=self.root, env=env, capture_output=True, check=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(calls[0], ['storage_paths.py'])
+        calls = [call for call in calls if call != ['storage_paths.py']]
         self.assertEqual(calls[0][:3], ['-m', 'pip', 'install'])
         self.assertEqual(calls[1:], [['download.py'], ['download_loras.py', '--id', 'realism']])
 
@@ -83,7 +87,7 @@ if sys.argv[1:3] == ['-m', 'venv']:
         subprocess.run(['git', 'init', '-q', str(self.root)], capture_output=True, check=True)
         ignored = ['images/output.png', 'references/source.jpg', 'image-index/id.json',
                    'weights/transformer/weights.safetensors', 'loras/catalog.json',
-                   'cache/private.json', 'ui/future.PNG', 'nested/photo.JPEG', 'photo.heic',
+                   'cache/private.json', 'storage.json', 'weights', 'images', 'cache', 'ui/future.PNG', 'nested/photo.JPEG', 'photo.heic',
                    'nested/vector.svg', 'ui/._index.html', '__pycache__/server.pyc', '.env']
         result = subprocess.run(['git', 'check-ignore', '--stdin', '-z'], cwd=self.root,
                                 input='\0'.join(ignored)+'\0', capture_output=True, text=True, check=True)

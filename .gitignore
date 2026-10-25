@@ -66,3 +66,21 @@ dist/
 .Spotlight-V100/
 .Trashes/
 .fseventsd/
+
+# Local configuration and data-directory symlinks (never commit link destinations)
+storage.json
+/weights
+/images
+/outputs
+/voices
+/references
+/cache
+/logs
+/jobs
+/artifact-index
+/idempotency
+/extensions
+/runtime
+/loras
+/image-index
+/.venv

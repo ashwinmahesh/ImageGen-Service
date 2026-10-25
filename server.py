@@ -15,7 +15,8 @@ import time
 import uuid
 from typing import Literal
 
-from config import API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT
+from config import API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
+from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
 import image_catalog
@@ -37,6 +38,7 @@ model = None
 
 def load_model():
     global model
+    require_storage(ROOT)
     if not (MODEL_DIR / "download.json").exists():
         raise RuntimeError("Model is missing or incomplete. Run `make download` first.")
     import mlx.core as mx
@@ -59,7 +61,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="Local Z-Image Turbo", version="1.8.0", lifespan=lifespan,
+    title="Local Z-Image Turbo", version="1.9.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -190,6 +192,10 @@ class ReferenceResult(BaseModel):
 
 
 def save_reference(data: bytes):
+    try:
+        require_storage(ROOT)
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
     from PIL import Image, ImageOps, UnidentifiedImageError
     try:
         with Image.open(io.BytesIO(data)) as source:
@@ -246,6 +252,11 @@ def reference_photo(identifier: str):
 
 
 def generate(payload):
+    try:
+        require_storage(ROOT)
+        require_storage(payload.output_dir)
+    except RuntimeError as error:
+        raise LocalFileError(str(error)) from error
     try:
         with prepare_geometry(payload.reference_image, payload.size, ROOT / "cache" / "scratch") as geometry:
             return generate_with_geometry(payload, geometry)
@@ -319,12 +330,12 @@ def generate_with_geometry(payload, geometry):
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse(ROOT / "ui" / "index.html", media_type="text/html", headers={"Cache-Control": "no-store"})
+    return FileResponse(PROJECT_ROOT / "ui" / "index.html", media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")
 def health():
-    return {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "loras_enabled": app.state.loras_enabled}
+    return {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -427,7 +438,7 @@ def catalog_urls(record, request):
 
 @app.get("/gallery", include_in_schema=False)
 def gallery():
-    return FileResponse(ROOT / "ui" / "gallery.html", media_type="text/html", headers={"Cache-Control": "no-store"})
+    return FileResponse(PROJECT_ROOT / "ui" / "gallery.html", media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
@@ -483,7 +494,7 @@ def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request,
         record = image_catalog.update_tags(ROOT, IMAGE_DIR, identifier, payload.tags)
     except FileNotFoundError:
         raise HTTPException(404, "Saved image is unavailable") from None
-    except OSError:
+    except (OSError, RuntimeError):
         raise HTTPException(503, "Cannot save image tags. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     return catalog_urls(record, request)

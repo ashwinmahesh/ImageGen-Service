@@ -3,9 +3,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from config import API_MODEL, ROOT
+from config import API_MODEL, PROJECT_ROOT as ROOT, ROOT as DATA_ROOT
 
-LORA_DIR = ROOT / "loras"
+LORA_DIR = DATA_ROOT / "loras"
 _verified = {}
 
 

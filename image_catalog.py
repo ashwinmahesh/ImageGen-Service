@@ -10,6 +10,7 @@ import time
 import unicodedata
 
 from PIL import Image, ImageOps
+from storage_paths import require_storage
 
 IDENTIFIER = re.compile(r'[0-9a-f]{32}')
 MAX_METADATA_BYTES = 256 * 1024
@@ -87,6 +88,7 @@ def write_index(root, identifier, path, tags):
     if not valid_identifier(identifier):
         raise ValueError('Invalid image ID')
     folder = root / 'image-index'
+    require_storage(root)
     with _index_lock:
         folder.mkdir(parents=True, exist_ok=True)
         destination = folder / f'{identifier}.json'

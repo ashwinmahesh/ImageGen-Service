@@ -1,14 +1,18 @@
 .DEFAULT_GOAL := help
-VENV ?= $(HOME)/Documents/models/z-image-turbo/.venv
+VENV ?= $(CURDIR)/.venv
 PYTHON := $(VENV)/bin/python
 BOOTSTRAP_PYTHON ?= /opt/homebrew/bin/python3.14
 PORT ?= 8000
+DATA_DIR ?=
+ifneq ($(strip $(DATA_DIR)),)
+export DATA_DIR
+endif
 NO_LORAS ?= 0
 WITH_REALISM ?= 0
 SERVER_FLAGS := $(if $(filter 1,$(NO_LORAS)),--no-loras,)
 LORA_ID ?= realism
 
-.PHONY: help setup setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism
+.PHONY: storage help setup setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism
 help:
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
 	@echo 'make serve     Start the local API (Ctrl-C stops it)'
@@ -33,11 +37,14 @@ setup: setup-env
 	$(MAKE) download
 	$(if $(filter 1,$(WITH_REALISM)),$(MAKE) download-realism,@:)
 
-setup-env:
+storage:
+	"$(BOOTSTRAP_PYTHON)" storage_paths.py
+
+setup-env: storage
 	@test -x "$(PYTHON)" || $(BOOTSTRAP_PYTHON) -m venv "$(VENV)"
 	"$(PYTHON)" -m pip install --no-cache-dir -r requirements.lock.txt
 
-download:
+download: storage
 	"$(PYTHON)" download.py
 
 serve:

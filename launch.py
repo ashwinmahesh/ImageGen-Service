@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from config import ROOT, API_MODEL
+from config import PROJECT_ROOT as ROOT, API_MODEL
 
 
 def port_free(port):

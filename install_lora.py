@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from storage_paths import require_storage
 import shutil
 import struct
 import tempfile
@@ -12,6 +13,7 @@ from lora_catalog import LORA_DIR, catalog
 def install(source, identifier):
     source = Path(source).expanduser().resolve()
     entries = catalog()
+    require_storage(LORA_DIR)
     LORA_DIR.mkdir(parents=True, exist_ok=True)
     entry = next((item for item in entries if item["id"] == identifier), None)
     if entry is None:

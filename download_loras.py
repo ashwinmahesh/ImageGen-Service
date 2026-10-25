@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 from pathlib import Path
+from storage_paths import require_storage
 from huggingface_hub import hf_hub_download
 from lora_catalog import LORA_DIR, catalog
 
@@ -12,6 +13,7 @@ def main(identifier=None):
         entries = [entry for entry in entries if entry["id"] == identifier]
         if not entries:
             raise ValueError("Unknown shipped adapter ID; local serving presets are not downloadable here")
+    require_storage(LORA_DIR)
     LORA_DIR.mkdir(parents=True, exist_ok=True)
     for entry in entries:
         if not entry.get("repository"):
