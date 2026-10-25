@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
@@ -73,6 +74,12 @@ class LauncherModeTest(unittest.TestCase):
         execute,kill=self.run_launcher([], {'model':launch.API_MODEL,'busy':False,'loras_enabled':False})
         kill.assert_called_once()
         self.assertNotIn('--no-loras',execute.call_args.args[1])
+
+    def test_mode_switch_accepts_custom_checkout_folder(self):
+        with patch.object(launch, 'ROOT', Path('/tmp/custom-checkout-name')):
+            execute,kill=self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':False,'loras_enabled':True})
+            kill.assert_called_once()
+            self.assertIn('/tmp/custom-checkout-name/server.py',execute.call_args.args[1])
 
     def test_busy_mode_switch_is_refused_and_same_mode_reused(self):
         with self.assertRaisesRegex(SystemExit,'generating'):

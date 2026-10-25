@@ -46,7 +46,7 @@ def main():
             raise SystemExit('Cannot identify one existing image-server process; leaving it running.')
         pid=int(found[0])
         cwd=subprocess.check_output(['/usr/sbin/lsof','-a','-p',str(pid),'-d','cwd','-Fn'],text=True)
-        accepted={str(ROOT.parent/'z-image-turbo'),str(ROOT.parent/'chroma1-hd'),str(ROOT.parent/'chroma1-flash')}
+        accepted={str(ROOT),str(ROOT.parent/'z-image-turbo'),str(ROOT.parent/'chroma1-hd'),str(ROOT.parent/'chroma1-flash')}
         directories={line[1:] for line in cwd.splitlines() if line.startswith('n')}
         if not directories.intersection(accepted):
             raise SystemExit('The existing service is outside the managed image folders; leaving it running.')
