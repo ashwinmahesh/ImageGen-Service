@@ -47,14 +47,14 @@
           <button type="button" id="choose-photo" class="choose-photo">＋ Choose photo</button>
           <p class="hint">Use a photo as the starting point. PNG, JPEG or WebP, up to 20 MB. Processed locally on your Mac.</p>
           <div id="reference-card" class="reference-card" hidden><img id="reference-preview" alt="Selected reference photo"><div class="reference-description"><strong id="reference-name"></strong><small id="reference-info"></small></div><button id="remove-photo" class="remove-photo" type="button" aria-label="Remove reference photo">×</button></div>
-          <details class="reference-path"><summary>Or use a file path</summary><div class="field"><label for="reference">Reference photo path</label><input id="reference" type="text" placeholder="/Volumes/ASH-SSD/photos/reference.jpg" autocomplete="off"></div></details>
+          <details class="reference-path"><summary>Or use a file path</summary><div class="field"><label for="reference">Reference photo path</label><input id="reference" type="text" placeholder="/absolute/path/to/reference.jpg" autocomplete="off"></div></details>
           <div id="reference-options" class="reference-options" hidden><label for="strength">Keep the original</label><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
         <div class="field"><label id="size-label" for="size">Image size</label><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint">9 steps is a good default. Reuse a seed to explore variations of the same idea.</p></details>
         <details><summary>Image tags</summary><div class="field"><label for="tags">Tags <span class="optional">(optional)</span></label><input id="tags" type="text" maxlength="2110" placeholder="gothic, village, campaign"><p class="hint">Separate tags with commas. Search or edit them later in the gallery.</p></div></details>
         <details><summary>Save location</summary>
-          <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: images folder on your SSD" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
+          <div class="field"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input id="output-dir" type="text" placeholder="Default: selected data folder" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
         </details>
         <button class="generate" id="generate" type="submit" disabled><span id="button-text">Generate image</span><span aria-hidden="true">↗</span></button>
         <p class="shortcut">⌘ / Ctrl + Enter to generate</p>
@@ -67,12 +67,12 @@
           <img id="result" alt="" hidden>
           <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Keep this page open while your image is created.</p></div>
         </div>
-        <div class="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your SSD.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
+        <div class="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your selected folder.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
       </section>
     </div>
     <p id="announcement" role="status" aria-live="polite"></p>
   </main>
-  <footer><div>Saved to <code id="saved-path">/Volumes/ASH-SSD/models/z-image-turbo/images</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
+  <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
@@ -165,6 +165,7 @@
         const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
         if (!response.ok) throw new Error('Unavailable');
         const data = await response.json();
+        if (!lastResult && typeof data.data_dir === 'string') { const folder = data.data_dir.replace(/\/$/, '') + '/images'; $('saved-path').textContent = folder; $('output-dir').placeholder = 'Default: ' + folder; }
         if (typeof data.loras_enabled === 'boolean' && data.loras_enabled !== lorasEnabled) {
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
         }
@@ -241,7 +242,7 @@
         $('result-info').textContent = `${actualSize.replace('x', ' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
         $('download').href = url.href; $('download').download = `z-image-turbo-${lastSeed}.png`; $('actions').hidden = false;
         $('saved-path').textContent = item.file_path;
-        $('announcement').textContent = 'Your image is ready and saved to your SSD.';
+        $('announcement').textContent = 'Your image is ready and saved to your selected folder.';
       } catch (error) {
         $('error').textContent = error instanceof TypeError ? 'Could not reach the server. Check that it is running and the SSD is connected. If the connection dropped during generation, the image may still finish saving.' : error.message;
         $('error').hidden = false;
