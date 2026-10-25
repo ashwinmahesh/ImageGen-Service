@@ -37,17 +37,17 @@ Expect `status:ready`, `model:z-image-turbo`, and inspect `busy` and `loras_enab
 
 The default virtual environment is `~/Documents/models/z-image-turbo/.venv` on internal storage; this avoids symlink limitations on the exFAT SSD. Override it with `VENV=/absolute/internal/path/.venv` on **both** setup and serving commands. If Python is installed elsewhere, pass `BOOTSTRAP_PYTHON=/path/to/python3.14` to setup. `make setup-env` installs only Python dependencies, and `make download` runs only the base-model download after the environment exists.
 
-LoRA adapters are optional and are not needed for base-model generation:
+Setup downloads only the base model by default. **Realism is the only bundled optional adapter**:
 
 ```sh
-make setup WITH_LORAS=1  # Also fetch the pinned adapters
+make setup WITH_REALISM=1  # Also fetch the pinned Realism adapter
 # Or, after normal setup:
-make download-loras
+make download-realism
 # Serve with adapters disabled:
 make serve-no-loras
 ```
 
-The tracked `lora-catalog.json` contains only adapter names, source revisions and checksums. A fresh clone uses that catalog automatically; an existing local `loras/catalog.json` takes precedence. Downloaded adapter files and local catalog overrides are ignored by Git. The shell aliases below are conveniences on this Mac; `make serve` works without installing any alias.
+The tracked `lora-catalog.json` contains only the Realism preset, its source revision and checksum. The download scripts read this shipped catalog, never a personal `loras/catalog.json`. A local catalog may override the server’s available adapters, but its contents and downloaded files are ignored by Git and are not part of setup. `make download-loras` remains a compatibility command for downloading the shipped catalog (currently just Realism). The shell aliases below are conveniences on this Mac; `make serve` works without installing any alias.
 
 ## Setup recovery and completion checks
 
@@ -139,9 +139,9 @@ The Realism trigger word is added automatically. Write scene descriptions in `pr
 
 MFLUX applies the adapter without baking it into the quantized base weights. Changing the selected adapter, changing its strength, or selecting None releases the previous model and reloads clean weights, with at most one GPU model resident. Repeated requests with the same selection reuse the loaded model. This adds some time when switching and avoids residual effects from the previous adapter. Model reload time is included in `generation_seconds`.
 
-Files live in `<project>/loras/`; `lora-catalog.json` supplies the source defaults; a local `loras/catalog.json` overrides names and compatibility. Run `make download-loras` to download/resume the pinned catalogued adapters and verify their checksums. Already verified files are reused. Downloads occur separately from the offline server. To import another compatible adapter, add an entry to `lora-catalog.json` (or the local override) then run `make install-lora FILE=/absolute/path/to/adapter.safetensors LORA_ID=its-id`. Refresh the UI after catalog changes; a server restart is not needed.
+Files live in `<project>/loras/`; `lora-catalog.json` supplies the source defaults; a local `loras/catalog.json` overrides names and compatibility. Run `make download-realism` to download/resume the pinned Realism adapter and verify its checksum. Download commands use the shipped catalog only, even if a separate local server catalog exists. Already verified files are reused. Downloads occur separately from the offline server. To import another compatible adapter for personal use, add an entry to the ignored `loras/catalog.json` then run `make install-lora FILE=/absolute/path/to/adapter.safetensors LORA_ID=its-id`. Refresh the UI after catalog changes; a server restart is not needed.
 
-Installed adapter sources and pins:
+Optional Realism source and pin:
 
 - Realism: https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA , revision `8dc179cb56844d4ddc6e4527c30e98347eeae971`, `pytorch_lora_weights.safetensors` saved as `z-image-turbo-realism.safetensors`, 85,094,800 bytes. SHA256 `b38b074964f1f6564c22fee42125accd7a218a916966b5d0f0b2f63d4939c2f7`.
 

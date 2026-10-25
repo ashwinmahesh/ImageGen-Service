@@ -46,10 +46,10 @@ if sys.argv[1:3] == ['-m', 'venv']:
         self.assertEqual(calls[1][:3], ['-m', 'pip', 'install'])
         self.assertEqual(calls[2], ['download.py'])
         log.write_text('')
-        subprocess.run(command + ['WITH_LORAS=1'], cwd=self.root, env=env, capture_output=True, check=True)
+        subprocess.run(command + ['WITH_REALISM=1'], cwd=self.root, env=env, capture_output=True, check=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertEqual(calls[0][:3], ['-m', 'pip', 'install'])
-        self.assertEqual(calls[1:], [['download.py'], ['download_loras.py']])
+        self.assertEqual(calls[1:], [['download.py'], ['download_loras.py', '--id', 'realism']])
 
     def test_model_downloader_uses_pinned_hugging_face_snapshot(self):
         weights = self.root / 'weights'

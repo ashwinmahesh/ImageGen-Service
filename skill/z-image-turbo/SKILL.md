@@ -28,7 +28,7 @@ make test
 
 The default environment is `~/Documents/models/z-image-turbo/.venv` on internal storage. For another location, pass the same `VENV=/absolute/internal/path/.venv` to every Make command. An external exFAT volume can hold the checkout and weights, while the environment stays on internal storage. If needed, set `BOOTSTRAP_PYTHON=/path/to/python3.14` during setup. `make setup-env` installs only dependencies; `make download` downloads only the base model once the environment exists. Never fabricate `weights/download.json` to bypass an incomplete download.
 
-LoRAs are optional. If requested, use `make setup WITH_LORAS=1` or run `make download-loras` after setup. `lora-catalog.json` supplies tracked defaults; an ignored `loras/catalog.json` can override them. Images, reference photos, weights, adapters, caches, logs, and runtime records must stay ignored by Git; do not force-add them.
+Setup installs only the base model by default. Realism is the only shipped optional adapter: if requested, use `make setup WITH_REALISM=1` or `make download-realism` after setup. The downloader uses only the tracked `lora-catalog.json`; it never reads personal `loras/catalog.json` entries. Local catalog overrides affect serving only and are not included in Git or setup. Images, reference photos, weights, adapters, caches, logs, and runtime records must stay ignored by Git; do not force-add them.
 
 ## Start and verify
 

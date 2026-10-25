@@ -1,13 +1,19 @@
-"""Download only catalogued adapters at pinned revisions, verifying SHA256."""
+"""Download shipped public presets only; never inspect the local serving catalog."""
+import argparse
 import hashlib
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 from lora_catalog import LORA_DIR, catalog
 
 
-def main():
+def main(identifier=None):
+    entries = catalog(local=False)
+    if identifier is not None:
+        entries = [entry for entry in entries if entry["id"] == identifier]
+        if not entries:
+            raise ValueError("Unknown shipped adapter ID; local serving presets are not downloadable here")
     LORA_DIR.mkdir(parents=True, exist_ok=True)
-    for entry in catalog():
+    for entry in entries:
         if not entry.get("repository"):
             continue
         destination = LORA_DIR / entry["filename"]
@@ -29,4 +35,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--id", help="Download one ID from the shipped public catalog")
+    main(parser.parse_args().id)

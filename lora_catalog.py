@@ -9,8 +9,8 @@ LORA_DIR = ROOT / "loras"
 _verified = {}
 
 
-def catalog():
-    path = LORA_DIR / "catalog.json"
+def catalog(*, local=True):
+    path = LORA_DIR / "catalog.json" if local else ROOT / "lora-catalog.json"
     if not path.is_file():
         path = ROOT / "lora-catalog.json"
     if not path.is_file():
