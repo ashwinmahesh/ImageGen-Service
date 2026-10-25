@@ -43,7 +43,7 @@ def check_assets(selected):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--port',type=int,default=8000)
+    parser.add_argument('--port',type=int,default=5732)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
     parser.add_argument('--model', choices=PROFILES, help='Choose a backend; omitted in a terminal opens the model menu')
     args=parser.parse_args()
@@ -57,7 +57,7 @@ def main():
             with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health',timeout=5) as response:
                 state=json.load(response)
         except Exception:
-            raise SystemExit(f'Port {args.port} is in use by another service. Choose PORT=8001 or stop it first.')
+            raise SystemExit(f'Port {args.port} is in use by another service. Choose PORT=5733 or stop it first.')
         allowed={'z-image-turbo','chroma1-hd','chroma1-flash'}
         if state.get('model') not in allowed:
             raise SystemExit(f'Port {args.port} belongs to another service; leaving it running.')

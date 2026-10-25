@@ -47,7 +47,7 @@ make serve MODEL=chroma1-hd NO_LORAS=1
 make serve-no-loras MODEL=z-image-turbo
 ```
 
-Without a terminal, or with `NONINTERACTIVE=1`, an omitted model defaults to Z-Image Turbo. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=8001` changes the endpoint. Use `BOOTSTRAP_PYTHON=/absolute/path/to/python3.14` if `python3` resolves to another version. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
+Without a terminal, or with `NONINTERACTIVE=1`, an omitted model defaults to Z-Image Turbo. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=5733` changes the endpoint. Use `BOOTSTRAP_PYTHON=/absolute/path/to/python3.14` if `python3.14` is installed elsewhere. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
 
 ## Model storage
 
@@ -78,14 +78,18 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 `make serve` runs in the foreground; keep the terminal open. Ctrl-C stops it gracefully. AI tools should retain the terminal session and use another session for checks.
 
-- Webpage: <http://127.0.0.1:8000/>
-- All-model image gallery: <http://127.0.0.1:8000/gallery>
-- API docs and live schema: <http://127.0.0.1:8000/docs> and `/openapi.json`
+- Webpage: <http://127.0.0.1:5732/>
+- All-model image gallery: <http://127.0.0.1:5732/gallery>
+- API docs and live schema: <http://127.0.0.1:5732/docs> and `/openapi.json`
 - Readiness: `make health` or `GET /health`
+
+The default is **`http://127.0.0.1:5732/`**, also reachable as `http://localhost:5732/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. No hosts-file mapping or `http://imagegen` shortcut is installed.
 
 Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, model `capabilities`, and durable `queue` counts/state/database path. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
 
 To switch, stop the server and run `make serve` again, or run `make serve MODEL=...` in another terminal. The launcher reuses an identical instance or gracefully replaces a **verified managed idle** service. It refuses to interrupt generation or replace unrelated listeners. It never hot-swaps models inside an inference request. A request's `model`, if specified, must equal the active model; mismatches return 422. Serving never downloads models. If assets are missing, run `make setup MODEL=<id>` first.
+
+If the launcher finds the same model/mode already running from this checkout, it prints the URL and exits successfully; the original terminal still owns that server. A model switch leaves its waiting queue persisted until that model starts again. During initial model loading the HTTP listener may not yet be reachable; connection refusal can be normal until startup completes. Read logs if readiness never arrives.
 
 The original Mac's shortcuts `serve-images`, `serve-z-image-turbo`, `serve-chroma1-hd`, `serve-chroma1-flash` and the three `-no-loras` variants all use this one project. Other users can use Make directly without aliases.
 
@@ -99,12 +103,14 @@ The original Mac's shortcuts `serve-images`, `serve-z-image-turbo`, `serve-chrom
 
 Pinned Hugging Face sources and revisions are in `model_profiles.py`: [Z-Image Turbo](https://huggingface.co/filipstrand/Z-Image-Turbo-mflux-4bit), [Chroma1-HD](https://huggingface.co/silveroxides/Chroma1-HD-GGUF), [Chroma1-Flash](https://huggingface.co/silveroxides/Chroma1-Flash-GGUF), [shared T5 encoder](https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf), and [VAE](https://huggingface.co/lodestones/Chroma1-HD). Native runtime release, download URL and checksums are pinned there too. Download scripts resume Hugging Face transfers; Chroma files and the runtime archive are SHA256-verified before recording completion. See upstream cards/licenses for usage terms.
 
+Only request fields listed below are accepted. Negative prompts, guidance/CFG, custom samplers/schedulers, masks and instruction-editing controls are not exposed as request options; Chroma sampling values above are fixed by its backend profile. No model-specific API option namespace is implemented yet.
+
 Z-Image keeps a loaded instance; Chroma loads GPU weights per CLI generation and releases them afterward. Chroma can be substantially slower on this Mac. Native sampling progress, when available, appears in `/health` while busy. Resolution, reference preservation, and steps affect latency. Do not infer Mac performance from CUDA benchmarks.
 
 ## Generation API
 
 ```sh
-curl --fail-with-body http://127.0.0.1:8000/v1/images/generations \
+curl --fail-with-body http://127.0.0.1:5732/v1/images/generations \
   -H 'Content-Type: application/json' \
   -d '{"model":"z-image-turbo","prompt":"A fox in a snowy forest, soft morning light","size":"1024x1024","seed":42,"tags":["Wildlife","Winter"],"response_format":"url"}'
 ```
@@ -127,7 +133,7 @@ curl --fail-with-body http://127.0.0.1:8000/v1/images/generations \
 | `lora_strength` | 0–2; requires `lora`; omitted uses catalog default. |
 | `tags` | Up to 32 text labels, each 1–64 normalized characters; duplicates removed case-insensitively. No commas/control characters. |
 
-Unknown fields and invalid combinations return 422. Invalid input/adapter selections return 400; unavailable queue storage returns 503. The synchronous compatibility endpoint waits for its persisted job and returns the existing image response; backend failures surface there with the job error. Use a long timeout (e.g. 1800 seconds). **Disconnecting or timing out does not cancel a persisted job**. Prefer the asynchronous job API below for promptly returned IDs and polling, and reuse an `Idempotency-Key` after uncertain submissions. Both routes use the same queue worker; a busy worker accepts pending work without starting overlapping inference.
+Unknown fields and invalid combinations return 422. Invalid input/adapter selections return 400; unavailable queue storage/worker or admission storage failures return 503. Base-only mode rejects new adapter requests with 422. A saved failed job remains readable with HTTP 200 and `status:"failed"`; the synchronous generation endpoint instead returns its generation error status. The synchronous compatibility endpoint waits for its persisted job and returns the existing image response; backend failures surface there with the job error. Use a long timeout (e.g. 1800 seconds). **Disconnecting or timing out does not cancel a persisted job**. Prefer the asynchronous job API below for promptly returned IDs and polling, and reuse an `Idempotency-Key` after uncertain submissions. Both routes use the same queue worker; a busy worker accepts pending work without starting overlapping inference.
 
 Generation metadata records requested/effective dimensions, prompt, effective trigger prompt, active model/revision/backend, sampler settings, seed, steps, timing, reference path, adapter, initial tags, and output paths. The original file and generation record remain unchanged when tags are edited later.
 
@@ -139,25 +145,37 @@ The worker executes one image at a time. Ordinary jobs are FIFO. **`generate_imm
 
 ```sh
 # Persist an ordinary FIFO job and promptly receive its ID (HTTP 202).
-curl --fail-with-body http://127.0.0.1:8000/v1/jobs \
+curl --fail-with-body http://127.0.0.1:5732/v1/jobs \
   -H 'Content-Type: application/json' -H 'Idempotency-Key: my-first-image' \
   -d '{"prompt":"A fox beneath snowy pine trees","size":"512x512","response_format":"url","generate_immediately":false}'
 
 # Submit to the next immediate slot instead (same settings, distinct request key).
-curl --fail-with-body http://127.0.0.1:8000/v1/jobs \
+curl --fail-with-body http://127.0.0.1:5732/v1/jobs \
   -H 'Content-Type: application/json' -H 'Idempotency-Key: my-next-image' \
   -d '{"prompt":"A lantern in a misty forest","size":"512x512","response_format":"url","generate_immediately":true}'
 
-curl 'http://127.0.0.1:8000/v1/jobs?status=pending&limit=24&offset=0'
-curl 'http://127.0.0.1:8000/v1/jobs/<job-id>'
-curl --request DELETE 'http://127.0.0.1:8000/v1/jobs/<job-id>'
-curl --request DELETE 'http://127.0.0.1:8000/v1/jobs'
-curl --request POST 'http://127.0.0.1:8000/v1/jobs/<job-id>/retry'
-curl --request PATCH 'http://127.0.0.1:8000/v1/queue' \
+curl 'http://127.0.0.1:5732/v1/jobs?status=pending&limit=24&offset=0'
+curl 'http://127.0.0.1:5732/v1/jobs/<job-id>'
+curl --request DELETE 'http://127.0.0.1:5732/v1/jobs/<job-id>'
+curl --request DELETE 'http://127.0.0.1:5732/v1/jobs'
+curl --request POST 'http://127.0.0.1:5732/v1/jobs/<job-id>/retry'
+curl --request PATCH 'http://127.0.0.1:5732/v1/queue' \
   -H 'Content-Type: application/json' -d '{"paused":true}'
 ```
 
-A job response includes `id`, `model`, `status`, normalized `request`, `generate_immediately`, timestamps, `attempts`, optional `error`, and `result` when complete. Statuses are `queued`, `running`, `succeeded`, `failed`, `cancelled`. A 202 acknowledges the database commit, not image completion. Poll GET `/v1/jobs/{id}`; a successful `result` has the usual generation response with actual image/metadata paths and URL/base64 according to `response_format`. List responses omit result blobs and include `total`, `limit`, `offset`, `has_more`, `next_offset`, `has_previous`, `previous_offset`. `status=pending` selects waiting/running jobs; other statuses select that exact state. Omit status for history. Limit is 1–100 (default24); offset is nonnegative. Running comes first, waiting work follows execution order, then finished history newest first.
+The queue APIs operate on the startup-selected model only:
+
+| Method / path | Use |
+| --- | --- |
+| POST `/v1/jobs` | Persist a job; return 202 and an ID after the SQLite commit |
+| GET `/v1/jobs?status=pending&limit=24&offset=0` | List running/waiting jobs with pagination; omit status for history |
+| GET `/v1/jobs/{id}` | Read one job; completed jobs include `result` |
+| DELETE `/v1/jobs/{id}` | Cancel waiting work; running/finished409, unknown404 |
+| DELETE `/v1/jobs` | Cancel all waiting entries; return `{"cancelled": count}` |
+| POST `/v1/jobs/{id}/retry` | New ordinary FIFO job for a failed/cancelled entry |
+| PATCH `/v1/queue` | Persist `{"paused":true}` or `{"paused":false}` for ordinary FIFO work |
+
+A job response includes `id`, `model`, `status`, normalized `request`, `generate_immediately`, timestamps, `attempts`, optional `error`, and `result` when complete. Statuses are `queued`, `running`, `succeeded`, `failed`, `cancelled`. A 202 acknowledges the database commit, not image completion. Poll GET `/v1/jobs/{id}`; a successful `result` has the usual generation response with actual image/metadata paths and URL/base64 according to `response_format`. List responses omit result blobs and include `data`, `total`, `limit`, `offset`, `has_more` and `has_previous`. `next_offset` / `previous_offset` are present only when that direction exists; optional null fields are omitted. `status=pending` selects waiting/running jobs; other statuses select that exact state. Omit status for history. Limit is 1–100 (default24); offset is nonnegative. Running comes first, waiting work follows execution order, then finished history newest first. An initial 202 or a queued/running status does **not** contain finished image paths. Once `status` is `succeeded`, read **`result.data[0].file_path`**, `result.data[0].metadata_path`, and `result.data[0].url` for `response_format:"url"`. Prefer URL responses for polling; base64 detail responses reread/embed the PNG and can be large. An accepted job may still fail during inference or output writing; inspect its terminal status/error.
 
 DELETE of one entry cancels **waiting work only**; deleting a running/finished job returns409. Clearing returns `{"cancelled": count}`, cancels all waiting work for the active model and preserves the running image, completed files and job history. This removes entries from the active queue, not from the audit history. Failed/cancelled jobs can be explicitly retried as new ordinary FIFO jobs with the saved seed/settings and a new ID; restore missing references/adapters first. Failed jobs do not block later jobs or retry forever. A base-only server preserves a queued adapter job at the head until adapters are enabled or that waiting entry is removed.
 
@@ -176,7 +194,7 @@ The worker cooperates with other local services through a configurable filesyste
 The webpage accepts a photo upload or an absolute path. The API also accepts raw bytes:
 
 ```sh
-curl --fail-with-body http://127.0.0.1:8000/v1/reference-images \
+curl --fail-with-body http://127.0.0.1:5732/v1/reference-images \
   -H 'Content-Type: image/jpeg' --data-binary @/absolute/path/reference.jpg
 ```
 
@@ -193,13 +211,13 @@ The oriented reference **aspect ratio is preserved automatically**. Only the lar
 The gallery combines generations across all three model folders, including indexed custom output destinations. References are excluded. It uses cached thumbnails, supports search by prompt/tags/model/adapter/seed/dimensions, sorting, editable tags, Previous/Next, page-size selection, full previews, settings and downloads. Reuse actions prefill the generator for review; they do not immediately generate. Images from another model may be used as references, but model-specific step/adapter settings use current defaults.
 
 ```sh
-curl 'http://127.0.0.1:8000/v1/images?q=forest&tag=Winter&limit=24&offset=0&sort=newest'
-curl 'http://127.0.0.1:8000/v1/images/0123456789abcdef0123456789abcdef'
-curl --request PATCH 'http://127.0.0.1:8000/v1/images/0123456789abcdef0123456789abcdef/tags' \
+curl 'http://127.0.0.1:5732/v1/images?q=forest&tag=Winter&limit=24&offset=0&sort=newest'
+curl 'http://127.0.0.1:5732/v1/images/0123456789abcdef0123456789abcdef'
+curl --request PATCH 'http://127.0.0.1:5732/v1/images/0123456789abcdef0123456789abcdef/tags' \
   -H 'Content-Type: application/json' -d '{"tags":["Campaign","Village"]}'
 ```
 
-`q` is a case-insensitive substring. Repeated `tag` parameters require all exact labels, case-insensitively; they combine with search. `limit` is 1–100 (default 24), `offset` is nonnegative, `sort` is `newest` or `oldest`. The response returns `total`, `limit`, `offset`, `has_previous`, `previous_offset`, `has_more`, `next_offset`, and `data`. Missing files are skipped; old/corrupt/missing sidecars do not prevent browsing valid PNGs. Tag edits are stored atomically in the owning model's `image-index`; `[]` clears tags. The index also resolves custom-folder images after restart. Back it up.
+`q` is a case-insensitive substring. Repeated `tag` parameters require all exact labels, case-insensitively; they combine with search. `limit` is 1–100 (default 24), `offset` is nonnegative, `sort` is `newest` or `oldest`. The response returns `total`, `limit`, `offset`, `has_previous`, `has_more`, and `data`; `previous_offset` / `next_offset` are omitted when unavailable. Missing files are skipped; old/corrupt/missing sidecars do not prevent browsing valid PNGs. Tag edits are stored atomically in the owning model's `image-index`; `[]` clears tags. The index also resolves custom-folder images after restart. Back it up.
 
 ## Optional adapters
 
@@ -221,6 +239,6 @@ If a download is interrupted, rerun `make setup MODEL=<id>` or `make download MO
 
 For another AI tool:
 
-> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report the UI URL. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings and symlinks outside Git.
+> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. SQLite queues stay in project-local state/queues/<model-id>/jobs.sqlite3 independently of DATA_DIR. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report http://127.0.0.1:5732/ (or the explicit PORT override). Prefer POST /v1/jobs, reuse Idempotency-Key plus the same request after an uncertain submission, poll GET /v1/jobs/{id}, and read result.data[0] only after succeeded. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings, SQLite state and storage symlinks outside Git.
 
-No Codex plugin, original paths, shell aliases, or chat history is required. The service accepts local file paths and is intended for trusted local clients; it binds to `127.0.0.1` with host checks and no permissive CORS. Do not expose it to a network without an access-control design. The source-only repository ignores model folders, environments, runtime binaries, output/reference images, indexes, logs, credentials and local settings. Cleanup should preserve actual data unless explicitly requested.
+No Codex plugin, original paths, shell aliases, or chat history is required. The service accepts local file paths and is intended for trusted local clients; it binds to `127.0.0.1` with host checks and no permissive CORS. Do not expose it to a network without an access-control design. The source-only repository ignores model folders, environments, runtime binaries, output/reference images, indexes, logs, credentials and local settings. The only tracked image files are the three approved README screenshots under docs/screenshots/. Cleanup should preserve actual data unless explicitly requested.

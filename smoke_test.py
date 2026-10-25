@@ -6,7 +6,7 @@ import urllib.request
 from PIL import Image
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--port", type=int, default=8000)
+parser.add_argument("--port", type=int, default=5732)
 parser.add_argument("--size", default="512x512")
 args = parser.parse_args()
 base = f"http://127.0.0.1:{args.port}"

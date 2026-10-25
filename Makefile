@@ -2,7 +2,7 @@
 VENV ?= $(CURDIR)/.venv
 PYTHON := $(VENV)/bin/python
 BOOTSTRAP_PYTHON ?= python3.14
-PORT ?= 8000
+PORT ?= 5732
 MODEL ?=
 ifneq ($(strip $(MODEL)),)
 export IMAGE_MODEL := $(MODEL)
@@ -19,13 +19,13 @@ LORA_ID ?= realism
 .PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism
 help:
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
-	@echo 'make serve     Choose a model and start the API (Ctrl-C stops it)'
+	@echo 'make serve     Choose a model and start http://127.0.0.1:5732 (Ctrl-C stops it)'
 	@echo 'make health    Check readiness'
 	@echo 'make smoke     Generate and validate a 512px test image'
 	@echo 'make download  Download/resume the selected model'
 	@echo 'make setup     Choose a model, install dependencies and download it (one time)'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
-	@echo 'Choose explicitly: make serve MODEL=chroma1-flash PORT=8001'
+	@echo 'Choose explicitly: make serve MODEL=chroma1-flash PORT=5733'
 
 download-realism:
 	"$(PYTHON)" download_loras.py --id realism

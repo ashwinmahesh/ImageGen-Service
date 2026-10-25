@@ -827,7 +827,7 @@ def image_metadata(identifier: str):
 if __name__ == "__main__":
     import uvicorn
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=5732)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
     parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
     args = parser.parse_args()
