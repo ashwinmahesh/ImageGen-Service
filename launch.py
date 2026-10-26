@@ -54,11 +54,33 @@ def available_models():
     return ready
 
 
+def select_llm_mode(explicit,*,interactive=None,prompt=input):
+    if explicit is not None:
+        return explicit
+    if interactive is None:
+        interactive=sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE')!='1'
+    if not interactive:
+        return True
+    while True:
+        try:
+            answer=prompt('Enable local LLM prompt expansion? [Y/n]: ').strip().lower()
+        except EOFError:
+            raise SystemExit('Startup cancelled. Use NO_LLM=1 to disable or WITH_LLM=1 to enable without asking.') from None
+        if answer in ('','y','yes'):
+            return True
+        if answer in ('n','no'):
+            return False
+        print('Choose Y/Enter to enable, or N to disable.')
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=5732)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
-    parser.add_argument('--with-llm',action='store_true',help='Enable the optional local prompt expander')
+    llm=parser.add_mutually_exclusive_group()
+    llm.add_argument('--with-llm',dest='with_llm',action='store_true',help='Enable local prompt expansion without asking (default on)')
+    llm.add_argument('--no-llm',dest='with_llm',action='store_false',help='Disable local prompt expansion')
+    parser.set_defaults(with_llm=None)
     parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
     args=parser.parse_args()
     try:
@@ -67,11 +89,12 @@ def main():
     except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)
+    args.with_llm=select_llm_mode(args.with_llm)
     if args.with_llm:
         try:
             check_enhancer_assets(ROOT)
         except (RuntimeError, OSError, ValueError) as error:
-            raise SystemExit(str(error)) from error
+            raise SystemExit(str(error)+' To serve without the LLM, use make serve NO_LLM=1.') from error
     if not port_free(args.port):
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health',timeout=5) as response:
@@ -111,8 +134,7 @@ def main():
     command=[sys.executable,str(ROOT/'server.py'),'--model',selected,'--port',str(args.port)]
     if args.no_loras:
         command.append('--no-loras')
-    if args.with_llm:
-        command.append('--with-llm')
+    command.append('--with-llm' if args.with_llm else '--no-llm')
     os.execv(sys.executable,command)
 
 

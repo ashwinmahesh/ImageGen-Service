@@ -44,7 +44,7 @@ class ServingModeTest(unittest.TestCase):
 
 
 class LauncherModeTest(unittest.TestCase):
-    def run_launcher(self, args, state=None):
+    def run_launcher(self, args, state=None, *, stub_enhancer=True):
         patches=[patch.object(sys,'argv',['launch.py',*args]), patch.object(launch.os,'chdir'),
                  patch.object(launch.os,'execv'),patch.object(launch.os,'kill'),patch.object(launch,'check_assets')]
         if state is None:
@@ -53,6 +53,8 @@ class LauncherModeTest(unittest.TestCase):
             patches.extend([patch.object(launch,'port_free',side_effect=[False,True]),
                 patch.object(launch.urllib.request,'urlopen',return_value=io.BytesIO(json.dumps(state).encode())),
                 patch.object(launch.subprocess,'check_output',side_effect=['1234\n',f'n{launch.ROOT}\n','python server.py'])])
+        if stub_enhancer:
+            patches.append(patch.object(launch,'check_enhancer_assets'))
         with contextlib.ExitStack() as stack:
             mocks=[stack.enter_context(item) for item in patches]
             with contextlib.redirect_stdout(io.StringIO()):
@@ -85,7 +87,7 @@ class LauncherModeTest(unittest.TestCase):
     def test_busy_mode_switch_is_refused_and_same_mode_reused(self):
         with self.assertRaisesRegex(SystemExit,'generating'):
             self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':True,'loras_enabled':True})
-        execute,kill=self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':True,'loras_enabled':False})
+        execute,kill=self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':True,'loras_enabled':False,'prompt_expansion':{'enabled':True}})
         execute.assert_not_called()
         kill.assert_not_called()
 

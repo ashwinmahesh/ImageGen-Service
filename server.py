@@ -106,7 +106,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.3.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.3.1", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -141,7 +141,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
-    expand_prompt: bool = Field(default=False, strict=True, description="Requires make serve WITH_LLM=1. Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
+    expand_prompt: bool = Field(default=False, strict=True, description="Requires LLM-enabled serving (default; NO_LLM=1 disables it). Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     vary_prompt: bool = Field(default=False,strict=True,description="Requires expand_prompt:true and n>=2. Plan a distinct LLM expansion/composition per option, preserving explicit original constraints and style. All prompts are persisted before rendering and reused after restart. Default false shares one expansion; the UI enables this for multi-image batches with expansion. Improves creative variety but cannot guarantee visibly different results for constrained prompts or strongly preserved references.")
     generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
     n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch rendered sequentially with distinct seeds. seed is the first seed; later options increment it modulo 2^32. expand_prompt shares one expansion unless vary_prompt:true requests distinct composition expansions.")
@@ -514,7 +514,7 @@ class ExpandPromptRequest(BaseModel):
 
 
 @app.post('/v1/prompts/expand',response_model=PromptExpansion,summary='Preview local prompt expansion',
-          description='Requires WITH_LLM=1. Text only; does not inspect a reference image or create an image job. Keeps original description verbatim. Returns 409 if inference/the shared accelerator is occupied; preview is not queued. Expansion failures return 422 and never silently fall back. Long image prompts are not compressed.')
+          description='Requires LLM-enabled serving (the default). Text only; does not inspect a reference image or create an image job. Keeps original description verbatim. Returns 409 if inference/the shared accelerator is occupied; preview is not queued. Expansion failures return 422 and never silently fall back. Long image prompts are not compressed.')
 def expand_prompt(payload:ExpandPromptRequest):
     if not app.state.llm_enabled:
         raise HTTPException(422,'Prompt expansion is disabled; restart with make serve WITH_LLM=1.')
@@ -1032,16 +1032,23 @@ def image_metadata(identifier: str):
     return FileResponse(path, media_type="application/json", filename=path.name)
 
 
-if __name__ == "__main__":
-    import uvicorn
+def parse_server_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5732)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
-    parser.add_argument("--with-llm", action="store_true", help="Enable local prompt expansion")
+    llm=parser.add_mutually_exclusive_group()
+    llm.add_argument('--with-llm',dest='with_llm',action='store_true',help='Enable local prompt expansion (default)')
+    llm.add_argument('--no-llm',dest='with_llm',action='store_false',help='Disable local prompt expansion')
+    parser.set_defaults(with_llm=True)
     parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    args=parse_server_args()
     app.state.llm_enabled = args.with_llm
-    log.warning("Local prompt expansion: %s", "enabled (Qwen3.5-2B 4-bit, text only)" if args.with_llm else "disabled; use WITH_LLM=1 to enable")
+    log.warning("Local prompt expansion: %s", "enabled (Qwen3.5-2B 4-bit, text only)" if args.with_llm else "disabled explicitly; use WITH_LLM=1 to enable")
     app.state.loras_enabled = not args.no_loras
     if args.no_loras:
         app.description += " This server is running in base-only mode: LoRAs are disabled."

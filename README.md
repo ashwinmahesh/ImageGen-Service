@@ -111,18 +111,21 @@ If the launcher finds the same model/mode already running from this checkout, it
 
 The original Mac's shortcuts `serve-images`, `serve-z-image-turbo`, `serve-chroma1-hd`, `serve-chroma1-flash` and the three `-no-loras` variants all use this one project. Other users can use Make directly without aliases.
 
-## Optional local prompt expansion
+## Local prompt expansion (enabled by default)
 
 First `make setup` also downloads **[Qwen3.5-2B 4-bit](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit)** (Apache-2.0) to `<store>/prompt-enhancer/weights`. All image models share it; repeated setup reuses the files. Revision `674aaa7240b91e8012fcad5d791b7dfe5ba90207` and the weights SHA256 are pinned in `enhancer_profile.py`. The text-only loader uses pinned `mlx-lm==0.32.2`. Serving is offline. For an existing installation, run `make setup MODEL=z-image-turbo` to install the new dependency, or use `make download-llm` if dependencies are already installed.
 
 ```sh
-make serve MODEL=z-image-turbo WITH_LLM=1   # Enable the optional prompt LLM
-make serve MODEL=z-image-turbo              # Image model alone (default)
-make serve MODEL=chroma1-flash WITH_LLM=1 NO_LORAS=1
-make download-llm                            # Download/resume shared LLM only
+make serve MODEL=z-image-turbo              # LLM defaults on; terminal asks [Y/n]
+make serve MODEL=z-image-turbo NO_LLM=1     # Explicitly disable the LLM
+make serve MODEL=z-image-turbo WITH_LLM=0   # Equivalent explicit opt-out
+make serve MODEL=chroma1-flash WITH_LLM=1 NO_LORAS=1  # Skip the LLM question; force on
+make download-llm                           # Download/resume shared LLM only
 ```
 
-`WITH_LLM` is independent of adapters and image-model selection. Its presence is checked before replacing an idle managed service. Missing prompt assets do not block plain serving. `/health.prompt_expansion.enabled` and `/health.capabilities.prompt_expansion` describe the current mode. Switching modes requires restarting; the launcher refuses a busy switch.
+Prompt expansion capability is **enabled by default** for every startup model. In a terminal, startup asks `Enable local LLM prompt expansion? [Y/n]:` after selecting the model: Enter/Y keeps it on, N explicitly turns it off for that run. Without a terminal (or with `NONINTERACTIVE=1`), omission enables it without prompting. `NO_LLM=1` and `WITH_LLM=0` disable it and skip the LLM question; `WITH_LLM=1` forces it on and skips that question. Conflicting `NO_LLM=1 WITH_LLM=1` is rejected. These choices are independent of adapters and model selection, and an interactive N is not saved as the next run's default. Direct launchers also support mutually exclusive `--with-llm` / `--no-llm`; `server.py` defaults on while `launch.py` offers the same terminal question.
+
+When enabled, prompt assets are checked **before** replacing an idle managed service. Missing/incomplete LLM assets fail clearly with `make download-llm`/setup guidance and the explicit `NO_LLM=1` alternative; startup never silently disables the LLM. Explicitly disabled serving does not require its weights. The LLM still loads only in a short-lived child when expansion/planning is requested, not as a second permanently resident startup model. `/health.prompt_expansion.enabled` and `/health.capabilities.prompt_expansion` describe the current mode. Switching modes requires restarting; the launcher refuses a busy switch.
 
 The LLM has explicit image-specific instructions to expand the description using evocative, concrete visual language. It develops the requested medium/style/look/aesthetic through compatible line work, shading, palette, materials, atmosphere, lighting, framing and depth. It is told to preserve subjects, counts, actions, colors, composition, quoted text and exclusions, and to avoid conflicting styles or generic quality filler. **Your original text is kept verbatim**, followed by added visual detail, with style development first. The LLM returns separate `style_details` and optional `additional_composition` fields; their accepted text is combined after the original. See [research and policy decisions](docs/prompt-expansion.md). This is expansion, with no compression pass. Check the preview when exact creative choices matter: model-generated additions can still be imperfect. The LLM sees only text and does not analyze reference photos.
 
