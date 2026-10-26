@@ -463,6 +463,16 @@ def root():
     return FileResponse(PROJECT_ROOT / "ui" / "index.html", media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/assets/help.css", include_in_schema=False)
+def ui_help_styles():
+    return FileResponse(PROJECT_ROOT / "ui" / "assets" / "help.css", media_type="text/css", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/assets/help.js", include_in_schema=False)
+def ui_help_script():
+    return FileResponse(PROJECT_ROOT / "ui" / "assets" / "help.js", media_type="text/javascript", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/health")
 def health():
     state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}

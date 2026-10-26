@@ -17,6 +17,8 @@
     @media(max-width:520px){header{padding:18px;gap:10px}.brand strong{font-size:15px}.brand small{font-size:9px}.mark{width:30px;height:30px;font-size:20px}.nav a{padding:6px 9px}.nav{gap:0}main{padding:28px 18px}h1{font-size:28px}.toolbar{flex-wrap:wrap;gap:9px}.search{flex-basis:100%}select{flex:1;max-width:none}.grid{grid-template-columns:1fr 1fr;gap:10px}.card-body{padding:11px}.prompt{font-size:12px;min-height:38px}.card-data{align-items:start;flex-direction:column;gap:4px}.style{font-size:10px}footer{padding:18px;flex-direction:column;gap:8px}.details{padding:18px}dialog{width:96vw}.empty{padding:48px 18px}}
     @media(prefers-reduced-motion:reduce){.card{transition:none}}
   </style>
+  <link rel="stylesheet" href="/assets/help.css">
+  <script src="/assets/help.js" defer></script>
 </head>
 <body>
   <header>
@@ -26,8 +28,8 @@
   <main>
     <div class="intro"><div><h1>Your image library.</h1><p>A place for everything you’ve made.</p></div><span class="local">Stored on this Mac</span></div>
     <div class="toolbar">
-      <div class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><label class="sr-only" for="search">Search images</label><input id="search" type="search" maxlength="4000" placeholder="Search prompts, tags, seeds or styles…" autocomplete="off"></div>
-      <label class="sr-only" for="sort">Image order</label><select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+      <div class="search help-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><label class="sr-only" for="search">Search images</label><input id="search" type="search" maxlength="4000" placeholder="Search prompts, tags, seeds or styles…" autocomplete="off"><button type="button" class="help-button" aria-label="Help with gallery search" data-help="Search prompts, tags, models, adapter names, seeds and dimensions. Click an image’s tag to filter by that exact label."><span aria-hidden="true">?</span></button></div>
+      <div class="help-control"><label class="sr-only" for="sort">Image order</label><select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><button type="button" class="help-button" aria-label="Help with image order" data-help="Sort saved images by creation time. This does not change generation queue order."><span aria-hidden="true">?</span></button></div>
       <button type="button" class="button" id="refresh">Refresh ↻</button>
     </div>
     <div class="active-filter" id="active-filter" hidden><span id="filter-label"></span><button class="button" id="clear-filter" type="button">Clear tag filter ×</button></div>
@@ -35,7 +37,7 @@
     <p id="error" class="error" role="alert" hidden></p>
     <section class="grid" id="grid" aria-label="Saved generations" aria-busy="true"></section>
     <section class="empty" id="empty" hidden><svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="6" width="36" height="36" rx="7" stroke="currentColor"/><circle cx="18" cy="18" r="4" stroke="currentColor"/><path d="m7 35 13-11 8 6 7-12 6 13" stroke="currentColor"/></svg><h2 id="empty-title">Your library starts here.</h2><p id="empty-text">Generate an image and it will appear here automatically.</p><a class="button primary" href="/">Create an image ↗</a></section>
-    <nav class="pagination" aria-label="Image pages"><button id="page-previous" class="button" disabled>← Previous page</button><span id="page-label" class="page-label">Page 1 of 1</span><button id="page-next" class="button" disabled>Next page →</button><label class="page-size" for="page-size">Per page<select id="page-size"><option value="12">12</option><option value="24" selected>24</option><option value="48">48</option><option value="96">96</option></select></label></nav>
+    <nav class="pagination" aria-label="Image pages"><button id="page-previous" class="button" disabled>← Previous page</button><span id="page-label" class="page-label">Page 1 of 1</span><button id="page-next" class="button" disabled>Next page →</button><div class="page-size"><label for="page-size">Per page</label><select id="page-size"><option value="12">12</option><option value="24" selected>24</option><option value="48">48</option><option value="96">96</option></select><button type="button" class="help-button" aria-label="Help with images per page" data-help="Choose how many previews to show at once. Previous and Next move through the matching images."><span aria-hidden="true">?</span></button></div></nav>
   </main>
   <footer><span>Images stay in their saved folders. Previews are cached locally.</span><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <dialog id="viewer" aria-labelledby="viewer-title">
@@ -44,7 +46,7 @@
       <div class="full-image"><p id="preview-state">Loading preview…</p><img id="full-image" alt="" hidden></div>
       <div class="details">
         <p class="eyebrow">Prompt</p><p class="full-prompt" id="full-prompt"></p><button id="copy-prompt" class="button">Copy prompt</button>
-        <form id="tag-form" class="tag-form"><label for="tags">Image tags</label><input id="tags" type="text" maxlength="2110" placeholder="e.g. gothic, village, campaign" autocomplete="off" aria-describedby="tags-hint"><p class="hint" id="tags-hint">Separate tags with commas. Up to 32 tags, 64 characters each. Leave blank to clear.</p><button class="button" id="save-tags" type="submit">Save tags</button><p class="error" id="tag-error" role="alert" hidden></p></form>
+        <form id="tag-form" class="tag-form"><div class="help-label"><label for="tags">Image tags</label><button type="button" class="help-button" aria-label="Help with image tags" data-help="Replace this image’s searchable tags using comma-separated labels; leave blank to clear them. The original image and generation settings stay unchanged."><span aria-hidden="true">?</span></button></div><input id="tags" type="text" maxlength="2110" placeholder="e.g. gothic, village, campaign" autocomplete="off" aria-describedby="tags-hint"><p class="hint" id="tags-hint">Separate tags with commas. Up to 32 tags, 64 characters each. Leave blank to clear.</p><button class="button" id="save-tags" type="submit">Save tags</button><p class="error" id="tag-error" role="alert" hidden></p></form>
         <dl class="settings" id="settings"></dl>
         <div class="detail-actions"><a id="variation" class="button primary">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
         <p class="eyebrow file-label">Saved file</p><code class="file-path" id="file-path"></code><button id="copy-path" class="button">Copy file path</button>

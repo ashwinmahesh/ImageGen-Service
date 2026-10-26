@@ -53,7 +53,7 @@ make serve
 ```
 
 1. Select an installed model. Enter prefers Z-Image Turbo when it is ready; models you haven't set up appear separately with installation commands.
-2. At **Enable local LLM prompt expansion? [Y/n]**, press Enter to keep expansion available.
+2. At **Enable local LLM prompt expansion? [Y/n]**, press Enter to keep expansion available. A small AI text model on your Mac can add visual detail to your image descriptions before generation; you can turn this off for each image.
 3. Wait for startup to finish. Keep this terminal open while using the generator.
 
 You now have two local services:
@@ -83,7 +83,7 @@ To add another model later, stop the generator, run `make setup MODEL=chroma1-fl
 
 ## 4. Generate from the webpage
 
-1. Open **[http://localhost:5732](http://localhost:5732/)**.
+1. Open **[http://localhost:5732](http://localhost:5732/)**. Grey question-mark icons beside settings explain them on hover, keyboard focus or tap; press Escape or click elsewhere to dismiss the help.
 2. Enter a prompt, such as **A watercolor fox in a snowy forest, soft morning light**.
 3. For a first image, choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the default steps alone.
 4. Keep **Expand description with local LLM** checked if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice.

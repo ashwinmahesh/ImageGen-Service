@@ -60,6 +60,7 @@ def select_llm_mode(*,interactive=None,prompt=input):
         interactive=sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE')!='1'
     if not interactive:
         return True
+    print("A small AI text model on your Mac can add visual detail to your image descriptions before generation; you can turn this off for each image.")
     while True:
         try:
             answer=prompt('Enable local LLM prompt expansion? [Y/n]: ').strip().lower()

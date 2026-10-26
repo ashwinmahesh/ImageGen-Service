@@ -1,0 +1,16 @@
+/* Shared, keyboard- and touch-accessible setting help for both webpages. */
+.help-label,.help-control{display:flex;align-items:center;gap:7px}
+.help-label{margin-bottom:9px}
+.help-label>label,.help-label>h2{margin:0}
+.help-control{display:inline-flex}
+.help-choice{display:flex;align-items:center;gap:7px;margin:22px 0 9px}
+.help-choice>.immediate-choice{margin:0;min-width:0}
+.help-choice input{flex-shrink:0}
+.help-button.help-button{display:inline-grid;place-items:center;flex:0 0 20px;width:20px;height:20px;padding:0;border:1px solid #73806f;border-radius:50%;background:transparent;color:var(--muted);font:600 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:help;vertical-align:middle}
+.help-button.help-button:hover,.help-button.help-button:focus-visible{color:var(--text);border-color:#a4aea3;background:#30372d}
+.help-tooltip{position:fixed;z-index:10000;width:280px;max-width:calc(100vw - 24px);padding:11px 13px;border:1px solid #596452;border-radius:9px;background:#272e24;color:var(--text);font:12px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 8px 28px #0007;white-space:normal;overflow-wrap:anywhere}
+.help-tooltip[hidden]{display:none!important}
+.search.help-search{display:flex;align-items:center;gap:7px}
+.help-search input{flex:1}
+.page-size>label{margin:0}
+@media(max-width:520px){.toolbar>.help-control{flex:1}.toolbar>.help-control select{min-width:0}}

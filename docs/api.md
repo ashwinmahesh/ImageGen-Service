@@ -436,6 +436,8 @@ The URLs below are read-only. They are useful for previews/downloads and cover r
 | GET `/references/{identifier}.png` | Generator | 200 | `image/png` preview of an uploaded reference. |
 | GET `/` | Generator | 200 | Generator webpage, `text/html`. |
 | GET `/gallery` | Generator | 200 | Searchable gallery webpage, `text/html`. |
+| GET `/assets/help.css` | Generator | 200 | Shared tooltip stylesheet, `text/css`. |
+| GET `/assets/help.js` | Generator | 200 | Shared tooltip interactions, `text/javascript`. |
 | GET `/docs` | Both | 200 | Swagger UI for that service. |
 | GET `/redoc` | Both | 200 | Alternative API reference UI. |
 | GET `/openapi.json` | Both | 200 | Machine-readable OpenAPI schema for that service. |
