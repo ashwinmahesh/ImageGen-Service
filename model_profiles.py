@@ -18,6 +18,36 @@ PROFILES = {
                   '--extra-sample-args','alpha=0.6,beta=0.6','--flow-shift','1'],
         applied=dict(cfg_scale=1.0, sampler='heun', scheduler='beta', flow_shift=1.0),
         prompt_note='Prompts are encoded by the bundled T5 text encoder.'),
+    'flux2-klein-4b': dict(name='FLUX.2 Klein 4B', backend='mflux', steps=4, max_steps=4,
+        repository='mflux-community/flux2-klein-4b-mflux-q8', revision='ca49409e4ce21c6717ee87caadd9488e0b15208f',
+        base_model='flux2-klein-4b', quantization=8, reference_mode='edit',
+        cli_module='mflux.models.flux2.cli.flux2_edit_generate',
+        text_cli_module='mflux.models.flux2.cli.flux2_generate',
+        required_files=['transformer/model.safetensors.index.json', 'text_encoder/model.safetensors.index.json',
+                        'vae/model.safetensors.index.json', 'tokenizer/tokenizer.json', 'tokenizer/tokenizer_config.json', 'tokenizer/chat_template.jinja'],
+        prompt_note='Use natural-language descriptions or editing instructions. The text encoder processes up to 512 tokens.',
+        license=dict(id='Apache-2.0', url='https://huggingface.co/black-forest-labs/FLUX.2-klein-4B', notice=None)),
+    'flux2-klein-9b': dict(name='FLUX.2 Klein 9B', backend='mflux', steps=4, max_steps=4,
+        repository='mflux-community/flux2-klein-9b-mflux-q4', revision='fcbc7528d6b4193cca919390a2a8b5b59e601f65',
+        base_model='flux2-klein-9b', quantization=4, reference_mode='edit',
+        cli_module='mflux.models.flux2.cli.flux2_edit_generate',
+        text_cli_module='mflux.models.flux2.cli.flux2_generate',
+        required_files=['transformer/model.safetensors.index.json', 'text_encoder/model.safetensors.index.json',
+                        'vae/model.safetensors.index.json', 'tokenizer/tokenizer.json', 'tokenizer/tokenizer_config.json', 'tokenizer/chat_template.jinja'],
+        prompt_note='Use natural-language descriptions or editing instructions. The text encoder processes up to 512 tokens.',
+        license=dict(id='FLUX-Non-Commercial', url='https://huggingface.co/black-forest-labs/FLUX.2-klein-9B',
+                     notice='Commercial use of these model weights requires a separate license from Black Forest Labs.')),
+    'qwen-image-2.1-turbo': dict(name='Qwen-Image 2.1 Turbo', backend='mflux', steps=8, max_steps=8,
+        repository='mflux-community/qwen-image-2-1-turbo-mflux-q4', revision='bda8951ec6b8cc288a961432fe15c22433521a1d',
+        base_model='qwen-image-2.1-turbo', quantization=4, reference_mode='edit', vae_tiling=True, mask_editing=True,
+        cli_module='mflux.models.qwen21.cli.qwen21_edit_generate',
+        required_files=['transformer/model.safetensors.index.json', 'text_encoder/model.safetensors.index.json',
+                        'vae/model.safetensors.index.json', 'text_encoder/config.json', 'model_index.json',
+                        'scheduler/scheduler_config.json', 'processor/tokenizer.json', 'processor/tokenizer_config.json',
+                        'processor/preprocessor_config.json', 'processor/chat_template.jinja'],
+        prompt_note='Describe the picture to generate or the change to the reference photo. Use 1024 px or larger for Turbo detail.',
+        license=dict(id='Qwen-Research', url='https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE',
+                     notice='The Qwen Research License permits research/evaluation use only; commercial model use requires a separate license from Qwen.')),
 }
 DEFAULT_MODEL='z-image-turbo'
 SHARED_ASSETS=[
@@ -31,12 +61,27 @@ RUNTIME_URL='https://github.com/leejet/stable-diffusion.cpp/releases/download/ma
 RUNTIME_SHA256='d183e8d87a1d1b26f376ff68f4d15f3322648805687cb01c25a97c9ac5acdc50'
 
 
+def model_details(identifier):
+    """Model-specific public metadata, kept under the exact model ID by callers."""
+    profile=PROFILES[identifier]
+    return {key:profile[key] for key in ('quantization','license') if key in profile}
+
+
+def _editing_label(profile):
+    if profile.get('mask_editing'):
+        return ' (edit selected area enabled)'
+    if profile.get('reference_mode')=='edit':
+        return ' (edits enabled)'
+    return ''
+
+
 def _show_unavailable(identifiers):
     missing=[name for name in PROFILES if name not in identifiers]
     if missing:
         print('\nNot set up (not selectable):')
         for name in missing:
-            print(f"  - {PROFILES[name]['name']} ({name}) — make setup MODEL={name}")
+            profile=PROFILES[name]
+            print(f"  - {profile['name']}{_editing_label(profile)} ({name}) — make setup MODEL={name}")
         print('Run a model\'s setup command to add it to the numbered options, then run make serve again.')
 
 
@@ -55,7 +100,8 @@ def select_model(explicit=None, *, interactive=None, prompt=input, choices=None)
         print('Choose an image model:' if choices is None else 'Choose a set up image model:')
         for index,identifier in enumerate(identifiers,1):
             profile=PROFILES[identifier]
-            print(f"  {index}. {profile['name']} ({identifier})")
+            label=_editing_label(profile) if choices is not None else ''
+            print(f"  {index}. {profile['name']}{label} ({identifier})")
         if choices is not None:
             _show_unavailable(identifiers)
         answer=prompt(f"Model [{identifiers.index(default)+1} / {PROFILES[default]['name']}]: ").strip()

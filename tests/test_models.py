@@ -26,7 +26,7 @@ class SelectionTest(unittest.TestCase):
             self.assertEqual(model_profiles.select_model(interactive=True,prompt=lambda _: '3'),'chroma1-flash')
             self.assertEqual(model_profiles.select_model(interactive=True,prompt=lambda _: ''),'z-image-turbo')
             self.assertEqual(model_profiles.select_model('chroma1-hd',prompt=lambda _: self.fail('prompted')),'chroma1-hd')
-            for answer in ['4','bad']:
+            for answer in [str(len(model_profiles.PROFILES)+1),'bad']:
                 with self.assertRaises(ValueError):
                     model_profiles.select_model(interactive=True,prompt=lambda _: answer)
 
@@ -152,10 +152,10 @@ class CrossModelGalleryTest(unittest.TestCase):
             with patch.object(server,'ROOT',roots[config.API_MODEL]),patch.object(server,'IMAGE_DIR',roots[config.API_MODEL]/'images'),patch.object(server,'MODEL_ROOTS',roots):
                 client=TestClient(server.app,base_url='http://127.0.0.1')
                 listing=client.get('/v1/images?limit=2&q=fox&tag=forest').json()
-                self.assertEqual(listing['total'],3)
+                self.assertEqual(listing['total'],len(roots))
                 self.assertEqual(listing['next_offset'],2)
                 second=client.get('/v1/images?limit=2&offset=2').json()
-                self.assertEqual(len(second['data']),1)
+                self.assertEqual(len(second['data']),min(2,len(roots)-2))
                 self.assertEqual(second['previous_offset'],0)
                 for identifier in ids:
                     response=client.get('/v1/images/'+identifier)
@@ -164,7 +164,7 @@ class CrossModelGalleryTest(unittest.TestCase):
                     self.assertEqual(client.get(response.json()['thumbnail_url']).status_code,200)
                     changed=client.patch('/v1/images/'+identifier+'/tags',json={'tags':['Campaign']})
                     self.assertEqual(changed.status_code,200)
-                self.assertEqual(client.get('/v1/images?tag=campaign').json()['total'],3)
+                self.assertEqual(client.get('/v1/images?tag=campaign').json()['total'],len(roots))
                 self.assertEqual(client.get('/v1/images?q=chroma1-flash').json()['total'],1)
                 client.close()
 

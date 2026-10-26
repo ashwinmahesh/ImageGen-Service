@@ -28,7 +28,7 @@ This is the human-readable reference for **all HTTP endpoints in ImageGen-Servic
 
 Unless stated otherwise, send JSON with `Content-Type: application/json`; responses are JSON. Request-body booleans must be JSON `true`/`false`. Generation integers such as `n`, `steps` and `seed` must be numbers, not strings or booleans. Unknown fields are rejected on typed request bodies. The queue's nested `request` is deliberately open for later generator validation.
 
-Supported model IDs are `z-image-turbo`, `chroma1-hd` and `chroma1-flash`:
+Supported model IDs are `z-image-turbo`, `chroma1-hd`, `chroma1-flash`, `flux2-klein-4b`, `flux2-klein-9b` and `qwen-image-2.1-turbo`:
 
 - **Generator:** omitted `model` means its startup-selected model. An explicit different model returns **422**; switch models at startup.
 - **Queue:** omitted `model` always means **`z-image-turbo`**, independent of the running generator. Submission selects it in the JSON envelope; other operations select it with `?model=<id>`.
@@ -70,8 +70,10 @@ The generator's `capabilities` object exposes these named controls:
 | `prompt_note`, `max_prompt_characters`, `min_dimension`, `max_dimension` | string, integers | Prompt behavior and canvas limits. |
 | `default_image_count`, `max_image_count` | integers | Batch default and ceiling. |
 | `loras_enabled`, `persistent_queue`, `immediate_generation` | booleans | Available modes. |
+| `tasks`, `photo_editing` | array, object | Supported tasks and edit capabilities: eligible model IDs, required source, default long edge, mask support, no composition variation, and text-only edit refinement. |
+| `reference_mode`, `image_strength_supported` | string, boolean | `variation` with preservation strength for Z-Image/Chroma; `edit` without that control for Klein/Qwen. |
 | `prompt_expansion`, `queue_api_url` | object, string | LLM capability metadata and standalone queue origin. |
-| `<active-model-id>` | object | `prompt_expansion_guidance` with profile `id`, `version`, `soft_max_new_words`, nullable `image_token_limit`, `verified_token_count` and `sources[]`. |
+| `<active-model-id>` | object | For Klein/Qwen, also `quantization` and `license:{id,url,notice}`. `prompt_expansion_guidance` with profile `id`, `version`, `soft_max_new_words`, nullable `image_token_limit`, `verified_token_count` and `sources[]`. |
 
 **Queue response:** `status`, `service:"imagegen-queue"`, `project_dir`, `default_model:"z-image-turbo"` and `version`. This checks the queue HTTP process; it does not load a model or guarantee that a later storage write will succeed.
 
@@ -81,8 +83,8 @@ Queue counts/state contain integer `queued`, `running`, `succeeded`, `failed`, `
 
 No body or query parameters.
 
-- **Generator:** `{object:"list", active_model, data:[...]}`. Each entry has `id`, `object:"model"`, `owned_by:"local"`, `name`, `active`, `downloaded`, `default_steps` and `max_steps`. `downloaded` checks the completion marker; it is not a full startup integrity check.
-- **Queue:** `{default_model, data:[{id,name}, ...]}`. Lists every supported model even before setup, so tools can route future work.
+- **Generator:** `{object:"list", active_model, data:[...]}`. Each entry has `id`, `object:"model"`, `owned_by:"local"`, `name`, `active`, `downloaded`, `default_steps`, `max_steps`, `reference_mode`, `tasks` and `mask_editing`. Model-specific `quantization` and `license:{id,url,notice}` are under the exact model-ID key when present. `downloaded` checks the completion marker; it is not a full startup integrity check.
+- **Queue:** `{default_model, data:[{id,name,reference_mode,tasks,mask_editing,"<model-id>":{...}}, ...]}`. Lists every supported model even before setup, so tools can route future work.
 
 ### GET /v1/loras
 
@@ -105,6 +107,9 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 
 | Field | Type | Default and rules |
 | --- | --- | --- |
+| `task` | string | `"generate"` by default. `"edit"` requires an editing-capable startup model and a source photo. Composition variation is rejected for edits. |
+| `preserve` | string or null | Edit only: explicit preservation requirements, max 1000 characters. Instruction plus constraints must fit the final 4000-character prompt budget. |
+| `mask_image` | string or null | Qwen edit only: absolute/`~/...` mask path, max 4096 characters. Must match the oriented source dimensions; white edits and black preserves the resized source. |
 | `model` | string | Generator's active model. Must match it. On queue submissions use the outer `model`; a nested value, if present, must match. |
 | `prompt` | string | Required, nonblank, 1–4000 characters. `<lora:...>` tags are rejected; use adapter fields. Z-Image processes the first 512 tokens including formatting/trigger, so put essentials first. |
 | `size` | string | `"1024x1024"`. Format `WIDTHxHEIGHT`; each dimension a multiple of 64 from 256–2048. With a reference, the larger dimension sets its long edge and the source sets the aspect ratio. |
@@ -117,7 +122,7 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `response_format` | string | `"b64_json"` or `"url"`; default `"b64_json"`. URL format is convenient for polling and downloads. Both save files. |
 | `output_dir` | string | `<store>/<active-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
 | `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. |
-| `image_strength` | number | 0.6; from 0 inclusive to 1 exclusive. Only send it with a reference. Higher preserves more of the reference and runs fewer denoising steps. |
+| `image_strength` | number | Z-Image/Chroma variations only: default 0.6, [0,1), higher preserves more. Only send with a reference. Klein/Qwen reject this field even if set to 0.6; omit it for instruction edits. |
 | `lora` | string or null | Omitted/null for none. Compatible installed catalog ID; lowercase letters, digits and hyphens, starting alphanumeric, max 80 characters. One adapter. |
 | `lora_strength` | number or null | Requires `lora`; 0–2. Omit/null for its catalog default (Realism: 0.8). |
 | `tags` | array of strings | `[]`. Up to 32 labels, each 1–64 characters after whitespace normalization. No commas/control characters; case-insensitive duplicates are removed. |
@@ -127,8 +132,11 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `z-image-turbo` | 9 | 1–12 | MFLUX Turbo defaults. |
 | `chroma1-hd` | 40 | 1–80 | Euler, CFG 3. |
 | `chroma1-flash` | 8 | 1–40 | Heun, CFG 1, beta schedule, flow shift 1. |
+| `flux2-klein-4b` | 4 | 1–4 | Distilled flow-match Euler, guidance 1; MLX Q8. |
+| `flux2-klein-9b` | 4 | 1–4 | Distilled flow-match Euler, guidance 1; MLX Q4. |
+| `qwen-image-2.1-turbo` | 8 | 1–8 | Checkpoint Turbo sigma schedule, guidance 1; MLX Q4. |
 
-Negative prompts, CFG/guidance, custom samplers/schedulers, masks and instruction-editing options are **not exposed** as request fields. No model-specific request-option namespace is implemented. Larger images/options/step counts cost more time and memory. Z-Image uses VAE tiling above 1024; Chroma always uses it.
+Negative prompts, CFG/guidance, custom samplers/schedulers and multiple references are **not exposed** as request fields. Qwen photo edits accept `mask_image`; Klein does not. Klein/Qwen instruction editing uses the common `reference_image` and `prompt` fields. No model-specific request-option namespace is implemented. Larger images/options/step counts cost more time and memory. Z-Image uses VAE tiling above 1024; Chroma and Qwen always use it. Klein uses the runtime's default strip decoder. Klein/Qwen use low-RAM child processes and release all model memory afterward.
 
 ### Submit and poll an image
 
@@ -153,6 +161,7 @@ A completed generator job returns images in **`result.data[]`**. An accepted or 
 | Endpoint | Service | Success | Purpose |
 | --- | --- | --- | --- |
 | POST `/v1/images/generations` | Generator | 200 | Persist the same job, wait for completion and return an image response directly. |
+| POST `/v1/images/edits` | Generator | 200 | Require an editing model and source photo; wait for the durable edit and return an image response. |
 
 Accepts the full image-settings object and optional `Idempotency-Key` header. The only default difference is `generate_immediately:true`. Response is `{created, generation_seconds, data:[...]}`, without the job wrapper. The active model is used if omitted.
 
@@ -164,6 +173,54 @@ curl --fail-with-body --max-time 1800 http://localhost:5732/v1/images/generation
 ```
 
 Use a long client timeout; disconnecting does not cancel the persisted job. Failed generation returns an HTTP error (the recorded error status, or 500); cancellation returns 400. Prefer async jobs when you need a promptly returned ID and restart-safe polling. This endpoint is a limited compatibility route, not a claim of full OpenAI API compatibility.
+
+## Edit an existing photo
+
+**POST `/v1/images/edits`** is a JSON, synchronous endpoint using the same durable worker and `GenerateResponse` as generation. It defaults to `task:"edit"` and immediate priority. It requires `reference_image` and a Klein/Qwen startup model; missing photos, unsupported models, or composition variation return **422**. For a promptly returned job ID, use **POST `/v1/jobs`** with `task:"edit"`. The standalone queue accepts the same settings inside `request`; model-specific validation happens when consumed.
+
+```json
+{
+  "model": "qwen-image-2.1-turbo",
+  "prompt": "Change the jacket to green.",
+  "reference_image": "/absolute/path/photo.png",
+  "preserve": "Face, pose, and background",
+  "size": "1024x1024",
+  "expand_prompt": true,
+  "response_format": "url"
+}
+```
+
+All three editing entries still support text-to-image generation through `/v1/images/generations` and `/v1/jobs` with the default task. Edit settings do not change that workflow. Per-request model IDs still must match the startup model.
+
+### Selected-area Qwen edits
+
+Add `"mask_image":"/absolute/path/mask.png"` to the edit request. The mask must match the **oriented original source dimensions**, not the resized output canvas. White (255) repaints, black (0) preserves; intermediate grayscale values blend. An entirely black mask or mismatched dimensions returns **400** at generator admission; invalid opaque queue requests fail when consumed. Upload a mask PNG through the existing raw-byte **POST `/v1/reference-images`** and pass its returned local path if needed.
+
+Selected areas are supported by **both API servers**. The generator accepts a flat request on port 5732; its startup model must be Qwen:
+
+```sh
+curl --fail-with-body http://localhost:5732/v1/jobs \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: jacket-area-1' \
+  -d '{"task":"edit","prompt":"Change the jacket to green.","reference_image":"/absolute/path/photo.png","mask_image":"/absolute/path/mask.png","preserve":"Face, pose and background","size":"1024x1024","response_format":"url"}'
+```
+
+The independent queue accepts the same selection inside `request` on port 55302, even while the generator is off:
+
+```sh
+curl --fail-with-body http://localhost:55302/v1/jobs \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: jacket-area-2' \
+  -d '{"model":"qwen-image-2.1-turbo","request":{"task":"edit","prompt":"Change the jacket to green.","reference_image":"/absolute/path/photo.png","mask_image":"/absolute/path/mask.png","preserve":"Face, pose and background","size":"1024x1024"}}'
+```
+
+Both return **202** and a job ID. Poll the generator's `/v1/jobs/{id}`, or the queue's `/v1/jobs/{id}?model=qwen-image-2.1-turbo`. Start `make serve MODEL=qwen-image-2.1-turbo` to consume queued edits. For a synchronous result, send the flat masked request to generator **POST `/v1/images/edits`** instead. Keep photo and mask files accessible on the generator's Mac through completion and any restart recovery; the independent queue does not upload, copy or serve media. Use a new idempotency key when changing the mask path or settings, and avoid modifying the referenced files while jobs wait.
+
+Mask and photo are aligned, resized to the requested long edge and padded together. Qwen receives the mask during inference. The service then composites unselected source pixels back before trimming padding, preserving them exactly **at the normalized output resolution**. Original source files are unchanged. Klein models do not receive mask inputs; unsupported mask/model/task combinations return **422**. The UI provides a rectangle selection for uploaded/gallery photos; API clients may supply arbitrary masks. A path-only reference can still be edited, but must have a browser preview before drawing an area selection.
+
+### Edit instructions and saved settings
+
+Edit requests append deterministic scope/preservation guidance even with expansion disabled. With `expand_prompt:true`, a separate text-only editing policy refines only the requested change and preservation requirements. It does not run the generation style/composition expansion policy, inspect the photo, or add composition alternatives. `n` still requests 1–5 attempts at the same edit; `vary_prompt:true` is rejected. Explicit `image_strength` is also rejected for these instruction editors.
+
+**POST `/v1/prompts/expand`** also accepts `task:"edit"` and optional `preserve` for an editing preview; no photo is required because it reads text only. Expansion records report `task:"edit"`, an `<model-id>-edit-v1` guidance profile, the original instruction, refined instruction and preservation details. Each generated image response reports `task`. Edit sidecars also retain `preserve`, `mask_image`, `edit_scope` and the actual effective prompt. Missing `task` on older generation metadata means generation. Queue preparation/recovery keeps selected task, source, mask and saved refinement.
 
 ## Job and queue endpoints
 
@@ -361,7 +418,20 @@ Response: `{file_path:string, url:string, width:integer, height:integer}`. The P
 }
 ```
 
-Output preserves the oriented reference's aspect ratio. Only the larger dimension of `size` sets the long edge. Model padding is trimmed, so saved dimensions can be nonmultiples of 64 and the short edge can be below 256. Local-path references also have the 40-megapixel check; the 20-MiB limit applies to the upload endpoint. These are variations, with no masks or reliable instruction-based localized editing.
+Output preserves the oriented reference's aspect ratio. Only the larger dimension of `size` sets the long edge. Model padding is trimmed, so saved dimensions can be nonmultiples of 64 and the short edge can be below 256. Local-path references also have the 40-megapixel check; the 20-MiB limit applies to the upload endpoint. Z-Image/Chroma produce variations controlled by `image_strength`. Klein and Qwen instead perform **instruction-based editing**; describe the change in `prompt` and **omit `image_strength`**. The service exposes one reference. Whole-photo edits do not guarantee unchanged pixels or exact identity. Qwen photo edits can use a mask as described below. For example, while serving `flux2-klein-9b`:
+
+```json
+{
+  "model": "flux2-klein-9b",
+  "prompt": "Change the jacket to green. Keep the face, pose and background.",
+  "reference_image": "/absolute/path/portrait.png",
+  "size": "1024x1024",
+  "expand_prompt": false,
+  "response_format": "url"
+}
+```
+
+The same shape works for `qwen-image-2.1-turbo` when that model is serving. Its default is 8 steps with the checkpoint's Turbo schedule. Use around 1024px initially; smaller Turbo outputs may lose detail. Qwen PNGs retain RGBA output. The shared prompt LLM remains text-only and does not inspect the reference.
 
 ## Local prompt expansion (enabled by default)
 
@@ -369,7 +439,7 @@ Output preserves the oriented reference's aspect ratio. Only the larger dimensio
 | --- | --- | --- | --- |
 | POST `/v1/prompts/expand` | Generator | 200 | Preview an expanded description without creating an image job. |
 
-Body: required `prompt` (nonblank string, max 4000 characters), optional `lora` (ID/null) and `lora_strength` (0–2/null, requires a LoRA). Other fields are rejected. Adapter selection accounts for its configured trigger in token budgeting.
+Body: required `prompt` (nonblank string, max 4000 characters), optional `lora` (ID/null), `lora_strength` (0–2/null, requires a LoRA), `task` (`generate` default or `edit`) and `preserve` (edit only, max 1000 characters). Other fields are rejected. Adapter selection accounts for its configured trigger in token budgeting.
 
 ```sh
 curl --fail-with-body http://localhost:5732/v1/prompts/expand \
@@ -399,7 +469,7 @@ This endpoint is synchronous and **not queued**. It returns **409** if another p
 
 Capability is on by default at startup, with `NO_LLM=1` as the opt-out. Requests still need `expand_prompt:true` (API default false). To generate from an adopted preview, use its expanded text as `prompt` with expansion false to avoid another pass. The LLM reads text only and does not inspect references.
 
-Z-Image expansions check the exact **512-token** image budget including formatting and adapter trigger. Over-budget inputs/expansions fail; the expander never compresses or truncates them. Native Chroma counts are unknown; the 4000-character API limit still applies. Guidance is selected by backend; Flash currently shares HD's content guidance. The LLM uses a short-lived child, greedy non-thinking decoding, at most 320 generated tokens per expansion and a 180-second child timeout (including all options in varied planning).
+Z-Image expansions check the exact **512-token** image budget including formatting and adapter trigger. Over-budget inputs/expansions fail; the expander never compresses or truncates them. Native Chroma and Klein/Qwen counts are not measured by the expander; the 4000-character API limit still applies. Klein/Qwen have concise, edit-preserving guidance with a 60-new-word soft cap. This is not an encoder-budget guarantee. Guidance is selected by backend; Flash currently shares HD's content guidance. The LLM uses a short-lived child, greedy non-thinking decoding, at most 320 generated tokens per expansion and a 180-second child timeout (including all options in varied planning).
 
 Automatic expansion is part of the durable image job. Shared plans appear in `prompt_expansion`; varied plans in generator `candidate_expansions[]`; each image records its actual plan. The sidecar keeps original `prompt`, `expanded_prompt`, and `effective_prompt` including the adapter trigger. Expansion failure fails the job without silently rendering the original. See [design and research](prompt-expansion.md).
 
@@ -493,7 +563,7 @@ Most application errors have `{"detail":"message"}`. Request-schema errors use F
 
 ### Idempotency-Key
 
-Optional on both services' **POST `/v1/jobs`**, and generator **POST `/v1/images/generations`**. It accepts 1–128 ASCII letters/digits and `._:-`. Keys are scoped to the model database. The same key/settings returns the original job; changed settings return **409**. PATCH associates that key with the replacement settings.
+Optional on both services' **POST `/v1/jobs`**, and generator **POST `/v1/images/generations`** / **POST `/v1/images/edits`**. It accepts 1–128 ASCII letters/digits and `._:-`. Keys are scoped to the model database. The same key/settings returns the original job; changed settings return **409**. PATCH associates that key with the replacement settings.
 
 After an uncertain submission, retry the **same API route, key and settings**. A lost response is not proof that no job was committed. Different keys create new work. Client disconnect/timeouts do not cancel accepted jobs. The synchronous route waits on the same durable worker; the async route is preferable for polling and large/slow batches.
 

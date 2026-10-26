@@ -32,6 +32,10 @@
     .queue-item.dragging{opacity:.45}.queue-item.drop-before{box-shadow:0 -2px 0 var(--accent)}.queue-item.drop-after{box-shadow:0 2px 0 var(--accent)}
     .queue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}.queue-actions button{padding:5px 9px;min-height:30px;line-height:1.4}
     @media(max-width:600px){.queue-item{flex-wrap:wrap}.queue-actions{margin-left:auto}.queue-drag.queue-drag{align-self:center}.queue-copy{min-width:150px}}
+
+    .workflow-tabs{display:flex;gap:8px;margin:0 0 24px}.workflow-tabs button{border:1px solid var(--line);border-radius:8px;padding:11px 18px;background:transparent;color:var(--muted)}.workflow-tabs button[aria-pressed=true]{background:var(--accent);color:#1d2515;border-color:var(--accent)}
+    .workflow-edit{position:relative;display:inline-flex}.workflow-edit[data-unavailable=true]{cursor:not-allowed}.workflow-edit button:disabled{pointer-events:none}.workflow-tooltip{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:10000;width:250px;max-width:calc(100vw - 60px);padding:11px 13px;border:1px solid #596452;border-radius:9px;background:#272e24;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 8px 28px #0007}.workflow-edit[data-unavailable=true]:is(:hover,:focus-within) .workflow-tooltip{display:block}
+    .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{padding:18px;background:var(--panel,#20241f);border:1px solid var(--line);border-radius:12px;margin-bottom:18px}.source-editor h2{font-size:16px;margin:0 0 6px}.source-editor canvas{display:block;width:auto;max-width:100%;height:auto;max-height:560px;border-radius:8px;cursor:crosshair;touch-action:none;background:#111}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden]{display:none}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
@@ -40,36 +44,41 @@
   <header><div class="brand"><span class="mark" aria-hidden="true">I</span><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
+    <p class="hint" id="license-notice" hidden></p>
+    <div class="workflow-tabs" role="group" aria-label="Image workflow"><button type="button" id="mode-generate" aria-pressed="true">Generate</button><span class="workflow-edit" id="mode-edit-control" data-unavailable="true" tabindex="0" aria-describedby="mode-edit-tooltip"><button type="button" id="mode-edit" aria-pressed="false" aria-describedby="mode-edit-tooltip" disabled>Edit photo</button><span class="workflow-tooltip" id="mode-edit-tooltip" role="tooltip">Switch to a model that supports edits</span></span></div>
     <div class="workspace">
       <form class="controls" id="form">
-        <div class="label-row"><div class="help-label"><label for="prompt">Your prompt</label><button type="button" class="help-button" aria-label="Help with Your prompt" data-help="Describe the subject, setting, lighting and visual style you want. Put the most important details first."><span aria-hidden="true">?</span></button></div><button type="button" id="example">Try an example ↗</button></div>
+        <div class="field"><label for="model-choice">Model</label><select id="model-choice" aria-describedby="model-status"></select><p class="hint model-status" id="model-status"></p></div>
+        <div class="label-row" id="prompt-row"><div class="help-label"><label id="prompt-label" for="prompt">Your prompt</label><button type="button" class="help-button" aria-label="Help with Your prompt" data-help="Describe the subject, setting, lighting and visual style you want. Put the most important details first."><span aria-hidden="true">?</span></button></div><button type="button" id="example">Try an example ↗</button></div>
         <textarea id="prompt" required maxlength="4000" placeholder="Describe the subject, setting, light, and style you have in mind…"></textarea>
         <p class="hint" id="prompt-hint">Loading model settings…</p>
+        <div class="field" id="preserve-section" hidden><label for="preserve">What should stay the same? <span class="optional">(optional)</span></label><textarea id="preserve" maxlength="1000" rows="2" placeholder="For example: face, pose, background, and lighting" style="min-height:70px"></textarea><p class="hint">The model is instructed to change only what you request. Add any details that especially matter to you.</p></div>
         <p class="hint" id="base-only-mode" hidden>Base model only · LoRAs disabled for this server.</p>
         <section id="expansion-controls" hidden>
-          <div class="help-choice"><label class="immediate-choice"><input id="expand-prompt" type="checkbox" role="switch" class="setting-switch">Prompt expansion</label><button type="button" class="help-button" id="expansion-help" aria-label="Help with Prompt expansion" data-help="A small AI text model on your Mac adds visual detail while keeping your original description. This adds some time and can be turned off for each image."><span aria-hidden="true">?</span></button></div>
-          <p class="hint">Keeps your words and adds visual detail. Text only; reference photos are not sent to the LLM.</p>
+          <div class="help-choice"><label class="immediate-choice"><input id="expand-prompt" type="checkbox" role="switch" class="setting-switch"><span id="expansion-label">Prompt expansion</span></label><button type="button" class="help-button" id="expansion-help" aria-label="Help with Prompt expansion" data-help="A small AI text model on your Mac adds visual detail while keeping your original description. This adds some time and can be turned off for each image."><span aria-hidden="true">?</span></button></div>
+          <p class="hint" id="expansion-hint">Keeps your words and adds visual detail. Text only; reference photos are not sent to the LLM.</p>
           <p class="hint" id="expansion-guidance"></p>
           <button type="button" class="secondary" id="preview-expansion">Preview expansion</button>
         </section>
-        <details id="expanded-details" hidden><summary>Expanded description</summary><p id="expanded-text" style="white-space:pre-wrap;color:var(--muted)"></p><p class="hint" id="expanded-info"></p><button type="button" class="secondary" id="use-expansion">Use this description</button></details>
+        <details id="expanded-details" hidden><summary id="expanded-title">Expanded description</summary><p id="expanded-text" style="white-space:pre-wrap;color:var(--muted)"></p><p class="hint" id="expanded-info"></p><button type="button" class="secondary" id="use-expansion">Use this description</button></details>
         <div class="field" id="lora-section">
           <div class="help-label"><label for="lora">Style LoRA</label><button type="button" class="help-button" aria-label="Help with Style LoRA" data-help="A LoRA is an optional model adapter that influences the image’s style or appearance. Choose None to use the original model."><span aria-hidden="true">?</span></button></div>
           <select id="lora" aria-describedby="lora-hint"><option value="">None — original model</option></select>
           <p class="hint" id="lora-hint">Loading local styles…</p>
           <div id="lora-options" hidden><div class="help-label"><label for="lora-strength">LoRA strength</label><button type="button" class="help-button" aria-label="Help with LoRA strength" data-help="Higher values strengthen the selected adapter’s influence (0–2). Start with its default and adjust gradually."><span aria-hidden="true">?</span></button></div><input id="lora-strength" type="number" min="0" max="2" step="0.05" value="0.8"><p class="hint">Lower values give a lighter style influence. Separate from keeping a reference photo.</p></div>
         </div>
-        <section class="reference-section" aria-label="Reference photo">
-          <div class="help-label"><h2 class="reference-title">Reference photo <span class="optional">(optional)</span></h2><button type="button" class="help-button" aria-label="Help with reference photo" data-help="Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed."><span aria-hidden="true">?</span></button></div>
+        <section class="reference-section" id="reference-section" aria-label="Reference photo">
+          <div class="help-label"><h2 class="reference-title" id="reference-title">Reference photo <span class="optional">(optional)</span></h2><button type="button" class="help-button" id="reference-help" aria-label="Help with reference photo" data-help="Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed."><span aria-hidden="true">?</span></button></div>
           <input id="reference-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" aria-label="Choose reference photo file" hidden>
           <button type="button" id="choose-photo" class="choose-photo">＋ Choose photo</button>
-          <p class="hint">Use a photo as the starting point. PNG, JPEG or WebP, up to 20 MB. Processed locally on your Mac.</p>
+          <p class="hint" id="reference-hint">Use a photo as the starting point. PNG, JPEG or WebP, up to 20 MB. Processed locally on your Mac.</p>
           <div id="reference-card" class="reference-card" hidden><img id="reference-preview" alt="Selected reference photo"><div class="reference-description"><strong id="reference-name"></strong><small id="reference-info"></small></div><button id="remove-photo" class="remove-photo" type="button" aria-label="Remove reference photo">×</button></div>
           <details class="reference-path"><summary>Or use a file path</summary><div class="field"><div class="help-label"><label for="reference">Reference photo path</label><button type="button" class="help-button" aria-label="Help with Reference photo path" data-help="Enter an absolute path to an image on the Mac running this server, rather than a web address."><span aria-hidden="true">?</span></button></div><input id="reference" type="text" placeholder="/absolute/path/to/reference.jpg" autocomplete="off"></div></details>
           <div id="reference-options" class="reference-options" hidden><div class="help-label"><label for="strength">Keep the original</label><button type="button" class="help-button" aria-label="Help with Keep the original" data-help="Higher values preserve more of the reference photo; lower values allow bigger changes. Start at 0.6."><span aria-hidden="true">?</span></button></div><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
-        <div class="field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, resolution sets the long edge and keeps the photo’s aspect ratio."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
-        <div class="field"><div class="help-label"><label for="image-count">Number of images</label><button type="button" class="help-button" aria-label="Help with Number of images" data-help="Generate 1–5 options, one after another, with different seeds. More options take more time; composition variation can add further variety."><span aria-hidden="true">?</span></button></div><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
+        <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p></div>
+        <div class="field" id="resolution-field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, resolution sets the long edge and keeps the photo’s aspect ratio."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
+        <div class="field"><div class="help-label"><label for="image-count">Number of images</label><button type="button" class="help-button" aria-label="Help with Number of images" data-help="Generate 1–5 options, one after another, with different seeds. More options take more time; composition variation can add further variety."><span aria-hidden="true">?</span></button></div><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint" id="image-count-hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
         <section id="variation-controls" hidden><div class="help-choice"><label class="immediate-choice"><input id="vary-prompt" type="checkbox" role="switch" class="setting-switch" checked>Different compositions with LLM</label><button type="button" class="help-button" aria-label="Help with Different compositions with LLM" data-help="Gives each option its own composition prompt while keeping your stated subjects and style. Requires at least two images and prompt expansion."><span aria-hidden="true">?</span></button></div><p class="hint" id="variation-hint"></p></section>
         <details><summary>Fine-tune the settings</summary><div class="two field"><div><div class="help-label"><label for="steps">Steps</label><button type="button" class="help-button" aria-label="Help with Steps" data-help="How many refinement steps the image model takes. More steps cost time and do not always improve the result; start with this model’s default."><span aria-hidden="true">?</span></button></div><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><div class="help-label"><label for="seed">Seed</label><button type="button" class="help-button" aria-label="Help with Seed" data-help="Leave blank for a random starting point, or reuse a number to compare changes from the same starting noise."><span aria-hidden="true">?</span></button></div><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint" id="steps-hint">Reuse a seed to explore variations of the same idea.</p></details>
         <details><summary>Image tags</summary><div class="field"><div class="help-label"><label for="tags">Tags <span class="optional">(optional)</span></label><button type="button" class="help-button" aria-label="Help with image tags" data-help="Add comma-separated labels to find images later in the gallery. You can edit tags without changing the image."><span aria-hidden="true">?</span></button></div><input id="tags" type="text" maxlength="2110" placeholder="gothic, village, campaign"><p class="hint">Separate tags with commas. Search or edit them later in the gallery.</p></div></details>
@@ -84,6 +93,7 @@
         <p class="error" id="error" role="alert" hidden></p>
       </form>
       <section aria-label="Generated image">
+        <section class="source-editor" id="source-editor" hidden aria-label="Source photo and edit selection"><div class="source-toolbar"><div><h2>Source photo</h2><p class="hint" id="source-caption">Your original stays unchanged.</p></div><button type="button" class="secondary" id="clear-selection">Clear selection</button></div><canvas id="source-canvas" aria-label="Photo area selection canvas"></canvas><p class="hint" id="selection-info" role="status">Drag over the photo to select the area to edit.</p></section>
         <div class="preview" id="preview" aria-busy="false">
           <div class="empty" id="empty"><svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="9" y="9" width="46" height="46" rx="9" stroke="currentColor" stroke-width="1.5"/><circle cx="25" cy="25" r="5" stroke="currentColor" stroke-width="1.5"/><path d="m12 48 16-13 9 7 9-18 8 15" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg><h2>Room for your imagination.</h2><p>Your image will appear here.<br>Start with a prompt, or try an example.</p></div>
           <img id="result" alt="" hidden>
@@ -106,16 +116,128 @@
   <script>
     const $ = id => document.getElementById(id);
     let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
-    let activeModel = null, defaultSteps = 9, maxSteps = 12;
+    let activeModel = null, defaultSteps = 9, maxSteps = 12, referenceMode = 'variation';
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
+    let workflow = 'generate', modelCatalog = [], serverCapabilities = {}, modePrompts = {generate:'', edit:''};
+    let selectionRect = null, selectionStart = null, maskUpload = null, savedMaskPath = null;
+    const sourceCanvas = $('source-canvas'), sourceContext = sourceCanvas.getContext('2d');
+    function chosenModel() { return $('model-choice').value || activeModel; }
+    function chosenProfile() { return modelCatalog.find(item => item.id === chosenModel()); }
+    function editsSupported() { return chosenProfile()?.tasks?.includes('edit') === true; }
+    function updateWorkflowAvailability() {
+      const supported=editsSupported(), control=$('mode-edit-control');
+      $('mode-edit').disabled=!supported || generating || previewingExpansion;
+      control.dataset.unavailable=String(!supported);
+      control.tabIndex=supported ? -1 : 0;
+      for (const element of [control,$('mode-edit')]) {
+        if (supported) element.removeAttribute('aria-describedby');
+        else element.setAttribute('aria-describedby','mode-edit-tooltip');
+      }
+    }
+    function editingReady() { return workflow !== 'edit' || Boolean(referenceFile || $('reference').value.trim()); }
+    function maskSupported() { return chosenProfile()?.mask_editing === true; }
+    async function loadModels() {
+      try { const response=await fetch('/v1/models',{cache:'no-store'}); if (!response.ok) throw new Error('Unavailable'); modelCatalog=(await response.json()).data; populateModels(); }
+      catch { $('model-status').textContent='Could not load available models. Reload after checking the server.'; }
+    }
+    function populateModels(preferred) {
+      const previous=preferred || $('model-choice').value;
+      const choices=modelCatalog.filter(item => workflow==='generate' || item.tasks?.includes('edit'));
+      $('model-choice').replaceChildren(...choices.map(item => new Option(item.name+(item.id===activeModel ? ' · active' : item.downloaded ? ' · ready to start' : ' · setup required'),item.id)));
+      const selected=choices.find(item => item.id===previous) || choices.find(item => item.id===activeModel) || choices.find(item => item.id==='flux2-klein-9b') || choices[0];
+      if (selected) $('model-choice').value=selected.id;
+      updateModelChoice();
+    }
+    function updateModelChoice() {
+      const profile=chosenProfile();
+      updateWorkflowAvailability();
+      if (!profile) return;
+      defaultSteps=profile.default_steps; maxSteps=profile.max_steps;
+      $('steps').value=defaultSteps; $('steps').max=maxSteps;
+      const active=profile.id===activeModel;
+      $('model-status').textContent=active ? (workflow==='edit' ? 'Ready for photo editing. Your source photo sets the framing.' : 'Ready for generation, with or without a reference photo.') : `${profile.name} ${profile.downloaded ? 'is installed' : 'needs setup'}. This server runs ${serverCapabilities.name || activeModel}.\n${profile.downloaded ? '' : 'make setup MODEL='+profile.id+'\n'}make serve MODEL=${profile.id}`;
+      $('steps-hint').textContent=`${defaultSteps} steps is recommended for ${profile.name}. ${workflow==='edit' ? 'More steps can change the source more; start here.' : 'Reuse a seed to compare settings.'}`;
+      $('edit-area').options[1].disabled=!maskSupported();
+      if (!maskSupported()) { $('edit-area').value='whole'; selectionRect=null; maskUpload=null; savedMaskPath=null; }
+      $('edit-area-hint').textContent=maskSupported() ? 'Select an area on the source photo to edit it. Pixels outside the selection are copied from the resized original.' : 'This Klein runtime edits the whole photo. Choose Qwen-Image 2.1 Turbo for area selection.';
+      updateReferenceSizing(); updateSourceCanvas(); updateButton(); updateVariationControls();
+    }
+    function setWorkflow(next) {
+      if (generating || previewingExpansion || (next==='edit' && !editsSupported())) return;
+      modePrompts[workflow]=$('prompt').value;
+      const preferred=chosenModel(); workflow=next;
+      $('prompt').value=modePrompts[next];
+      $('mode-generate').setAttribute('aria-pressed',String(next==='generate')); $('mode-edit').setAttribute('aria-pressed',String(next==='edit'));
+      $('prompt-label').textContent=next==='edit' ? 'What would you like to change?' : 'Your prompt';
+      $('prompt-hint').textContent=next==='edit' ? 'Describe only the requested change. Keep unrequested details as they are.' : 'Describe the subject, setting, light and style you want.';
+      $('prompt').placeholder=next==='edit' ? 'For example: remove the sign, change the jacket to green, or replace the background…' : 'Describe the subject, setting, light, and style you have in mind…';
+      $('preserve-section').hidden=next!=='edit'; $('edit-area-section').hidden=next!=='edit';
+      const sourceAnchor=next==='edit' ? $('prompt-row') : $('resolution-field');
+      $('form').insertBefore($('reference-section'),sourceAnchor); $('form').insertBefore($('edit-area-section'),sourceAnchor);
+      $('reference-title').textContent=next==='edit' ? 'Photo to edit · required' : 'Reference photo (optional)';
+      $('reference-hint').textContent=next==='edit' ? 'Choose the existing photo, then describe only the changes. Its aspect ratio is preserved.' : 'Use a photo as the starting point. PNG, JPEG or WebP, up to 20 MB. Processed locally on your Mac.';
+      $('expansion-label').textContent='Prompt expansion';
+      $('expansion-hint').textContent=next==='edit' ? 'Clarifies only your requested edit and preserves everything else. Text only; the refiner cannot see the photo.' : 'Keeps your words and adds visual detail. Text only; reference photos are not sent to the LLM.';
+      $('expanded-title').textContent=next==='edit' ? 'Refined edit instruction' : 'Expanded description';
+      const expansionHelp=$('expansion-help');
+      if (expansionHelp) expansionHelp.dataset.help=next==='edit' ? 'The local text LLM clarifies only your requested change and preservation constraints. It cannot inspect the photo, and does not add new compositions or scene details.' : 'A small AI text model on your Mac adds visual detail while keeping your original description. This adds some time and can be turned off for each image.';
+      $('expansion-guidance').textContent=next==='edit' ? 'Editing guidance: preserve the source; refine only the requested changes.' : '';
+      $('preview-expansion').textContent=next==='edit' ? 'Preview refinement' : 'Preview expansion';
+      $('use-expansion').textContent=next==='edit' ? 'Use this instruction' : 'Use this description';
+      $('image-count-hint').textContent=next==='edit' ? 'Alternate attempts at the same edit. The source framing and requested changes stay the same.' : 'Same prompt, different seeds. Options render one at a time and appear together for comparison.';
+      $('lora-section').hidden=next==='edit' || !lorasEnabled; $('base-only-mode').hidden=next==='edit' || lorasEnabled;
+      $('expanded-details').hidden=true; expansionPreview=null;
+      if (next==='edit') { $('lora').value=''; $('reference-size').value='1024'; }
+      populateModels(preferred); updateReferenceSizing(); updateVariationControls();
+    }
+    $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
+    $('mode-edit').addEventListener('click',()=>setWorkflow('edit'));
+    $('model-choice').addEventListener('change',updateModelChoice);
+    function updateSourceCanvas() {
+      const image=$('reference-preview');
+      const visible=workflow==='edit' && image.complete && image.naturalWidth>0 && !$('reference-card').hidden;
+      $('source-editor').hidden=!visible; if (!visible) return;
+      const scale=Math.min(1,900/Math.max(image.naturalWidth,image.naturalHeight));
+      sourceCanvas.width=Math.round(image.naturalWidth*scale); sourceCanvas.height=Math.round(image.naturalHeight*scale);
+      sourceContext.drawImage(image,0,0,sourceCanvas.width,sourceCanvas.height);
+      const selecting=$('edit-area').value==='selected' && maskSupported();
+      sourceCanvas.style.cursor=selecting ? 'crosshair' : 'default';
+      $('clear-selection').hidden=!selecting;
+      $('selection-info').textContent=selecting ? selectionRect ? 'Highlighted area will be edited; everything outside it is preserved at the output resolution.' : 'Drag over the source photo to select the area to edit.' : 'Whole-photo edit. Only requested changes are prompted; unchanged pixels are not guaranteed without an area mask.';
+      if (selectionRect && selecting) {
+        const [x,y,w,h]=selectionRect;
+        sourceContext.fillStyle='rgba(210,240,150,.28)'; sourceContext.fillRect(x*sourceCanvas.width,y*sourceCanvas.height,w*sourceCanvas.width,h*sourceCanvas.height);
+        sourceContext.strokeStyle='#ddedb0'; sourceContext.lineWidth=2; sourceContext.strokeRect(x*sourceCanvas.width,y*sourceCanvas.height,w*sourceCanvas.width,h*sourceCanvas.height);
+      }
+    }
+    $('reference-preview').addEventListener('load',updateSourceCanvas);
+    $('edit-area').addEventListener('change',()=>{ selectionRect=null; maskUpload=null; savedMaskPath=null; updateSourceCanvas(); updateButton(); });
+    $('clear-selection').addEventListener('click',()=>{selectionRect=null;maskUpload=null;savedMaskPath=null;updateSourceCanvas();updateButton();});
+    function canvasPosition(event) { const bounds=sourceCanvas.getBoundingClientRect(); return [Math.max(0,Math.min(1,(event.clientX-bounds.left)/bounds.width)),Math.max(0,Math.min(1,(event.clientY-bounds.top)/bounds.height))]; }
+    sourceCanvas.addEventListener('pointerdown',event=>{ if (generating || workflow!=='edit' || !maskSupported() || $('edit-area').value!=='selected') return; selectionStart=canvasPosition(event); sourceCanvas.setPointerCapture(event.pointerId); });
+    sourceCanvas.addEventListener('pointermove',event=>{if (!selectionStart) return; const [x,y]=canvasPosition(event),[a,b]=selectionStart; selectionRect=[Math.min(x,a),Math.min(y,b),Math.abs(x-a),Math.abs(y-b)];maskUpload=null;savedMaskPath=null;updateSourceCanvas();});
+    sourceCanvas.addEventListener('pointerup',()=>{selectionStart=null;if (selectionRect && (selectionRect[2]<.005 || selectionRect[3]<.005)) selectionRect=null;updateSourceCanvas();updateButton();});
+    sourceCanvas.addEventListener('pointercancel',()=>{selectionStart=null;});
+    async function uploadSelection() {
+      if (maskUpload) return maskUpload.file_path;
+      if (savedMaskPath) return savedMaskPath;
+      if (!selectionRect || !referenceDimensions) throw new Error('Select an area on the source photo first.');
+      const canvas=document.createElement('canvas'); [canvas.width,canvas.height]=referenceDimensions;
+      const context=canvas.getContext('2d'); context.fillStyle='#000';context.fillRect(0,0,canvas.width,canvas.height);context.fillStyle='#fff';
+      const [x,y,w,h]=selectionRect; context.fillRect(Math.floor(x*canvas.width),Math.floor(y*canvas.height),Math.ceil(w*canvas.width),Math.ceil(h*canvas.height));
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')); if (!blob) throw new Error('Could not prepare the selection mask.');
+      const response=await fetch('/v1/reference-images',{method:'POST',headers:{'Content-Type':'image/png'},body:blob});
+      const result=await response.json();if (!response.ok) throw new Error(result.detail || 'Could not save the selection.');maskUpload=result;return result.file_path;
+    }
+
     let displayedBatch = null, selectedOption = 0, selectingOption = 0;
     let loraCatalog = [], lorasEnabled = true, expansionEnabled = null, previewingExpansion = false, expansionPreview = null;
     function setLoRAMode(enabled) {
       lorasEnabled = enabled;
-      $('lora-section').hidden = !enabled;
-      $('base-only-mode').hidden = enabled;
+      $('lora-section').hidden = !enabled || workflow === 'edit';
+      $('base-only-mode').hidden = enabled || workflow==='edit';
       if (!enabled) { $('lora').value = ''; $('lora-options').hidden = true; }
     }
     function updateLoRA(reset = true) {
@@ -142,18 +264,24 @@
     }
     $('lora').addEventListener('change', () => updateLoRA());
     function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
-    function updateButton() { $('generate').disabled = generating || previewingExpansion || !ready; if (!generating) { const count=Number($('image-count').value); $('button-text').textContent = $('generate-immediately').checked ? (count===1 ? 'Generate image' : `Generate ${count} images`) : (count===1 ? 'Add to queue' : `Queue ${count} images`); } }
-    function varyingCompositions() { return Number($('image-count').value)>1 && expansionEnabled && $('expand-prompt').checked && $('vary-prompt').checked; }
+    function updateButton() {
+      updateWorkflowAvailability();
+      const selectedArea=workflow==='edit' && $('edit-area').value==='selected';
+      $('generate').disabled=generating || previewingExpansion || !ready || chosenModel()!==activeModel || !editingReady() || (selectedArea && !selectionRect && !savedMaskPath);
+      if (!generating) { const count=Number($('image-count').value); $('button-text').textContent=$('generate-immediately').checked ? (workflow==='edit' ? count===1 ? 'Edit photo' : `Create ${count} edit options` : count===1 ? 'Generate image' : `Generate ${count} images`) : count===1 ? 'Add to queue' : `Queue ${count} images`; }
+    }
+    function varyingCompositions() { return workflow !== 'edit' && Number($('image-count').value)>1 && expansionEnabled && $('expand-prompt').checked && $('vary-prompt').checked; }
     function updateVariationControls() {
       const multiple=Number($('image-count').value)>1, enabled=expansionEnabled && $('expand-prompt').checked;
-      $('variation-controls').hidden=!multiple; $('vary-prompt').disabled=!enabled;
+      $('variation-controls').hidden=!multiple || workflow==='edit'; $('vary-prompt').disabled=!enabled || workflow==='edit';
       $('variation-hint').textContent=!expansionEnabled ? 'Restart with make serve and keep the LLM enabled for distinct composition prompts. Different seeds alone may give similar pictures.' : !enabled ? 'Turn on Prompt expansion above to vary the compositions.' : 'Gives each option its own composition prompt while keeping your stated subjects, style and constraints. Adds LLM time. Strong references or precise framing can limit differences. Candidate prompts are saved with each image.';
-      $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions();
+      $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions() || chosenModel()!==activeModel;
       $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
     }
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
+      $('reference-options').hidden = !hasReference || referenceMode === 'edit' || workflow==='edit';
       if (hasReference && !usingReferenceSizing) selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
       usingReferenceSizing = hasReference;
       $('size').hidden = hasReference; $('size').disabled = hasReference;
@@ -172,10 +300,11 @@
         }
         $('reference-size-hint').textContent = `${dimensions}Matches the photo’s aspect ratio automatically.`;
       }
+      updateButton();
     }
     $('reference-size').addEventListener('change', updateReferenceSizing);
     function clearPhoto() {
-      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = '';
+      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; selectionRect=null; maskUpload=null; savedMaskPath=null; $('source-editor').hidden=true;
       if (referencePreviewURL) URL.revokeObjectURL(referencePreviewURL);
       referencePreviewURL = null; $('reference-preview').removeAttribute('src');
       $('reference-card').hidden = true; $('choose-photo').textContent = '＋ Choose photo';
@@ -194,7 +323,7 @@
         referenceDimensions = [candidate.naturalWidth, candidate.naturalHeight]; updateReferenceSizing();
         $('reference-preview').src = previewURL;
         $('reference-name').textContent = file.name; $('reference-info').textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB · ready to use`;
-        $('reference-card').hidden = false; $('reference-options').hidden = false; $('choose-photo').textContent = 'Change photo';
+        $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('choose-photo').textContent = 'Change photo';
       };
       candidate.onerror = () => { if (referenceFile === file) { clearPhoto(); showError('This photo cannot be previewed. Choose a PNG, JPEG or WebP image.'); } };
       candidate.src = previewURL;
@@ -207,14 +336,23 @@
         if (!response.ok) throw new Error('Unavailable');
         const data = await response.json();
         const changed = activeModel && activeModel !== data.model;
-        const cap = data.capabilities;
+        const cap = data.capabilities; serverCapabilities=cap || {};
         if (!cap || typeof cap.default_steps !== 'number') throw new Error('Missing model capabilities');
         if (activeModel !== data.model) {
-          activeModel = data.model; watchingJob = localStorage.getItem('imagegen-watching:' + activeModel); queueOffset = 0; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
+          activeModel = data.model; referenceMode = cap.reference_mode || 'variation'; watchingJob = localStorage.getItem('imagegen-watching:' + activeModel); queueOffset = 0; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
           $('model-name').textContent = cap.name; document.title = cap.name + ' — Image Studio';
           $('steps').value = defaultSteps; $('steps').max = maxSteps;
+          $('edit').textContent = referenceMode === 'edit' ? 'Edit image' : 'Make a variation';
+          $('reference-hint').textContent = workflow==='edit' ? 'Choose the existing photo and describe only the changes.' : 'Generate from text, or optionally add a photo as a visual reference. PNG, JPEG or WebP, up to 20 MB.';
+          const help = document.querySelector('[aria-label="Help with reference photo"]');
+          if (help) help.dataset.help = referenceMode === 'edit' ? 'Upload a photo and describe the desired edit in the prompt. This model uses instruction editing; there is no preservation-strength control.' : 'Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed.';
+          const license = cap[data.model]?.license;
+          $('license-notice').replaceChildren(); $('license-notice').hidden = !license?.notice;
+          if (license?.notice) { const link = document.createElement('a'); link.href = license.url; link.textContent = 'Model license'; link.target = '_blank'; link.rel = 'noopener'; $('license-notice').append(license.notice + ' ', link); }
+          updateReferenceSizing();
           $('steps-hint').textContent = `${defaultSteps} steps is the default for ${cap.name}. Reuse a seed to explore variations.`;
           $('prompt-hint').textContent = 'Put key details first. ' + cap.prompt_note;
+          populateModels(data.model);
           if (changed) { lastResult = null; $('lora').value = ''; await loadLoRAs(); showError('The server model changed. Review your settings before generating.'); }
         }
         if (!lastResult && typeof data.data_dir === 'string') { const folder = data.data_dir.replace(/\/$/, '') + '/images'; $('saved-path').textContent = folder; $('output-dir').placeholder = 'Default: ' + folder; }
@@ -222,7 +360,7 @@
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
         }
         const expansion = cap.prompt_expansion || {};
-        const guidance = cap[data.model]?.prompt_expansion_guidance;
+        const guidance = workflow==='edit' && expansion.photo_editing?.guidance_profile ? {id:expansion.photo_editing.guidance_profile,verified_token_count:false} : cap[data.model]?.prompt_expansion_guidance;
         $('expansion-guidance').textContent = guidance ? `Guidance: ${guidance.id}${guidance.verified_token_count ? ' · image token budget checked' : ' · native token count unavailable'}` : '';
         if (expansionEnabled !== !!expansion.enabled) {
           expansionEnabled = !!expansion.enabled;
@@ -237,17 +375,19 @@
     }
     $('size').addEventListener('change', updateReferenceSizing);
     $('example').addEventListener('click', () => {
+      if (workflow==='edit') { $('prompt').value='Change the jacket to forest green. Keep the face, pose and background unchanged.'; $('prompt').focus(); return; }
       $('prompt').value = 'A small red fox resting in fresh snow beneath pine trees, soft winter light, detailed wildlife photograph, calm atmosphere.';
       $('prompt').focus();
     });
     $('reuse').addEventListener('click', () => { if (lastSeed !== null) { $('seed').value = lastSeed; $('seed').closest('details').open = true; $('seed').focus(); } });
     $('edit').addEventListener('click', () => {
       if (!lastResult || generating) return;
+      if (referenceMode==='edit') setWorkflow('edit');
       clearPhoto(); $('reference').value = lastResult.file_path;
       $('reference-preview').src = lastResult.url; $('reference-name').textContent = 'Your generated image';
       $('reference-info').textContent = `${lastResult.size.replace('x', ' × ')} · selected for editing`;
-      $('reference-card').hidden = false; $('reference-options').hidden = false; $('strength').value = '0.6';
-      $('choose-photo').textContent = 'Change photo'; $('prompt').value = lastResult.prompt;
+      $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('strength').value = '0.6';
+      $('choose-photo').textContent = 'Change photo'; $('prompt').value = workflow==='edit' ? '' : lastResult.prompt;
       if (lastResult.expanded) $('expand-prompt').checked=false;
       updateVariationControls();
       referenceDimensions = lastResult.size.split('x').map(Number);
@@ -259,23 +399,25 @@
     });
     $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
     $('form').addEventListener('submit', async event => {
-      event.preventDefault(); if (generating || previewingExpansion || !ready) return;
+      event.preventDefault(); if (generating || previewingExpansion || !ready || chosenModel()!==activeModel) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
-      const payload = {model: activeModel, prompt, n:Number($('image-count').value), size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
+      const payload = {model: chosenModel(), prompt, n:Number($('image-count').value), size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
+      if (workflow==='edit') { payload.task='edit'; if ($('preserve').value.trim()) payload.preserve=$('preserve').value.trim(); }
       if (expansionEnabled && $('expand-prompt').checked) payload.expand_prompt = true;
       if (varyingCompositions()) payload.vary_prompt=true;
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
-      if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
+      if (workflow!=='edit' && lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
+      if (workflow==='edit' && !selectedFile && !referencePath) { showError('Choose the photo to edit first.'); return; }
       if ((selectedFile || referencePath) && payload.steps < 2) { showError('Use at least 2 steps with a reference photo.'); $('steps').closest('details').open = true; $('steps').focus(); return; }
       const imageStrength = Number($('strength').value);
       if ($('seed').value !== '') payload.seed = Number($('seed').value);
       if ($('output-dir').value.trim()) payload.output_dir = $('output-dir').value.trim();
-      if (referencePath) { payload.reference_image = referencePath; payload.image_strength = imageStrength; }
+      if (referencePath) { payload.reference_image = referencePath; if (referenceMode !== 'edit') payload.image_strength = imageStrength; }
       generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
-      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = true;
+      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area']) $(id).disabled = true;
       $('announcement').textContent = 'Saving your image request…';
       try {
         if (selectedFile) {
@@ -287,9 +429,10 @@
             if (!upload.ok) throw new Error(uploaded.detail || 'Could not prepare the reference photo.');
             referenceUpload = uploaded;
           }
-          payload.reference_image = uploaded.file_path; payload.image_strength = imageStrength;
+          payload.reference_image = uploaded.file_path; if (referenceMode !== 'edit') payload.image_strength = imageStrength;
           $('button-text').textContent = 'Generating…';
         }
+        if (workflow==='edit' && $('edit-area').value==='selected') payload.mask_image=await uploadSelection();
         const body = JSON.stringify(payload), remembered = JSON.parse(sessionStorage.getItem('imagegen-pending') || 'null');
         const key = remembered && remembered.body === body ? remembered.key : crypto.randomUUID();
         sessionStorage.setItem('imagegen-pending', JSON.stringify({body, key}));
@@ -305,14 +448,14 @@
         $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
       } finally {
-        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size']) $(id).disabled = false;
+        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area']) $(id).disabled = false;
         generating = false; updateButton(); await checkHealth();
       }
     });
     function showExpansion(data) {
       expansionPreview = data;
       $('expanded-text').textContent = data.expanded_prompt;
-      $('expanded-info').textContent = `${data.seconds}s for expansion` + (data.expanded_image_tokens != null ? ` · ${data.expanded_image_tokens}/${data.image_token_limit} image-model tokens` : ' · Image-model token count unavailable for this backend');
+      $('expanded-info').textContent = `${data.seconds}s for ${data.task==='edit' ? 'refinement' : 'expansion'}` + (data.expanded_image_tokens != null ? ` · ${data.expanded_image_tokens}/${data.image_token_limit} image-model tokens` : ' · Image-model token count unavailable for this backend');
       if (data.variation_index) $('expanded-info').textContent+=` · Composition ${data.variation_index} of ${data.variation_count}`;
       $('expanded-details').hidden = false; $('expanded-details').open = true;
     }
@@ -329,16 +472,17 @@
       const prompt=$('prompt').value.trim();
       if (!prompt) { showError('Describe the image before previewing expansion.'); return; }
       const payload={prompt};
-      if (lorasEnabled && $('lora').value) { payload.lora=$('lora').value; payload.lora_strength=Number($('lora-strength').value); }
+      if (workflow==='edit') { payload.task='edit'; if ($('preserve').value.trim()) payload.preserve=$('preserve').value.trim(); }
+      if (workflow!=='edit' && lorasEnabled && $('lora').value) { payload.lora=$('lora').value; payload.lora_strength=Number($('lora-strength').value); }
       previewingExpansion=true; $('preview-expansion').disabled=true; updateButton(); $('error').hidden=true;
-      $('preview-expansion').textContent='Expanding…';
+      $('preview-expansion').textContent=workflow==='edit' ? 'Refining…' : 'Expanding…';
       try {
         const response=await fetch('/v1/prompts/expand',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         const data=await response.json();
         if (!response.ok) throw new Error(typeof data.detail==='string' ? data.detail : 'Could not expand this description.');
         showExpansion(data);
       } catch(error) { showError(error.message); }
-      finally { previewingExpansion=false; $('preview-expansion').textContent='Preview expansion'; await checkHealth(); updateButton(); }
+      finally { previewingExpansion=false; $('preview-expansion').textContent=workflow==='edit' ? 'Preview refinement' : 'Preview expansion'; await checkHealth(); updateButton(); }
     });
     $('generate-immediately').addEventListener('change', updateButton);
     $('image-count').addEventListener('change',() => {updateButton();updateVariationControls();});
@@ -540,6 +684,7 @@
         const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
+        if (metadata.task==='edit' || (mode==='reference' && referenceMode==='edit')) { setWorkflow('edit'); $('preserve').value=metadata.preserve || ''; }
         const sameModel = !item.model || item.model === activeModel;
         if (!sameModel) warnings.push(`This image used ${item.model}; the server currently runs ${activeModel}. Model-specific settings use current defaults.`);
         const url = new URL(item.url, location.origin);
@@ -561,12 +706,13 @@
           $('reference').value = item.file_path; referenceDimensions = [item.width, item.height].every(n => Number.isFinite(n) && n > 0) ? [item.width, item.height] : null;
           $('reference-preview').src = url.href; $('reference-name').textContent = 'Saved gallery image';
           $('reference-info').textContent = (item.size || 'PNG') + ' · ready for a variation';
-          $('reference-card').hidden = false; $('reference-options').hidden = false; $('choose-photo').textContent = 'Change photo'; $('strength').value = '0.6';
+          $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('choose-photo').textContent = 'Change photo'; $('strength').value = '0.6';
           if (Number($('steps').value) < 2) $('steps').value = String(defaultSteps);
           updateReferenceSizing(); selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
         } else if (typeof metadata.reference_image === 'string' && metadata.reference_image) {
-          $('reference').value = metadata.reference_image; $('reference-options').hidden = false;
+          $('reference').value = metadata.reference_image; $('reference-options').hidden = referenceMode === 'edit';
           if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
+          if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
           warnings.push('This generation used a reference file; it must still exist at the saved path.');
         }
         updateReferenceSizing();
@@ -577,7 +723,7 @@
         $('prompt').focus();
       } catch (error) { showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth()]); await importSavedImage(); await refreshQueue(); }
+    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth(),loadModels()]); await importSavedImage(); await refreshQueue(); }
     initialize(); setInterval(checkHealth, 15000); setInterval(refreshQueue, 2000);
   </script>
 </body>

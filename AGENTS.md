@@ -8,7 +8,9 @@ This file is for agents changing the repository. An agent operating the service 
 - `queue_api.py` / `queue_launch.py`: independent queue API and background-process launcher.
 - `job_queue.py`: shared SQLite `JobStore`, ordering, mutations and durable checkpoints.
 - `generation_worker.py` / `queue_storage.py`: exclusive consumer, recovery, accelerator coordination and project-local database migration.
-- `model_profiles.py` / `config.py` / `launch.py`: backend defaults, asset checks and startup.
+- `model_profiles.py` / `model_assets.py` / `config.py` / `launch.py`: backend defaults, pinned snapshot preflight and startup.
+- `photo_workflows.py`: common generate/edit task semantics and preservation scope; masked geometry/compositing lives in `reference_geometry.py`.
+- `mflux_engine.py`: offline, per-image low-RAM CLI children for FLUX.2 Klein and Qwen-Image 2.1 Turbo; `engine.py` retains the resident Z-Image path.
 - `storage_paths.py`, setup/download scripts: portable storage selection and reproducible assets.
 - `adapter_catalog.py` / `lora_catalog.py`: queue discovery and generator adapter validation.
 - `prompt_expander.py` / `prompt_policy.py` / `enhancer_profile.py`: local prompt expansion; consult `docs/prompt-expansion.md` before changing policy.
@@ -34,13 +36,19 @@ Keep the shared accelerator lock separate from the queue worker lease. Native ch
 
 `make setup` lists all supported models (Enter: Z-Image Turbo), then asks for storage (Enter: project-local). External choices create reusable per-model symlinks. Never silently download to a fallback when a configured volume is missing, overwrite conflicting data or recreate retired per-model source projects. Chroma Flash shares the HD encoder/VAE without downloading HD's diffusion checkpoint.
 
-`make serve` numbers only ready models; list unready models separately with setup commands. Serving never downloads assets. Validate the model/mode before replacing an idle managed server; never replace a busy or unrelated listener. Start/reuse the detached queue API, then run the generator in the foreground. Ctrl-C finishes active work; the queue service stays up. `make stop-queue` stops only the verified queue process.
+`make serve` numbers only ready models; list unready models separately with setup commands. Label editing-capable model names `(edits enabled)` and mask-capable models `(edit selected area enabled)`, using registry capabilities in both sections. Serving never downloads assets. Validate the model/mode before replacing an idle managed server; never replace a busy or unrelated listener. Start/reuse the detached queue API, then run the generator in the foreground. Ctrl-C finishes active work; the queue service stays up. `make stop-queue` stops only the verified queue process.
 
 LLM capability defaults on, with an interactive `[Y/n]` choice. `NO_LLM=1` is the single startup opt-out (`--no-llm` in Python); don't add duplicate flags. API requests default `expand_prompt:false`; the enabled UI checks it by default. Preserve original text/style/constraints, validate expansion budgets and persist provenance. The text-only LLM subprocess exits before rendering. `vary_prompt:true` requires expansion and at least two images. Unique seeds don't guarantee visible diversity.
+
+FLUX.2 Klein 4B uses the pinned Q8 snapshot; Klein 9B and Qwen-Image 2.1 Turbo use pinned Q4 snapshots. Require every indexed shard and Qwen's vision encoder/processor/Turbo schedule before marking setup complete or listing them as ready. Keep child offline/local-model flags and inherited queue/GPU lock descriptors. Both generation and instruction editing are supported; references use the editing pipeline. Keep `task:generate` backward compatible and available for every model. Explicit `task:edit` and `/v1/images/edits` require a source and eligible model, use the dedicated editing-refinement policy, and reject composition variation. Qwen alone accepts aligned masks; pass them through to inference and composite unselected source pixels back at output resolution. Preserve task/mask/preservation/refinement through queue recovery and gallery reuse. The UI filters model choices by task but does not hot-switch the startup backend. Reject `image_strength` on these instruction editors and hide the variation control in the UI. Keep new quantization/license metadata under the exact model-ID namespace and preserve it when recording expansion provenance.
 
 Only Realism is an optional public adapter preset. Default setup downloads no LoRAs. Keep private catalogs, weights and preset names out of tracked files and download defaults. The loader inserts configured triggers; don't require `<lora:...>` prompt tags.
 
 Use accessible switches for boolean UI settings, labeled **Prompt expansion** for the local LLM control. Keep all help icons as grey circled question marks, and inset select chevrons from the right border. Preserve native input checked/disabled semantics and keyboard control.
+
+Disable the Edit photo mode button when the selected model's tasks omit edit. Its hover/focus tooltip must say “Switch to a model that supports edits”. Recompute capability restrictions after model changes and submission cleanup; unsupported models must never enter edit mode through another UI path.
+
+Selected-area API edits must work through both the generator's flat request and the standalone queue's `request` envelope. Keep queue admission independent of source/mask reads and defer model/media validation to consumption. Document complete examples in both schemas/references and verify masks survive preparation, checkpoints and recovery without re-rendering committed artifacts.
 
 ## Verification and data boundaries
 

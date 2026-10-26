@@ -98,3 +98,50 @@ def prepare_geometry(reference_path, requested_size, scratch_root):
         except OSError as exc:
             raise ReferenceError(f"Cannot prepare reference photo: {exc}") from exc
         yield Geometry(str(prepared), model_size, output_size, photo.size)
+
+
+def read_mask(mask_path, reference_size):
+    try:
+        with Image.open(mask_path) as source:
+            if source.width*source.height>40_000_000:
+                raise ValueError('Edit mask must be at most 40 megapixels')
+            mask=ImageOps.exif_transpose(source).convert('L')
+        if mask.size!=reference_size:
+            raise ValueError('Edit mask dimensions must match the oriented source photo')
+        if mask.getextrema()[1]==0:
+            raise ValueError('Edit mask must select at least one pixel (white edits, black preserves)')
+        return mask
+    except (OSError,ValueError,Image.DecompressionBombError) as error:
+        raise ReferenceError(f'Cannot use mask_image: {error}') from error
+
+
+@contextmanager
+def prepare_mask(mask_path, geometry, scratch_root):
+    if mask_path is None:
+        yield None
+        return
+    mask=read_mask(mask_path,geometry.reference_size)
+    mask=mask.resize(geometry.output_size,Image.Resampling.NEAREST)
+    canvas=Image.new('L',geometry.model_size,0)
+    canvas.paste(mask,geometry.crop_box[:2])
+    scratch_root.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='edit-mask-',dir=scratch_root) as temporary:
+        path=Path(temporary)/'mask.png'
+        canvas.save(path)
+        yield str(path)
+
+
+def composite_edit(path, source_path, mask_path):
+    """Copy unselected source pixels exactly at the prepared output resolution."""
+    with Image.open(path) as image:
+        generated=image.convert('RGBA')
+    with Image.open(source_path) as image:
+        source=image.convert('RGBA')
+    with Image.open(mask_path) as image:
+        mask=image.convert('L')
+    if generated.size!=source.size or mask.size!=source.size:
+        raise ReferenceError('Masked edit output does not match the prepared source and mask')
+    # Qwen already blends soft mask values. Copy only fully unselected pixels
+    # here, rather than applying fractional alpha a second time.
+    editable=mask.point(lambda value:255 if value else 0)
+    Image.composite(generated,source,editable).save(path,format='PNG')

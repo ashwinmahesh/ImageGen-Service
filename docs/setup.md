@@ -4,7 +4,7 @@ Start with the [README quick start](../README.md#quick-start). This page explain
 
 ## First-time setup
 
-Requires an Apple Silicon Mac with Metal, Git, Make and Python 3.14 (the tested version). With Homebrew: `brew install python@3.14`. The pinned Chroma native binary targets macOS 26.6.2 arm64; other systems need a compatible native build. The Python dependency lock includes MLX/MFLUX for Z-Image. This is not a Windows/CUDA distribution.
+Requires an Apple Silicon Mac with Metal, Git, Make and Python 3.14 (the tested version). With Homebrew: `brew install python@3.14`. The pinned Chroma native binary targets macOS 26.6.2 arm64; other systems need a compatible native build. The Python dependency lock includes MLX/MFLUX for Z-Image, FLUX.2 Klein and Qwen-Image 2.1 Turbo. This is not a Windows/CUDA distribution.
 
 ```sh
 cd /absolute/path/to/downloaded-project
@@ -20,12 +20,15 @@ Choose an image model:
   1. Z-Image Turbo (z-image-turbo)
   2. Chroma1-HD (chroma1-hd)
   3. Chroma1-Flash (chroma1-flash)
+  4. FLUX.2 Klein 4B (flux2-klein-4b)
+  5. FLUX.2 Klein 9B (flux2-klein-9b)
+  6. Qwen-Image 2.1 Turbo (qwen-image-2.1-turbo)
 Model [1 / Z-Image Turbo]:
 ```
 
 Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads the selected image model's required assets plus one shared prompt-expansion LLM; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
 
-**`make serve` numbers only models already set up.** Other supported models are shown separately without numbers, with the command to set each up. For example, with only Z-Image installed:
+**`make serve` numbers only models already set up.** Klein names show `(edits enabled)` and Qwen shows `(edit selected area enabled)`. Other supported models are shown separately without numbers, with the command to set each up. For example, with only Z-Image installed:
 
 ```text
 Choose a set up image model:
@@ -34,6 +37,9 @@ Choose a set up image model:
 Not set up (not selectable):
   - Chroma1-HD (chroma1-hd) — make setup MODEL=chroma1-hd
   - Chroma1-Flash (chroma1-flash) — make setup MODEL=chroma1-flash
+  - FLUX.2 Klein 4B (edits enabled) (flux2-klein-4b) — make setup MODEL=flux2-klein-4b
+  - FLUX.2 Klein 9B (edits enabled) (flux2-klein-9b) — make setup MODEL=flux2-klein-9b
+  - Qwen-Image 2.1 Turbo (edit selected area enabled) (qwen-image-2.1-turbo) — make setup MODEL=qwen-image-2.1-turbo
 Run a model's setup command to add it to the numbered options, then run make serve again.
 Model [1 / Z-Image Turbo]:
 ```
@@ -60,6 +66,9 @@ First setup also asks for a model store folder. **Blank/Enter uses the project d
 <store>/z-image-turbo/{weights,images,references,image-index,cache,loras,logs}
 <store>/chroma1-hd/{weights,images,references,image-index,cache,loras,logs}
 <store>/chroma1-flash/{weights,images,references,image-index,cache,loras,logs}
+<store>/flux2-klein-4b/{weights,images,references,image-index,cache,loras,logs}
+<store>/flux2-klein-9b/{weights,images,references,image-index,cache,loras,logs}
+<store>/qwen-image-2.1-turbo/{weights,images,references,image-index,cache,loras,logs}
 <store>/prompt-enhancer/weights  # shared Qwen3.5-2B 4-bit, about 1.7 GB
 ```
 
@@ -105,12 +114,21 @@ If the launcher finds the same model/mode already running from this checkout, it
 | `z-image-turbo` | MFLUX/MLX 4-bit | 9 | 1–12 | MFLUX Turbo defaults |
 | `chroma1-hd` | stable-diffusion.cpp Metal, Q4_K_M | 40 | 1–80 | Euler, CFG 3 |
 | `chroma1-flash` | stable-diffusion.cpp Metal, Q4_K_M | 8 | 1–40 | Heun, CFG 1, beta schedule, flow shift 1 |
+| `flux2-klein-4b` | MFLUX/MLX 8-bit | 4 | 1–4 | Distilled, guidance 1 |
+| `flux2-klein-9b` | MFLUX/MLX 4-bit | 4 | 1–4 | Distilled, guidance 1 |
+| `qwen-image-2.1-turbo` | MFLUX/MLX 4-bit, vision-capable | 8 | 1–8 | Checkpoint Turbo sigma schedule, guidance 1 |
 
 Pinned Hugging Face sources and revisions are in `model_profiles.py`: [Z-Image Turbo](https://huggingface.co/filipstrand/Z-Image-Turbo-mflux-4bit), [Chroma1-HD](https://huggingface.co/silveroxides/Chroma1-HD-GGUF), [Chroma1-Flash](https://huggingface.co/silveroxides/Chroma1-Flash-GGUF), [shared T5 encoder](https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf), and [VAE](https://huggingface.co/lodestones/Chroma1-HD). Native runtime release, download URL and checksums are pinned there too. Download scripts resume Hugging Face transfers; Chroma files and the runtime archive are SHA256-verified before recording completion. See upstream cards/licenses for usage terms.
 
-Only fields in the [generation API reference](api.md#generation-api) are accepted. Negative prompts, guidance/CFG, custom samplers/schedulers, masks and instruction-editing controls are not exposed as request options; Chroma sampling values above are fixed by its backend profile. No model-specific API option namespace is implemented yet.
+Klein uses pinned community conversions: [4B Q8](https://huggingface.co/mflux-community/flux2-klein-4b-mflux-q8) and [9B Q4](https://huggingface.co/mflux-community/flux2-klein-9b-mflux-q4). [Qwen Turbo Q4](https://huggingface.co/mflux-community/qwen-image-2-1-turbo-mflux-q4) includes the text/vision encoder, processor and Turbo schedule. Setup validates required files, quantization, every indexed shard and Qwen's vision keys before writing its completion marker. Serving checks that marker against the pinned source/revision. This is a file/index preflight, not a real inference or full checksum scan.
 
-Z-Image keeps a loaded instance; Chroma loads GPU weights per CLI generation and releases them afterward. Chroma can be substantially slower on this Mac. Native sampling progress, when available, appears in `/health` while busy. Resolution, reference preservation, and steps affect latency. Do not infer Mac performance from CUDA benchmarks.
+Klein 4B is Apache 2.0. Klein 9B's FLUX Non-Commercial License requires a separate BFL license for commercial model use. Qwen's [Research License](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) permits research/evaluation use only and requires separate permission for commercial model use. Their restrictions are surfaced conditionally at startup, on the webpage, and under each model's exact ID in discovery/capabilities; no acknowledgment step is added.
+
+Only fields in the [generation API reference](api.md#generation-api) are accepted. Negative prompts, guidance/CFG, custom samplers/schedulers, multiple-reference controls are not exposed as request options; Qwen photo edits also accept a mask; Chroma sampling values above are fixed by its backend profile. No model-specific API option namespace is implemented yet.
+
+Selected-area edits are available through both servers: generator `/v1/jobs` accepts flat `task:"edit"`, `reference_image` and `mask_image`; standalone queue `/v1/jobs` accepts those fields inside `request` with `model:"qwen-image-2.1-turbo"`. The queue can accept edits while the generator is off and validates media only when consumed. Keep source/mask paths accessible on this Mac through recovery. See the [complete selected-area examples](api.md#selected-area-qwen-edits).
+
+Z-Image keeps a loaded instance. Chroma, Klein and Qwen load GPU weights per CLI generation and release them afterward. Klein and Qwen run the pinned MFLUX CLI with local checkpoint paths, offline flags and low-RAM callbacks; Qwen also uses VAE tiling. Their ready status means local assets and the worker passed preflight; GPU weights load on the first request. Text-only generation and reference editing choose the appropriate runtime pipeline. For Klein/Qwen references, omit `image_strength`; the prompt specifies the edit. Dedicated photo edits use `task:"edit"` or `/v1/images/edits`, require a source, support optional preservation requirements, and disable composition variation. Qwen accepts a mask; Klein supports whole-photo edits. Generate remains available for every model. The webpage selector shows inactive-model setup/start commands and never switches the startup backend automatically. Qwen Turbo is intended for 1024px or larger, and memory varies with resolution and reference conditioning. The new models have not yet had real inference measured on this Mac. Chroma can be substantially slower on this Mac. Native sampling progress, when available, appears in `/health` while busy. Resolution, reference preservation, and steps affect latency. Do not infer Mac performance from CUDA benchmarks.
 
 ## Optional adapters
 

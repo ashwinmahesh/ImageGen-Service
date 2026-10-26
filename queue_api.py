@@ -11,13 +11,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from job_queue import JobStore, QueueConflict, fingerprint
-from model_profiles import PROFILES, DEFAULT_MODEL
+from model_profiles import PROFILES, DEFAULT_MODEL, model_details
+from photo_workflows import supported_tasks
 from queue_storage import queue_database
 from adapter_catalog import model_loras
 
 PROJECT_ROOT=Path(__file__).resolve().parent
 DEFAULT_QUEUE_PORT=55302
-Model=Literal['z-image-turbo','chroma1-hd','chroma1-flash']
+Model=Literal[tuple(PROFILES)]
 Status=Literal['pending','queued','running','succeeded','failed','cancelled']
 
 
@@ -117,7 +118,10 @@ def create_app(project=PROJECT_ROOT):
 
     @app.get('/v1/models',summary='List supported queue model IDs')
     def models():
-        return {'default_model':DEFAULT_MODEL,'data':[{'id':identifier,'name':profile['name']} for identifier,profile in PROFILES.items()]}
+        return {'default_model':DEFAULT_MODEL,'data':[{'id':identifier,'name':profile['name'],
+            'reference_mode':profile.get('reference_mode','variation'),'tasks':supported_tasks(profile),
+            'mask_editing':bool(profile.get('mask_editing')),identifier:model_details(identifier)}
+            for identifier,profile in PROFILES.items()]}
 
     @app.get('/v1/loras',response_model=LoRAList,response_model_exclude_none=True,
              summary='List compatible LoRAs for a model',description=(
@@ -139,7 +143,11 @@ def create_app(project=PROJECT_ROOT):
 
     @app.post('/v1/jobs',response_model=QueueJob,status_code=202,summary='Commit a request to its model queue',description=(
         'model (default z-image-turbo) routes the entry to state/queues/<model>/jobs.sqlite3. request contains '
-        'the image settings, such as prompt, size, seed, n and expand_prompt. Missing generation '
+        'the image settings, such as prompt, size, seed, n and expand_prompt. For photo edits, include '
+        'task:"edit", reference_image and optional preserve inside request. Qwen selected-area edits also '
+        'accept request.mask_image: an absolute server-local mask path matching the oriented source photo '
+        '(white edits, black preserves at output resolution). Klein supports whole-photo edits only. '
+        'The queue persists these fields without reading media; model/media validation happens when consumed. Missing generation '
         'defaults and a random seed are frozen by the generator before rendering. '
         'generate_immediately:true inside request gives next-free-slot priority, without interrupting '
         'active work; default false joins the end of the queue. Idempotency-Key is scoped to the model: matching '
@@ -229,7 +237,10 @@ def with_model(request,model):
 
 class Replacement(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed.',examples=[{'prompt':'A lantern in a misty forest','size':'1024x1024','n':1,'expand_prompt':True}])
+    request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed. Photo edits use task:"edit", reference_image, optional preserve, and Qwen-only mask_image (white edits, black preserves). Paths must remain accessible on the generator Mac until completion and recovery.',examples=[
+        {'prompt':'A lantern in a misty forest','size':'1024x1024','n':1,'expand_prompt':True},
+        {'task':'edit','prompt':'Change the jacket to green.','reference_image':'/absolute/path/photo.png',
+         'mask_image':'/absolute/path/mask.png','preserve':'Face, pose and background','size':'1024x1024'}])
 
 
 class Submission(Replacement):

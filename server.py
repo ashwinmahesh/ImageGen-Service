@@ -26,11 +26,12 @@ if __name__ == '__main__':
     if selected.model:
         os.environ['IMAGE_MODEL']=selected.model
 
-from model_profiles import PROFILES
+from model_profiles import PROFILES, model_details
+from photo_workflows import supported_tasks, edit_prompt
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
-from reference_geometry import prepare_geometry, ReferenceError
+from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, ReferenceError
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
 from generation_worker import QueueWorker
@@ -38,7 +39,7 @@ from queue_storage import initialize_queue
 from queue_client import QueueClient
 from queue_api import DEFAULT_QUEUE_PORT, MoveJob
 import prompt_expander
-from prompt_policy import public_guidance
+from prompt_policy import public_guidance, public_edit_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
 
 # Downloads are an explicit separate step. Serving never needs the network.
@@ -65,7 +66,13 @@ def load_model():
     require_storage(ROOT)
     if not (MODEL_DIR / "download.json").exists():
         raise RuntimeError(f"Model is missing or incomplete. Run `make download MODEL={API_MODEL}` first.")
-    if PROFILE['backend']=='mflux':
+    notice=PROFILE.get('license',{}).get('notice')
+    if notice:
+        log.warning('%s: %s %s',PROFILE['name'],notice,PROFILE['license']['url'])
+    if PROFILE.get('cli_module'):
+        from mflux_engine import MfluxEngine
+        model=MfluxEngine()
+    elif PROFILE['backend']=='mflux':
         import mlx.core as mx
         from engine import ZImageEngine
         if not mx.metal.is_available():
@@ -116,8 +123,8 @@ app = FastAPI(
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
         "absolute directory on this Mac. Every response includes `file_path` and `metadata_path`. "
         "These are server-local filesystem paths; `url` is the browser-accessible PNG. "
-        "Use `reference_image` for one local reference photo (image-to-image); `image_strength` "
-        "controls how strongly the starting image is preserved. The webpage can also upload a photo "
+        "Use `reference_image` for one local reference photo. FLUX.2 Klein and Qwen 2.1 Turbo "
+        "apply editing instructions; Z-Image and Chroma make variations controlled by `image_strength`. The webpage can also upload a photo "
         "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`. "
         "The generator API reads/writes project-local SQLite directly. "
         f"The independent queue API at `{queue_client.url}` accepts agent requests while the generator is stopped. "
@@ -141,7 +148,10 @@ async def queue_storage_error(request,error):
 
 class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: Literal['z-image-turbo','chroma1-hd','chroma1-flash'] = API_MODEL
+    model: Literal[tuple(PROFILES)] = API_MODEL
+    task: Literal['generate','edit'] = Field(default='generate',description='generate retains the existing generation/reference workflow. edit requires a source photo and an editing-capable startup model; prompt is an edit instruction, with preservation-focused expansion and no composition variation.')
+    preserve: str | None = Field(default=None,max_length=1000,description='Edit task only: optional explicit requirements for what must stay unchanged, such as face, pose or background. These are prompt constraints, not a pixel mask or a guarantee.')
+    mask_image: str | None = Field(default=None,max_length=4096,description='Qwen photo edits only: absolute local path to a mask matching the oriented source photo. White pixels are edited, black pixels preserve the resized source. Upload mask PNG bytes through /v1/reference-images if needed.')
 
     @field_validator('model')
     @classmethod
@@ -171,11 +181,11 @@ class GenerateRequest(BaseModel):
     )
     reference_image: str | None = Field(
         default=None, max_length=4096,
-        description="Optional absolute local image path (~/ supported) for image-to-image generation. One reference only; a path string, not HTTP URLs or raw image bytes. PNG, JPEG, WebP and other Pillow-readable images. Output automatically preserves the oriented photo aspect ratio without stretching. The longer dimension of size sets the output long edge; its width/height shape is ignored. Uploaded paths are supported via /v1/reference-images.",
+        description="Optional absolute local image path (~/ supported). One reference only; a path string, not HTTP URLs or raw image bytes. FLUX.2 Klein and Qwen 2.1 Turbo follow prompt editing instructions; Z-Image and Chroma make image-to-image variations. Output preserves the oriented photo aspect ratio; the longer dimension of size sets its long edge. Uploads are supported via /v1/reference-images.",
     )
     image_strength: float = Field(
         default=0.6, ge=0, lt=1,
-        description="Reference preservation strength, following MFLUX semantics: higher values retain more of the original and run fewer denoising steps. 0 starts from full noise; 0.6 is a useful starting point; must be less than 1. Only used with reference_image.",
+        description="Variation models only (Z-Image and Chroma): higher preserves more of the reference and runs fewer denoising steps. Range [0,1), default 0.6. Omit for FLUX.2 Klein and Qwen 2.1 Turbo instruction editing; explicitly supplying it for those models is rejected.",
     )
 
     @field_validator("tags", mode="before")
@@ -190,8 +200,28 @@ class GenerateRequest(BaseModel):
             return None
         return cls.validate_output_dir(value)
 
+    @field_validator('mask_image')
+    @classmethod
+    def validate_mask_path(cls,value):
+        return cls.validate_output_dir(value) if value is not None else None
+
     @model_validator(mode="after")
     def validate_reference_settings(self):
+        if self.task=='edit':
+            if 'edit' not in supported_tasks(PROFILE):
+                raise ValueError('Photo editing requires FLUX.2 Klein or Qwen-Image 2.1 Turbo; start an editing model with make serve MODEL=<id>')
+            if self.reference_image is None:
+                raise ValueError('Edit photo requires reference_image')
+            if self.vary_prompt:
+                raise ValueError('Composition variation is unavailable for photo edits; use n for alternate attempts at the same edit')
+            if len(edit_prompt(self.prompt,self.preserve))>4000:
+                raise ValueError('Edit instruction and preservation requirements must fit within 4000 characters including editing guidance')
+        elif self.preserve is not None:
+            raise ValueError('preserve requires task:edit')
+        if self.mask_image is not None and (self.task!='edit' or not PROFILE.get('mask_editing')):
+            raise ValueError('mask_image requires task:edit with Qwen-Image 2.1 Turbo')
+        if PROFILE.get('reference_mode')=='edit' and 'image_strength' in self.model_fields_set:
+            raise ValueError('image_strength is unsupported for instruction editing; omit it and describe the desired change in prompt')
         if self.reference_image is not None and self.steps < 2:
             raise ValueError("Reference-image generation requires at least 2 steps")
         if self.reference_image is None and "image_strength" in self.model_fields_set:
@@ -240,6 +270,7 @@ class PromptExpansion(BaseModel):
     model: str
     revision: str
     policy_version: int
+    task: Literal['generate','edit'] | None = None
     seconds: float
     original_image_tokens: int | None = None
     expanded_image_tokens: int | None = None
@@ -259,6 +290,7 @@ class PromptExpansion(BaseModel):
 
 
 class ImageResult(BaseModel):
+    task: Literal['generate','edit'] = 'generate'
     candidate_index: int = Field(default=1,description="One-based option position in the batch.")
     candidate_count: int = Field(default=1,description="Requested image count for this batch.")
     prompt_expansion: PromptExpansion | None = None
@@ -363,12 +395,13 @@ def generate(payload, job=None):
         raise LocalFileError(str(error)) from error
     try:
         with prepare_geometry(payload.reference_image, payload.size, ROOT / "cache" / "scratch") as geometry:
-            return generate_with_geometry(payload, geometry, job)
+            with prepare_mask(payload.mask_image,geometry,ROOT/'cache'/'scratch') as mask_path:
+                return generate_with_geometry(payload, geometry, job, mask_path=mask_path)
     except ReferenceError as exc:
         raise LocalFileError(str(exc)) from exc
 
 
-def generate_with_geometry(payload, geometry, job=None):
+def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
     try:
         if payload.lora is not None and not app.state.loras_enabled:
             raise ValueError("LoRAs are disabled for this server; restart without --no-loras to enable them")
@@ -396,8 +429,10 @@ def generate_with_geometry(payload, geometry, job=None):
         raise LocalFileError(f"Cannot write to output_dir {output_dir}: {exc.strerror}") from exc
     started = time.monotonic()
     try:
-        tiled = PROFILE['backend']=='sd-cpp' or max(width,height)>1024
-        if PROFILE['backend']=='mflux':
+        child_backend=PROFILE['backend']=='sd-cpp' or bool(PROFILE.get('cli_module'))
+        instruction_edit=PROFILE.get('reference_mode')=='edit'
+        tiled = PROFILE.get('vae_tiling',False) if PROFILE.get('cli_module') else PROFILE['backend']=='sd-cpp' or max(width,height)>1024
+        if not child_backend:
             if tiled:
                 from mflux.models.common.vae.tiling_config import TilingConfig
                 model.tiling_config=TilingConfig()
@@ -405,14 +440,18 @@ def generate_with_geometry(payload, geometry, job=None):
                 model.tiling_config=None
         else:
             model.active_log=ROOT/'logs'/(identifier+'.log')
+        rendering_prompt=edit_prompt(payload.prompt,payload.preserve) if payload.task=='edit' else payload.prompt
         result = model.generate_image(
-            seed=seed, prompt=payload.prompt, width=width, height=height,
+            seed=seed, prompt=rendering_prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
-            **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and PROFILE['backend']=='sd-cpp' else {}),
+            **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and child_backend else {}),
             image_path=geometry.image_path,
-            image_strength=payload.image_strength if payload.reference_image is not None else None,
+            image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
+            **({'mask_path':mask_path} if mask_path else {}),
         )
         result.save(str(path), overwrite=True)
+        if mask_path:
+            composite_edit(path,geometry.image_path,mask_path)
         geometry.finish(path)
         elapsed = round(time.monotonic() - started, 2)
         metadata = {
@@ -425,18 +464,24 @@ def generate_with_geometry(payload, geometry, job=None):
             "steps": payload.steps, "seconds": elapsed,
             "file_path": str(final_path), "metadata_path": str(final_path.with_suffix(".json")),
             "reference_image": payload.reference_image,
-            "image_strength": payload.image_strength if payload.reference_image is not None else None,
+            "image_strength": payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
             "vae_tiling": tiled, "lora": selection,
-            "effective_prompt": effective_prompt(payload.prompt, selection),
+            "effective_prompt": effective_prompt(rendering_prompt, selection),
             "loras_enabled": app.state.loras_enabled,
         }
+        if payload.task=='edit':
+            metadata.update(task='edit',preserve=payload.preserve,mask_image=payload.mask_image,
+                            edit_scope='mask' if payload.mask_image else 'whole_photo')
+        if PROFILE.get('cli_module'):
+            metadata[API_MODEL]={**model_details(API_MODEL),'low_ram':True,
+                                 'reference_mode':'edit' if payload.reference_image else 'none'}
         if job:
             metadata.update(job_id=job.get('_batch_id',identifier),request_fingerprint=fingerprint(job['request']))
             if job.get('_batch_id'):
                 metadata.update(batch_id=job['_batch_id'],candidate_index=job['_candidate_index'],candidate_count=job['request']['n'])
             if job.get('prompt_expansion'):
                 metadata.update(prompt_expansion=job['prompt_expansion'],expanded_prompt=payload.prompt)
-                metadata[API_MODEL]={'prompt_expansion_guidance':public_guidance(API_MODEL)}
+                metadata.setdefault(API_MODEL,{})['prompt_expansion_guidance']=public_edit_guidance(API_MODEL) if payload.task=='edit' else public_guidance(API_MODEL)
         temporary=output_dir/f'.{identifier}.metadata.tmp'
         temporary.write_text(json.dumps(metadata,indent=2)+'\n')
         temporary.replace(final_path.with_suffix('.json'))
@@ -451,7 +496,7 @@ def generate_with_geometry(payload, geometry, job=None):
             path.unlink()
         raise
     finally:
-        if PROFILE['backend']=='mflux':
+        if PROFILE['backend']=='mflux' and not PROFILE.get('cli_module'):
             import mlx.core as mx
             mx.clear_cache()
         else:
@@ -497,7 +542,16 @@ def health():
 def capabilities():
     return {'model':API_MODEL,'name':PROFILE['name'],'backend':PROFILE['backend'],
             'default_steps':PROFILE['steps'],'max_steps':PROFILE['max_steps'],
-            API_MODEL:{'prompt_expansion_guidance':public_guidance(API_MODEL)},
+            API_MODEL:{**model_details(API_MODEL),'prompt_expansion_guidance':public_guidance(API_MODEL)},
+            'reference_mode':PROFILE.get('reference_mode','variation'),
+            'image_strength_supported':PROFILE.get('reference_mode')!='edit',
+            'tasks':supported_tasks(PROFILE),
+            'photo_editing':{'supported':'edit' in supported_tasks(PROFILE),
+                'models':[identifier for identifier,profile in PROFILES.items() if 'edit' in supported_tasks(profile)],
+                'requires_reference':True,'default_long_edge':1024,'composition_variation':False,
+                'mask_supported':bool(PROFILE.get('mask_editing')),
+                'prompt_expansion_guidance':public_edit_guidance(API_MODEL) if 'edit' in supported_tasks(PROFILE) else None,
+                'expansion':'preserve the source and refine only the requested edit; text-only'},
             'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
             'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
             'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'queue_api_url':queue_client.url,'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
@@ -514,7 +568,9 @@ def models():
     return {'object':'list','active_model':API_MODEL,'data':[
         {'id':identifier,'object':'model','owned_by':'local','name':profile['name'],
          'active':identifier==API_MODEL,'downloaded':(MODEL_ROOTS[identifier]/'weights'/'download.json').is_file(),
-         'default_steps':profile['steps'],'max_steps':profile['max_steps']}
+         'default_steps':profile['steps'],'max_steps':profile['max_steps'],
+         'reference_mode':profile.get('reference_mode','variation'),'tasks':supported_tasks(profile),
+         'mask_editing':bool(profile.get('mask_editing')),identifier:model_details(identifier)}
         for identifier,profile in PROFILES.items()]}
 
 
@@ -523,6 +579,8 @@ class ExpandPromptRequest(BaseModel):
     prompt: str = Field(min_length=1,max_length=4000)
     lora: str | None = None
     lora_strength: float | None = Field(default=None,ge=0,le=2,allow_inf_nan=False)
+    task: Literal['generate','edit'] = 'generate'
+    preserve: str | None = Field(default=None,max_length=1000)
 
     @field_validator('prompt')
     @classmethod
@@ -533,6 +591,12 @@ class ExpandPromptRequest(BaseModel):
     def strength_requires_adapter(self):
         if self.lora is None and self.lora_strength is not None:
             raise ValueError('lora_strength requires lora')
+        if self.task=='edit' and 'edit' not in supported_tasks(PROFILE):
+            raise ValueError('Photo-edit instruction refinement requires an editing model')
+        if self.task!='edit' and self.preserve is not None:
+            raise ValueError('preserve requires task:edit')
+        if self.task=='edit' and len(edit_prompt(self.prompt,self.preserve))>4000:
+            raise ValueError('Edit instruction and preservation requirements exceed the prompt budget')
         return self
 
 
@@ -563,6 +627,7 @@ def expand_prompt(payload:ExpandPromptRequest):
             raise HTTPException(409,'Image inference is busy; preview again after it finishes.')
         return prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
                image_weights=MODEL_DIR,selection=selection,
+               **({'task':'edit','preserve':payload.preserve} if payload.task=='edit' else {}),
                inherited_fds=tuple(handle.fileno() for handle in [job_worker.lease,gpu] if handle))
     except prompt_expander.ExpansionError as error:
         raise HTTPException(422,str(error)) from error
@@ -580,14 +645,25 @@ class SyncGenerateRequest(GenerateRequest):
     generate_immediately: bool=Field(default=True,strict=True,description='Synchronous route defaults to immediate priority (next free slot); false waits in ordinary FIFO order.')
 
 
+class EditRequest(SyncGenerateRequest):
+    task: Literal['edit'] = 'edit'
+    reference_image: str = Field(max_length=4096,description='Required absolute local path to the photo to edit. Upload photo bytes through /v1/reference-images first if needed.')
+
+
 def normalized_request(payload):
     data=payload.model_dump()
+    if data['task']=='generate':
+        data.pop('task')
+    if data['preserve'] is None:
+        data.pop('preserve')
+    if data['mask_image'] is None:
+        data.pop('mask_image')
     # Keep legacy request fingerprints stable for the default disabled feature.
     if not data['expand_prompt']:
         data.pop('expand_prompt')
     if not data['vary_prompt']:
         data.pop('vary_prompt')
-    if data['reference_image'] is None:
+    if data['reference_image'] is None or PROFILE.get('reference_mode')=='edit':
         data.pop('image_strength',None)
     return data
 
@@ -621,6 +697,10 @@ def submit_job(payload,key=None,retry_of=None):
                     photo.verify()
             except (OSError,ValueError,Image.DecompressionBombError) as error:
                 raise ReferenceError(f'Cannot read reference_image: {error}') from error
+        if payload.mask_image:
+            from PIL import ImageOps
+            with Image.open(payload.reference_image) as photo:
+                read_mask(payload.mask_image,ImageOps.exif_transpose(photo).size)
         selection=resolve_lora(payload.lora,payload.lora_strength)
         record=job_store.enqueue(data,request_hash,key=key,
             adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
@@ -681,6 +761,7 @@ def prepare_job_prompt(payload,job):
         if not job.get('prompt_expansion'):
             job_worker.stage='expanding_prompt'
             expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
+                  **({'task':'edit','preserve':payload.preserve} if payload.task=='edit' else {}),
                   image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
             job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
         prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
@@ -750,6 +831,7 @@ def generation_response(path,metadata,request,response_format='url'):
         image_path=Path(saved['file_path'])
         width,height=map(int,saved['size'].split('x'))
         item={'tags':saved['tags'],'seed':saved['seed'],'file_path':str(image_path),'metadata_path':str(image_path.with_suffix('.json')),
+              'task':saved.get('task','generate'),
               'size':saved['size'],'width':width,'height':height,'generation_size':saved['generation_size'],
               'candidate_index':saved.get('candidate_index',1),'candidate_count':saved.get('candidate_count',1)}
         if saved.get('prompt_expansion'): item['prompt_expansion']=saved['prompt_expansion']
@@ -807,7 +889,7 @@ def job_response(job,request,*,include_result=True):
 
 
 @app.post('/v1/jobs',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
-          summary='Persist an image job',description='Default generate_immediately=false joins the end of the queue. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
+          summary='Persist an image job',description='Accepts generation or task:"edit" with reference_image and optional preserve. Qwen selected-area edits also accept mask_image: white edits, black preserves at output resolution. Default generate_immediately=false joins the end of the queue. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
 def enqueue_job(payload:GenerateRequest,request:Request,
                 idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     return job_response(submit_job(payload,idempotency_key),request)
@@ -925,6 +1007,14 @@ async def generations(payload:SyncGenerateRequest,request:Request,
         raise HTTPException(400 if record['status']=='cancelled' else (record.get('error_status') or 500),record['error'] or 'Job was cancelled')
     metadata=record['result']
     return generation_response(None,metadata,request,payload.response_format)
+
+
+@app.post('/v1/images/edits',response_model=GenerateResponse,response_model_exclude_none=True,
+          summary='Edit an existing photo and wait for the result',
+          description='JSON request, not multipart. Requires reference_image and an editing-capable startup model. Uses the same durable worker as generation. For asynchronous editing, POST /v1/jobs with task:"edit". Qwen supports optional mask_image: white edits, black preserves the resized source. Klein supports whole-photo instruction editing. Unmasked edits preserve unrequested content through prompt guidance rather than a pixel guarantee.')
+async def photo_edits(payload:EditRequest,request:Request,
+                      idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
+    return await generations(payload,request,idempotency_key)
 
 
 def catalog_roots():

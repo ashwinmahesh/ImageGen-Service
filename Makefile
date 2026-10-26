@@ -37,6 +37,7 @@ help:
 	@echo 'make setup     Choose a model, install dependencies and download image + prompt models (one time)'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
 	@echo 'Choose explicitly: make serve MODEL=chroma1-flash PORT=5733'
+	@echo 'Photo editing models: flux2-klein-4b, flux2-klein-9b, qwen-image-2.1-turbo'
 
 download-realism:
 	"$(PYTHON)" download_loras.py --id realism

@@ -10,6 +10,9 @@ from enhancer_profile import REPOSITORY, REVISION, check_assets
 import hashlib
 import re
 from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, guidance_for, public_guidance, style_context, style_anchor, example_for
+from prompt_policy import EDIT_POLICY_VERSION, EDIT_SYSTEM_PROMPT, edit_guidance_for
+from model_profiles import PROFILES
+from photo_workflows import supported_tasks, edit_prompt
 
 
 
@@ -22,12 +25,15 @@ def expansion_capability(enabled, image_model=None):
             'license': 'Apache-2.0', 'text_only': True,
             'guidance_profile': guidance_for(image_model)['id'] if image_model else None,
             'batch_variations': True,
+            'photo_editing':{'available':image_model in PROFILES and 'edit' in supported_tasks(PROFILES[image_model]),
+                            'guidance_profile':edit_guidance_for(image_model)['id'] if image_model in PROFILES and 'edit' in supported_tasks(PROFILES[image_model]) else None,
+                            'text_only':True,'composition_variation':False},
             'note': 'Keeps your description verbatim and appends visual detail. Does not inspect reference photos. Opt in with expand_prompt:true; add vary_prompt:true for distinct batch compositions. No automatic compression.'}
 
 
-def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=()):
+def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None):
     return _expand(prompt,project=project,image_model=image_model,image_weights=image_weights,
-                   selection=selection,inherited_fds=inherited_fds)
+                   selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve)
 
 
 def expand_batch(prompt, *, count, project, image_model, image_weights, selection=None, inherited_fds=()):
@@ -35,11 +41,17 @@ def expand_batch(prompt, *, count, project, image_model, image_weights, selectio
                    selection=selection,inherited_fds=inherited_fds)
 
 
-def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None):
+def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None, task='generate', preserve=None):
+    if task not in ('generate','edit'):
+        raise ValueError('Unknown expansion task')
     folder = check_assets(project)
     command = [sys.executable, str(Path(__file__).with_name('prompt_expander.py')), '--worker']
     request = {'prompt': prompt, 'weights': str(folder), 'image_model': image_model,
                'image_weights': str(image_weights), 'trigger': (selection or {}).get('trigger_prompt', '')}
+    if task=='edit':
+        if count is not None:
+            raise ValueError('Photo edits cannot use composition variation')
+        request.update(task='edit',preserve=preserve)
     if count is not None:
         if type(count) is not int or not 2<=count<=5: raise ValueError('Variation count must be 2–5')
         request['variation_count']=count
@@ -68,7 +80,7 @@ def _expand(prompt, *, project, image_model, image_weights, selection=None, inhe
         return [{**item,'model':REPOSITORY,'revision':REVISION,'mode':'expand','policy_version':POLICY_VERSION}
                 for item in data['candidates']]
     return {**data, 'model': REPOSITORY, 'revision': REVISION, 'mode': 'expand',
-            'policy_version': POLICY_VERSION, 'seconds': round(time.monotonic()-started, 2)}
+            'policy_version': EDIT_POLICY_VERSION if task=='edit' else POLICY_VERSION, 'seconds': round(time.monotonic()-started, 2)}
 
 
 def validate_expansion(original, data):
@@ -129,7 +141,7 @@ def check_added_details(original, addition):
 
 def image_token_count(prompt, request):
     if request['image_model'] != 'z-image-turbo':
-        return None  # Native Chroma uses GGUF T5; do not substitute the LLM tokenizer.
+        return None  # Other pipelines' formatting is not measured here; never substitute the LLM tokenizer.
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(str(Path(request['image_weights'])/'tokenizer'), local_files_only=True)
     trigger = request.get('trigger', '').strip()
@@ -144,6 +156,8 @@ def run_worker(request):
     original = request['prompt']
     if not original.strip() or len(original) > 4000:
         raise ExpansionError('Prompt must contain 1–4000 characters.')
+    if request.get('task')=='edit':
+        return run_edit_worker(request)
     original_tokens = image_token_count(original, request)
     if original_tokens is not None and original_tokens >= 490:
         raise ExpansionError(f'Original prompt uses {original_tokens}/512 image-model tokens. There is too little room to expand; shorten it yourself or disable expansion. It was not compressed.')
@@ -210,6 +224,62 @@ def run_worker(request):
         validate_variations(original,candidates,count)
         return {'candidates':candidates}
     return candidates[0]
+
+
+def run_edit_worker(request):
+    """Photo edits use their own policy, with no scene/composition expansion path."""
+    original=request['prompt']
+    identifier=request['image_model']
+    if identifier not in PROFILES or 'edit' not in supported_tasks(PROFILES[identifier]):
+        raise ExpansionError('Instruction refinement requires an editing-capable model')
+    if request.get('variation_count') is not None:
+        raise ExpansionError('Composition variation is unavailable for photo editing')
+    preserve=request.get('preserve')
+    if preserve is not None and (not isinstance(preserve,str) or len(preserve)>1000):
+        raise ExpansionError('Preservation requirements must be at most 1000 characters')
+    guidance=edit_guidance_for(identifier)
+    messages=[{'role':'system','content':EDIT_SYSTEM_PROMPT+'\n\n'+guidance['instructions']},
+              {'role':'user','content':'Refine only this requested photo edit with at most 60 NEW words.\n'
+               +json.dumps({'instruction':original,'preserve':preserve},ensure_ascii=False)}]
+    from mlx_lm import load, stream_generate
+    from mlx_lm.sample_utils import make_sampler
+    model,tokenizer=load(request['weights'])
+    formatted=tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True,enable_thinking=False)
+    text,final='',None
+    for response in stream_generate(model,tokenizer,prompt=formatted,max_tokens=256,sampler=make_sampler(temp=0)):
+        text+=response.text
+        final=response
+    if final is None or final.finish_reason=='length':
+        raise ExpansionError('Edit-instruction refinement exceeded its output limit; retry or disable refinement')
+    try:
+        value=re.fullmatch(r'```(?:json)?\s*(.*?)\s*```',text.strip(),re.S)
+        details=json.loads(value.group(1) if value else text)
+        if not isinstance(details,dict) or set(details)!={'edit_details','preservation'}:
+            raise ValueError('Wrong edit fields')
+        if not all(isinstance(item,str) for item in details.values()):
+            raise ValueError('Edit fields must be strings')
+        details={key:value.strip() for key,value in details.items()}
+        addition=' '.join(value for value in details.values() if value)
+        if not addition or len(addition)>1200 or '<think>' in addition or '<lora:' in addition.lower():
+            raise ValueError('Invalid edit details')
+        # Narrow guards catch unrequested camera changes; the policy handles broader fidelity.
+        for phrase in ('wide shot','close-up','new camera angle','reframe','crop the image'):
+            if phrase in addition.lower() and phrase not in original.lower():
+                raise ValueError('Unrequested framing change')
+        data={'original_prompt':original,'expanded_prompt':original+'\n'+addition,'task':'edit'}
+        validate_expansion(original,data)
+        if len(edit_prompt(data['expanded_prompt'],preserve))>4000:
+            raise ValueError('Edit instruction exceeds the final prompt budget')
+    except (ValueError,TypeError,KeyError) as error:
+        raise ExpansionError('The refiner did not return usable, scoped edit instructions; retry or disable refinement') from error
+    import resource
+    data.update(details=details,image_model=identifier,guidance_profile=guidance['id'],guidance_version=1,
+                original_image_tokens=None,expanded_image_tokens=None,image_token_limit=None,
+                sampling={'temperature':0.0},policy_version=EDIT_POLICY_VERSION,
+                policy_sha256=hashlib.sha256(json.dumps([EDIT_SYSTEM_PROMPT,guidance,preserve],sort_keys=True).encode()).hexdigest(),
+                peak_mlx_memory_gb=round(final.peak_memory,3),
+                peak_process_rss_gb=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/(1e9 if sys.platform=='darwin' else 1e6),3))
+    return data
 
 
 if __name__ == '__main__':

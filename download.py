@@ -8,6 +8,7 @@ import urllib.request
 import zipfile
 from config import ASSETS, MODEL_DIR, RUNTIME_DIR, RUNTIME_RELEASE, RUNTIME_URL, RUNTIME_SHA256, PROFILE, MODEL_ID, MODEL_REVISION, SHARED_ROOT, SHARED_ASSETS
 from huggingface_hub import hf_hub_download
+from model_assets import validate_snapshot
 
 
 def digest(path):
@@ -59,7 +60,10 @@ def main():
     if PROFILE['backend']=='mflux':
         from huggingface_hub import snapshot_download
         snapshot_download(repo_id=MODEL_ID,revision=MODEL_REVISION,local_dir=str(MODEL_DIR),
-            allow_patterns=['text_encoder/*','tokenizer/*','transformer/*','vae/*','README.md'],max_workers=3)
+            allow_patterns=['text_encoder/*','tokenizer/*','transformer/*','vae/*','processor/*',
+                            'scheduler/*','model_index.json','manifest.json','README.md','LICENSE*'],max_workers=3)
+        if PROFILE.get('cli_module'):
+            validate_snapshot(MODEL_DIR,PROFILE)
         record={'repository':MODEL_ID,'revision':MODEL_REVISION}
     else:
         # Flash needs the shared encoder/VAE, but does not download the HD diffusion model.

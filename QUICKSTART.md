@@ -32,7 +32,7 @@ If you already have the project, open Terminal in that folder and run `make setu
 
 Follow the setup questions:
 
-1. **Choose a model.** Press Enter for **Z-Image Turbo**, or select Chroma1-HD or Chroma1-Flash.
+1. **Choose a model.** Press Enter for **Z-Image Turbo**, or select Chroma1-HD, Chroma1-Flash, FLUX.2 Klein 4B/9B or Qwen-Image 2.1 Turbo.
 2. **Choose a storage folder.** Press Enter to keep model downloads and pictures inside the project. To use an external SSD, enter an absolute path such as `/Volumes/MySSD/models`.
 3. **Wait for setup to finish.** It installs dependencies and downloads the chosen image model plus a shared Qwen prompt-expansion model. Setup does not start either server.
 
@@ -52,7 +52,7 @@ From the project folder, run:
 make serve
 ```
 
-1. Select an installed model. Enter prefers Z-Image Turbo when it is ready; models you haven't set up appear separately with installation commands.
+1. Select an installed model. Klein names show `(edits enabled)`; Qwen shows `(edit selected area enabled)`. Enter prefers Z-Image Turbo when it is ready; models you haven't set up appear separately with installation commands.
 2. At **Enable local LLM prompt expansion? [Y/n]**, press Enter to keep expansion available. A small AI text model on your Mac can add visual detail to your image descriptions before generation; you can turn this off for each image.
 3. Wait for startup to finish. Keep this terminal open while using the generator.
 
@@ -71,7 +71,7 @@ These settings are chosen before the generator starts:
 
 | Choice | Example | What it does |
 | --- | --- | --- |
-| Model | `make serve MODEL=z-image-turbo` | Skips the model menu. Other IDs: `chroma1-hd`, `chroma1-flash`. |
+| Model | `make serve MODEL=z-image-turbo` | Skips the model menu. Other IDs: `chroma1-hd`, `chroma1-flash`, `flux2-klein-4b`, `flux2-klein-9b`, `qwen-image-2.1-turbo`. |
 | Prompt expansion | `make serve NO_LLM=1` | Disables the text LLM for this run. Otherwise it defaults on. |
 | LoRAs | `make serve NO_LORAS=1` | Disables optional style adapters and their UI selector. |
 | Generator port | `make serve PORT=5733` | Changes the webpage/API address to `localhost:5733`. |
@@ -79,7 +79,16 @@ These settings are chosen before the generator starts:
 
 Options can be combined, for example `make serve MODEL=z-image-turbo NO_LLM=1 NO_LORAS=1`. The examples below use the default ports.
 
-To add another model later, stop the generator, run `make setup MODEL=chroma1-flash`, then `make serve MODEL=chroma1-flash`. Each model keeps its own waiting jobs; one model runs at a time.
+To add an editing model later, run one of these setup commands, then select it at startup:
+
+```sh
+make setup MODEL=flux2-klein-4b
+make setup MODEL=flux2-klein-9b
+make setup MODEL=qwen-image-2.1-turbo
+make serve MODEL=flux2-klein-9b
+```
+
+Each setup downloads only its selected pre-quantized checkpoint and the shared prompt LLM. All three support text-only generation and single-photo instruction editing. Klein defaults to 4 steps; Qwen Turbo to 8. Each model keeps its own waiting jobs; one model runs at a time. Commercial model use of Klein 9B and Qwen Turbo requires a separate license; see the [model notes](docs/setup.md#models-and-effective-settings).
 
 ## 4. Generate from the webpage
 
@@ -108,12 +117,25 @@ The API names below map to the webpage controls.
 | Steps | `steps` | Defaults: Z-Image 9, Chroma HD 40, Flash 8. More steps cost time and do not always improve results. Keep the default to start. |
 | Seed | `seed` | Leave blank/omit for random. Reuse a returned seed to compare setting changes; a seed alone does not guarantee the same image across models/settings. |
 | Reference photo | `reference_image` | One absolute path on the server's Mac. The UI also uploads photos for you. Upload limits: 20 MiB and 40 megapixels. |
-| Keep the original | `image_strength` | With a reference: 0 inclusive to 1 exclusive, default 0.6. Higher preserves more; references require at least 2 steps. |
+| Keep the original | `image_strength` | Z-Image/Chroma variations only: [0,1), default 0.6; higher preserves more. Omit for Klein/Qwen instruction editing; the webpage hides it. All references require at least 2 steps. |
 | Style adapter | `lora`, `lora_strength` | Optional compatible installed LoRA; strength 0–2. Choose an ID from the API catalog. Configured trigger words are added automatically. |
 | Tags | `tags` | Optional labels for gallery search. UI: comma-separated text. API: an array such as `["Forest","Watercolor"]`. Editable later. |
 | Save location | `output_dir` | Absolute folder or `~/...` on the server's Mac. Omit to use the model's images folder. |
 | Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false to join the end of the queue. |
 | API result format | `response_format` | Use `"url"` for easy previews/downloads. Default is `"b64_json"`. Both save the PNG and metadata on disk. |
+
+With Klein or Qwen selected, upload a photo and write an instruction such as “Change the jacket to green; keep the face, pose and background.” The service follows the photo's aspect ratio. Use 1024px initially for Qwen Turbo; Qwen also supports a selected-area mask; multiple reference photos are not exposed. Turn off description expansion when you want to send your instruction exactly as written.
+
+### Edit an existing photo
+
+1. Start an editing model, for example `make serve MODEL=qwen-image-2.1-turbo`.
+2. Choose an editing-capable model, then select **Edit photo**. The button is disabled for unsupported models; hovering shows “Switch to a model that supports edits”. The edit model selector offers FLUX.2 Klein 4B/9B and Qwen Turbo. Inactive models show their setup/start commands; the server still runs one model at startup.
+3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
+4. For Qwen, choose **Selected area**, then drag a rectangle over the source preview. **Whole photo** remains available; Klein supports whole-photo editing only.
+5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
+6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
+
+The **Generate** view continues to offer Klein and Qwen for creating images from text, without requiring a source photo. Selected areas also work through both APIs: pass `mask_image` with `task:"edit"` in the generator's flat request, or inside the standalone queue's `request` envelope with `model:"qwen-image-2.1-turbo"`. White mask pixels edit; black pixels preserve. See the [photo-editing examples](docs/api.md#selected-area-qwen-edits).
 
 For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-image-turbo` before starting the generator. Normal setup downloads no LoRAs. Different seeds or composition prompts can help variety, but strongly constrained scenes and preserved references may still look similar.
 

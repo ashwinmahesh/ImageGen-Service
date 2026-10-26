@@ -2,7 +2,7 @@
 
 **A local image generation studio and API for Apple Silicon Macs.** Turn a description or reference photo into images, explore several options, and keep the results in a searchable gallery. After the initial downloads, image generation and prompt expansion run on your Mac without a cloud API.
 
-The project brings **Z-Image Turbo**, **Chroma1-HD** and **Chroma1-Flash** into one app. They share a webpage, API and saved-image library; choose the model when you start the generator. A small local language model helps develop descriptions and explore compositions, while a persistent queue lets people and agents submit work whenever they need it.
+The project brings **Z-Image Turbo**, **Chroma1-HD**, **Chroma1-Flash**, **FLUX.2 Klein 4B/9B** and **Qwen-Image 2.1 Turbo** into one app. They share a webpage, API and saved-image library; choose the model when you start the generator. A small local language model helps develop descriptions and explore compositions, while a persistent queue lets people and agents submit work whenever they need it.
 
 Use the webpage for hands-on experimentation, or call the API from scripts and other tools. You can leave the lightweight queue running all day and start the image generator only when you want to use your Mac's compute.
 
@@ -32,7 +32,7 @@ The LLM is instructed to keep framing and other details you've explicitly specif
 
 ### Guide the result with a reference or style adapter
 
-A reference photo provides a visual starting point. **Keep the original** controls how closely the result follows it: lower values allow larger changes. The service preserves the reference's aspect ratio automatically, which helps avoid stretching the composition. You can use a generated image as the next reference to keep developing an idea. This is image-to-image variation; precise localized edits and exact identity retention are not guaranteed.
+A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, drag a rectangle on the source preview to edit a selected area; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
 
 Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters).
 
@@ -41,6 +41,29 @@ Optional **LoRAs** are small adapters that influence the model's learned appeara
 Every image is saved with its prompt, expansion when used, seed, model, dimensions, steps and reference/adapter settings. Reuse a seed to compare setting changes, reuse a description, or make a variation from the result you like best. Saved settings give you a record of the choices behind each result.
 
 The effect of prompt expansion and composition planning depends on the scene and model. Preview and compare results to decide which choices work best. The [prompt-expansion design and evidence](docs/prompt-expansion.md) explains the research, implementation choices and limits of the local evaluation.
+
+## Generate or edit a photo
+
+**Generate** offers every supported model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each view keeps its own prompt. Editing defaults to a 1024px long edge with the source aspect ratio, the model's distilled step count, and alternate attempts at the same edit rather than new compositions.
+
+The editing refiner clarifies the requested change and preservation requirements; it cannot see the photo and does not use the generation scene-expansion policy. Source-photo preview and Qwen area selection are available for uploaded files and gallery images. The API supports `POST /v1/images/edits` or asynchronous `POST /v1/jobs` with `task:"edit"`. Selected-area edits use `mask_image` on both the generator API and the independent queue API; see the [masked request examples](docs/api.md#selected-area-qwen-edits).
+
+The model selector shows setup/start instructions for inactive models. The server continues to use one startup-selected backend; choosing a different dropdown entry does not load or switch models automatically.
+
+## Choose a model
+
+| Model ID | Checkpoint | Default steps | Reference workflow |
+| --- | --- | ---: | --- |
+| `z-image-turbo` | MLX 4-bit | 9 | Photo variations |
+| `chroma1-hd` | GGUF Q4_K_M | 40 | Photo variations |
+| `chroma1-flash` | GGUF Q4_K_M | 8 | Photo variations |
+| `flux2-klein-4b` | MLX 8-bit | 4 | Instruction editing |
+| `flux2-klein-9b` | MLX 4-bit | 4 | Instruction editing |
+| `qwen-image-2.1-turbo` | MLX 4-bit, including vision encoder | 8 | Whole-photo/masked editing and RGBA output |
+
+Add a model with `make setup MODEL=<model-id>`, then select it with `make serve MODEL=<model-id>`. Setup downloads weights; serving uses local assets only. Start Qwen Turbo around 1024px for detail; peak memory depends on the reference and output size. These additions have fake-backend coverage; real performance on a 24GB Mac still needs measurement.
+
+Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) and [Qwen Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) requires the respective owner's separate license. The service shows their model-specific notices at startup and in the webpage/API.
 
 ## Keep a searchable image library
 
@@ -69,7 +92,7 @@ The **Queue** panel lets you drag waiting jobs into a different order or use **R
 
 ## Built for local hardware and storage
 
-Quantized model weights and Apple's Metal GPU help make local inference practical. Image options render sequentially, and the prompt-expansion process releases its memory before image rendering. Resolution, image count and model choice affect memory use and generation time; Chroma can be substantially slower on this Mac.
+Quantized model weights and Apple's Metal GPU help make local inference practical. Image options render sequentially, and the prompt-expansion process releases its memory before image rendering. FLUX.2 Klein and Qwen use pre-quantized MLX checkpoints and low-memory child processes, releasing their weights after each image. Resolution, image count and model choice affect memory use and generation time; Chroma can be substantially slower on this Mac.
 
 Model downloads and generated media can live inside the project or on an external SSD. Setup remembers the location and creates links when needed. The source code, Python environment and SQLite queue databases stay in the project. Back up both your model/media store and the project's `state/` folder to preserve images, tags and waiting work. Downloaded weights and personal media are excluded from Git.
 
@@ -86,7 +109,7 @@ make setup
 make serve
 ```
 
-During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving offers installed models and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
+During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving offers installed models, labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
 
 `make serve` also starts the background queue API if needed. Ctrl-C stops the generator after its active batch finishes; `make stop-queue` stops the queue API separately. Use `make serve NO_LLM=1` to disable prompt expansion or `make serve NO_LORAS=1` to disable adapters.
 

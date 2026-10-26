@@ -20,7 +20,15 @@ Positive request-conditioned guidance covers photography, watercolor, vector art
 
 Every profile has its own ID/version, provenance and soft new-word allowance. Current profiles use a110-word soft cap; this is an engineering limit, not a model maximum. Z checks the real local tokenizer's512-token budget including formatting and adapter triggers. Chroma HD uses coherent T5-oriented natural-language guidance; native token counts remain unknown. Flash has a separate identity but inherits the same Chroma content guidance. Its lower step count alone does not justify simplifying prompts. [Chroma HD](https://huggingface.co/lodestones/Chroma1-HD), [Flash](https://huggingface.co/lodestones/Chroma1-Flash).
 
+Klein 4B/9B and Qwen-Image 2.1 Turbo have separate versioned guidance profiles with a 60-new-word soft allowance. Their guidance preserves editing instructions, avoids inventing source-photo details or extra changes, and makes no verified tokenizer-budget claim. The common text-only expander does not inspect references; turn expansion off to send an edit instruction exactly as written.
+
 Health capabilities expose model-specific guidance under the exact model-ID key. Saved expansion records include selected image model, guidance profile/version, common policy version/hash, model revision, sampling settings, text/token counts, time and memory. Sidecars retain original, expanded and effective prompts. Existing saved expansions are reused after interrupted rendering even if a newer policy is installed.
+
+## Dedicated photo-edit refinement
+
+`task:"edit"` uses editing policy1 and separate `<model-id>-edit-v1` guidance. It asks for `edit_details` and `preservation`, keeps the original instruction verbatim, and prohibits invented source content, extra edits, unsolicited style changes and new compositions. It does not use the generation examples, style detection or composition goals. Explicit user preservation text is passed as data. A few narrow guards reject unrequested framing phrases; these do not establish general semantic fidelity.
+
+The image adapter always appends deterministic scope/preservation instructions for explicit edit tasks, with or without LLM refinement. The text-only LLM cannot see the photo or mask. Failed or over-budget refinement fails the job without a silent fallback; saved refinements survive restart. Multiple edit options use the same instruction and different seeds, while composition variation is rejected. Generation remains on the existing policy and can use Klein/Qwen without a photo.
 
 ## Local evaluation and limits
 

@@ -13,6 +13,7 @@ from model_profiles import PROFILES, DEFAULT_MODEL, select_model, SHARED_ASSETS
 from storage_paths import data_directory, require_storage
 from queue_launch import ensure_queue, DEFAULT_QUEUE_PORT
 from enhancer_profile import check_assets as check_enhancer_assets
+from model_assets import validate_snapshot
 ROOT=Path(__file__).resolve().parent
 API_MODEL=DEFAULT_MODEL
 
@@ -37,6 +38,11 @@ def check_assets(selected):
     if profile['backend']=='sd-cpp':
         required += [folder/profile['filename'],ROOT/'runtime'/'sd-cli',ROOT/'runtime'/'libstable-diffusion.dylib']
         required += [store/'chroma1-hd'/'weights'/asset[2] for asset in SHARED_ASSETS]
+    elif profile.get('cli_module'):
+        try:
+            validate_snapshot(folder,profile,completed=True)
+        except (OSError,ValueError,TypeError) as error:
+            raise SystemExit(f'Model assets incomplete; run make setup MODEL={selected} first. {error}') from error
     else:
         directories=[folder/name for name in ['transformer','text_encoder','tokenizer','vae']]
     missing=[path for path in required if not path.is_file()]+[path for path in directories if not path.is_dir()]
@@ -103,7 +109,7 @@ def main():
                 state=json.load(response)
         except Exception:
             raise SystemExit(f'Port {args.port} is in use by another service. Choose PORT=5733 or stop it first.')
-        allowed={'z-image-turbo','chroma1-hd','chroma1-flash'}
+        allowed=set(PROFILES)
         if state.get('model') not in allowed:
             raise SystemExit(f'Port {args.port} belongs to another service; leaving it running.')
         found=subprocess.check_output(['/usr/sbin/lsof','-nP','-t',f'-iTCP:{args.port}','-sTCP:LISTEN'],text=True).split()

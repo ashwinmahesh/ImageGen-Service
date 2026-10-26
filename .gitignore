@@ -89,6 +89,9 @@ storage.json
 /z-image-turbo
 /chroma1-hd
 /chroma1-flash
+/flux2-klein-4b
+/flux2-klein-9b
+/qwen-image-2.1-turbo
 
 # Durable queue files and process locks
 /state
