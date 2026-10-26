@@ -39,6 +39,11 @@
 *.[dD][nN][gG]
 *.[rR][aA][wW]
 
+# Project-local Python/bootstrap downloads and Python environments
+/.python
+/.bootstrap
+/.venv-*
+
 # Python environments, build output and editor state
 /.venv/
 /venv/

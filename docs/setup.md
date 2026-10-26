@@ -4,11 +4,11 @@ Start with the [README quick start](../README.md#quick-start). This page explain
 
 ## First-time setup
 
-Requires an Apple Silicon Mac with Metal, Git, Make and Python 3.14 (the tested version). With Homebrew: `brew install python@3.14`. The pinned Chroma native binary targets macOS 26.6.2 arm64; other systems need a compatible native build. The Python dependency lock includes MLX/MFLUX for Z-Image, FLUX.2 Klein and Qwen-Image 2.1 Turbo. This is not a Windows/CUDA distribution.
+Requires an Apple Silicon Mac with Metal, Git and Make. You do not need to install Python first: setup reuses a compatible existing environment or interpreter and obtains a missing compatible interpreter inside the project. The Python lock resolves for macOS 14+ arm64; native-runtime requirements below remain separate. The pinned Chroma native binary targets macOS 26.6.2 arm64; other systems need a compatible native build. The Python dependency lock includes MLX/MFLUX for Z-Image, FLUX.2 Klein and Qwen-Image 2.1 Turbo. This is not a Windows/CUDA distribution.
 
 ```sh
 cd /absolute/path/to/downloaded-project
-make setup BOOTSTRAP_PYTHON=/opt/homebrew/bin/python3.14
+make setup
 make test
 make serve
 ```
@@ -56,7 +56,40 @@ make serve MODEL=chroma1-hd NO_LORAS=1
 make serve-no-loras MODEL=z-image-turbo
 ```
 
-Without a terminal, or with `NONINTERACTIVE=1`, setup/download default to Z-Image Turbo. Serving defaults to Z-Image when ready, otherwise the first ready model, or exits with setup guidance if none are ready. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=5733` changes the endpoint. Use `BOOTSTRAP_PYTHON=/absolute/path/to/python3.14` if `python3.14` is installed elsewhere. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
+Without a terminal, or with `NONINTERACTIVE=1`, setup/download default to Z-Image Turbo. Serving defaults to Z-Image when ready, otherwise the first ready model, or exits with setup guidance if none are ready. `MODEL=...` works for setup, download, serving and adapter commands. `IMAGE_MODEL` is the equivalent Python environment setting. `PORT=5733` changes the endpoint. An optional `BOOTSTRAP_PYTHON=/absolute/path/to/python3.12` selects a compatible interpreter during setup; it is not needed for serving or model-only downloads. `VENV=/absolute/internal/path/.venv` overrides the environment; use the same value consistently.
+
+## Python selection
+
+All image backends and prompt expansion continue to share one environment. `make setup` and `make setup-env` follow this order:
+
+1. Validate and reuse the target `VENV` (default `.venv`). A compatible environment keeps its existing Python.
+2. If that environment does not exist, try compatible installed Python interpreters, including existing project-local Python downloads.
+3. Only if none is suitable, obtain the tested Python 3.14.9 under `<project>/.python` and create the environment from it.
+4. Install the exact `requirements.lock.txt` pins without resolving extra unpinned dependencies, then run `pip check`.
+
+| Compatibility | Current policy |
+| --- | --- |
+| Interpreter | Standard CPython 3.12, 3.13 or 3.14, final releases, native Apple Silicon macOS |
+| Excluded patch | Python 3.14.1, explicitly excluded by NetworkX 3.7 |
+| Lower bound | Python 3.12, required by the pinned NumPy 2.5.4, ContourPy 1.4.0 and NetworkX 3.7 |
+| Unvalidated builds | Python 3.15+, older minors, free-threaded Python, PyPy, x86/Rosetta and non-macOS runtimes |
+| Managed download | Python 3.14.9, only during setup and only inside this project |
+
+The full 66-package lock was checked using binary-only resolution for each supported minor on macOS 14 arm64, rather than inferring compatibility from MFLUX alone. The installed 3.14.9 stack also passes `pip check` and the regression suite. Resolution verifies package compatibility; it does not establish identical inference or performance across interpreters. Revalidate the full lock and binary availability before widening these bounds. The supplied Chroma binary still targets macOS 26.6.2 arm64 and is independent of Python selection.
+
+The dependency-free `bootstrap_python.sh` can run setup menus using an available native CPython 3.9+ without treating that menu interpreter as compatible with model dependencies. On a Python-free machine, it obtains the compatible project-local interpreter first. Its official [uv](https://docs.astral.sh/uv/concepts/python-versions/) helper is pinned to 0.13.5; the downloaded Apple Silicon archive is checked against the recorded SHA256 before execution. The helper and cache live under `.bootstrap`; managed interpreters live under `.python`. No system interpreter, global packages, PATH or shell profiles are changed. These folders stay separate from the model/media store, and neither is published to Git.
+
+```sh
+# Optional explicit interpreter and a fresh, ignored environment.
+make setup BOOTSTRAP_PYTHON=/absolute/path/to/python3.12 VENV="$(pwd)/.venv-new"
+make serve VENV="$(pwd)/.venv-new"
+# Install/repair pinned packages without downloading model weights.
+make setup-env
+```
+
+Explicit incompatible interpreters fail with an explanation; setup does not silently choose another one. An existing environment that is broken, incompatible, not a real virtual environment, or based on a different explicitly requested Python is preserved. Choose another `VENV` or move it aside yourself before rebuilding. A partial newly created environment is also left available for inspection after a failure. Repeated setup resumes safely without replacing working environments or changing model/media/queue locations.
+
+`make serve`, `make queue`, `make stop-queue`, `make storage` and model/LoRA/LLM download commands run directly with the selected existing environment. They never provision Python or install packages. Model-download commands can still use the network for model assets. If no environment has been set up, run `make setup` first. The `BOOTSTRAP_PYTHON` override affects setup only. An existing configured external volume must still be mounted; Python setup does not create fallback model storage.
 
 ## Model storage
 
@@ -72,7 +105,7 @@ First setup also asks for a model store folder. **Blank/Enter uses the project d
 <store>/prompt-enhancer/weights  # shared Qwen3.5-2B 4-bit, about 1.7 GB
 ```
 
-Source, Git, UI, the native runtime, `.venv`, and **SQLite state** stay in the project. Per-model queue databases and their journals/worker leases live in `<project>/state/queues/<model-id>/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
+Source, Git, UI, the native runtime, `.venv`, managed `.python`/`.bootstrap` downloads, and **SQLite state** stay in the project. Per-model queue databases and their journals/worker leases live in `<project>/state/queues/<model-id>/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
 
 ```sh
 # Automation: choose model and store explicitly, with no prompts.

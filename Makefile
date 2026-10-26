@@ -1,7 +1,10 @@
 .DEFAULT_GOAL := help
 VENV ?= $(CURDIR)/.venv
+export VENV
 PYTHON := $(VENV)/bin/python
-BOOTSTRAP_PYTHON ?= python3.14
+BOOTSTRAP_PYTHON ?=
+export BOOTSTRAP_PYTHON
+BOOTSTRAP := sh ./bootstrap_python.sh
 PORT ?= 5732
 QUEUE_PORT ?= 55302
 MODEL ?=
@@ -23,6 +26,7 @@ LORA_ID ?= realism
 
 .PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism download-llm queue stop-queue
 help:
+	@echo 'Setup reuses compatible Python, or installs it inside the project; serving stays offline'
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
 	@echo 'make queue     Start/reuse the lightweight queue API on localhost:55302 (no model/GPU)'
 	@echo 'make stop-queue  Stop only the queue API; retain all persisted jobs'
@@ -50,7 +54,7 @@ install-lora:
 	"$(PYTHON)" install_lora.py "$(FILE)" --id "$(LORA_ID)"
 
 setup:
-	"$(BOOTSTRAP_PYTHON)" setup.py
+	@$(BOOTSTRAP) setup setup.py
 
 setup-selected: setup-env
 	$(MAKE) download
@@ -58,11 +62,11 @@ setup-selected: setup-env
 	$(if $(filter 1,$(WITH_REALISM)),$(MAKE) download-realism,@:)
 
 storage:
-	"$(BOOTSTRAP_PYTHON)" storage_paths.py
+	"$(PYTHON)" storage_paths.py
 
-setup-env: storage
-	@test -x "$(PYTHON)" || $(BOOTSTRAP_PYTHON) -m venv "$(VENV)"
-	"$(PYTHON)" -m pip install --no-cache-dir -r requirements.lock.txt
+setup-env:
+	@$(BOOTSTRAP) setup storage_paths.py
+	@$(BOOTSTRAP) setup runtime_setup.py
 
 download-llm: storage
 	"$(PYTHON)" download_enhancer.py

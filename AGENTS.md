@@ -11,6 +11,7 @@ This file is for agents changing the repository. An agent operating the service 
 - `model_profiles.py` / `model_assets.py` / `config.py` / `launch.py`: backend defaults, pinned snapshot preflight and startup.
 - `photo_workflows.py`: common generate/edit task semantics and preservation scope; masked geometry/compositing lives in `reference_geometry.py`.
 - `mflux_engine.py`: offline, per-image low-RAM CLI children for FLUX.2 Klein and Qwen-Image 2.1 Turbo; `engine.py` retains the resident Z-Image path.
+- `bootstrap_python.sh` / `bootstrap_uv.sh` / `python_runtime.py` / `runtime_setup.py`: dependency-free setup, compatible interpreter reuse and project-local provisioning.
 - `storage_paths.py`, setup/download scripts: portable storage selection and reproducible assets.
 - `adapter_catalog.py` / `lora_catalog.py`: queue discovery and generator adapter validation.
 - `prompt_expander.py` / `prompt_policy.py` / `enhancer_profile.py`: local prompt expansion; consult `docs/prompt-expansion.md` before changing policy.
@@ -33,6 +34,8 @@ A batch contains 1–5 sequential images. Persist effective defaults, adapter sn
 Keep the shared accelerator lock separate from the queue worker lease. Native children retain ownership until they exit. Preserve existing user jobs and processes when testing or switching modes.
 
 ## Setup and startup
+
+Python setup reuses the compatible target VENV first, then installed interpreters, and obtains a missing interpreter only during setup under `.python` with a checksum-pinned official uv helper/cache under `.bootstrap`. The full 66-package ImageGen lock supports standard arm64 macOS CPython 3.12–3.14 except 3.14.1 (NetworkX exclusion); validate the complete lock and binary wheels before adding a minor. Preserve broken/incompatible/nonvirtual environments and honor explicit BOOTSTRAP_PYTHON/VENV without silent fallback. Never install into system Python, publish executables to PATH or edit shell profiles. Serving, storage configuration and asset-only downloads use the existing environment directly, without bootstrap/provisioning. Keep model menus, native Chroma requirements, SSD data and project-local SQLite unchanged.
 
 `make setup` lists all supported models (Enter: Z-Image Turbo), then asks for storage (Enter: project-local). External choices create reusable per-model symlinks. Never silently download to a fallback when a configured volume is missing, overwrite conflicting data or recreate retired per-model source projects. Chroma Flash shares the HD encoder/VAE without downloading HD's diffusion checkpoint.
 

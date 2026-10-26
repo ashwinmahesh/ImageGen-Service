@@ -100,7 +100,7 @@ The generator, gallery and queue screenshots use demonstration data and a simula
 
 ## Quick start
 
-Requires an **Apple Silicon Mac**, Git, Make and **Python 3.14**. See the [quick-start guide](QUICKSTART.md#1-check-the-prerequisites) for prerequisites and Chroma runtime compatibility.
+Requires an **Apple Silicon Mac**, Git and Make. Setup reuses compatible Python already on your Mac, or downloads it into the project when needed; you do not need to install a specific Python version first. Your system Python and shell settings stay unchanged. See the [quick-start guide](QUICKSTART.md#1-check-the-prerequisites) for prerequisites and Chroma runtime compatibility.
 
 ```sh
 git clone https://github.com/ashwinmahesh/ImageGen-Service.git

@@ -24,40 +24,42 @@ class SetupTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_make_setup_creates_environment_then_downloads_and_can_repeat(self):
-        shutil.copyfile(ROOT / 'Makefile', self.root / 'Makefile')
-        for name in ['setup.py','model_profiles.py']:
+        for name in ['Makefile','setup.py','model_profiles.py','python_runtime.py','runtime_setup.py','bootstrap_python.sh']:
             shutil.copyfile(ROOT/name,self.root/name)
-        log = self.root / 'calls.jsonl'
-        fake = self.root / 'bootstrap'
+        log=self.root/'calls.jsonl';fake=self.root/'bootstrap'
         fake.write_text(f'''#!{sys.executable}
-import json, os, pathlib, sys, runpy
-with open(os.environ['SETUP_TEST_LOG'], 'a') as stream:
-    stream.write(json.dumps(sys.argv[1:]) + '\\n')
-if sys.argv[1:2] == ['setup.py']:
-    runpy.run_path('setup.py',run_name='__main__')
-if sys.argv[1:3] == ['-m', 'venv']:
-    python = pathlib.Path(sys.argv[3]) / 'bin/python'
-    python.parent.mkdir(parents=True)
-    python.write_text(pathlib.Path(__file__).read_text())
-    python.chmod(0o755)
+import json,os,pathlib,runpy,sys
+root=pathlib.Path({str(self.root)!r});sys.path.insert(0,str(root))
+args=sys.argv[1:]
+with open(os.environ['SETUP_TEST_LOG'],'a') as stream:stream.write(json.dumps(args)+'\\n')
+if args[:2]==['-I','-c']:
+    if 'json' in args[2]:
+        is_env=pathlib.Path(__file__).parent.name=='bin'
+        print(json.dumps(dict(version=[3,14,9],implementation='cpython',system='Darwin',machine='arm64',free_threaded=False,
+            prefix=str(pathlib.Path(__file__).parent.parent) if is_env else str(root/'base'),base_prefix=str(root/'base'),base=str(root/'bootstrap'))))
+elif args[:2]==['-m','venv']:
+    target=pathlib.Path(args[-1])/'bin/python';target.parent.mkdir(parents=True)
+    target.write_text(pathlib.Path(__file__).read_text());target.chmod(0o755)
+elif args and pathlib.Path(args[0]).name in ['setup.py','runtime_setup.py']:
+    runpy.run_path(args[0],run_name='__main__')
 ''')
         fake.chmod(0o755)
-        command = ['make', 'setup', f'VENV={self.root / "env"}', f'BOOTSTRAP_PYTHON={fake}']
-        env = {**os.environ, 'SETUP_TEST_LOG': str(log)}
-        subprocess.run(command, cwd=self.root, env=env, capture_output=True, check=True)
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(calls[0], ['setup.py'])
-        calls = [call for call in calls if call not in [['storage_paths.py'],['setup.py']]]
-        self.assertEqual(calls[0][:2], ['-m', 'venv'])
-        self.assertEqual(calls[1][:3], ['-m', 'pip', 'install'])
-        self.assertEqual(calls[2:],[['download.py'],['download_enhancer.py']])
+        command=['make','setup',f'VENV={self.root/"environment with spaces"}',f'BOOTSTRAP_PYTHON={fake}']
+        env={**os.environ,'SETUP_TEST_LOG':str(log),'NONINTERACTIVE':'1'}
+        subprocess.run(command,cwd=self.root,env=env,capture_output=True,check=True)
+        calls=[json.loads(line) for line in log.read_text().splitlines()]
+        calls=[call for call in calls if call[:2]!=['-I','-c'] and (not call or Path(call[0]).name not in ['storage_paths.py','setup.py','runtime_setup.py'])]
+        self.assertEqual(calls[0][:3],['-m','venv','--copies'])
+        self.assertEqual(calls[1][:3],['-m','pip','install']);self.assertIn('--no-deps',calls[1])
+        self.assertEqual(calls[2],['-m','pip','check'])
+        self.assertEqual(calls[3:],[['download.py'],['download_enhancer.py']])
         log.write_text('')
-        subprocess.run(command + ['WITH_REALISM=1'], cwd=self.root, env=env, capture_output=True, check=True)
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual(calls[0], ['setup.py'])
-        calls = [call for call in calls if call not in [['storage_paths.py'],['setup.py']]]
-        self.assertEqual(calls[0][:3], ['-m', 'pip', 'install'])
-        self.assertEqual(calls[1:], [['download.py'], ['download_enhancer.py'], ['download_loras.py', '--id', 'realism']])
+        subprocess.run(command+['WITH_REALISM=1'],cwd=self.root,env=env,capture_output=True,check=True)
+        calls=[json.loads(line) for line in log.read_text().splitlines()]
+        calls=[call for call in calls if call[:2]!=['-I','-c'] and (not call or Path(call[0]).name not in ['storage_paths.py','setup.py','runtime_setup.py'])]
+        self.assertEqual(calls[0][:3],['-m','pip','install'])
+        self.assertEqual(calls[1],['-m','pip','check'])
+        self.assertEqual(calls[2:],[['download.py'],['download_enhancer.py'],['download_loras.py','--id','realism']])
 
     def test_model_downloader_uses_pinned_hugging_face_snapshot(self):
         weights = self.root / 'weights'
@@ -92,7 +94,8 @@ if sys.argv[1:3] == ['-m', 'venv']:
         ignored = ['images/output.png', 'references/source.jpg', 'image-index/id.json',
                    'weights/transformer/weights.safetensors', 'loras/catalog.json',
                    'cache/private.json', 'storage.json', 'weights', 'images', 'cache', 'ui/future.PNG', 'nested/photo.JPEG', 'photo.heic',
-                   'nested/vector.svg', 'ui/._index.html', '__pycache__/server.pyc', '.env']
+                   'nested/vector.svg', 'ui/._index.html', '__pycache__/server.pyc', '.env',
+                   '.python/cpython/bin/python3', '.bootstrap/uv', '.venv-custom/bin/python']
         result = subprocess.run(['git', 'check-ignore', '--stdin', '-z'], cwd=self.root,
                                 input='\0'.join(ignored)+'\0', capture_output=True, text=True, check=True)
         self.assertEqual(set(result.stdout.rstrip('\0').split('\0')), set(ignored))

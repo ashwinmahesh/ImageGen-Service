@@ -4,18 +4,12 @@ Complete steps 1–3, then use the **webpage** in step 4 or the **API** in step 
 
 ## 1. Check the prerequisites
 
-You need an **Apple Silicon Mac**, Git, Make and **Python 3.14**. The provided setup uses Apple's Metal GPU; it does not support Windows or NVIDIA/CUDA. The bundled Chroma runtime targets macOS 26.6.2 on Apple Silicon; other versions may need a compatible build.
+You need an **Apple Silicon Mac**, Git and Make. Setup reuses a compatible Python environment or installed interpreter, and downloads Python into the project only when needed. No system Python installation or shell changes are required. The provided setup uses Apple's Metal GPU; it does not support Windows or NVIDIA/CUDA. The bundled Chroma runtime targets macOS 26.6.2 on Apple Silicon; other versions may need a compatible build.
 
 If Git or Make is missing, install Apple's command line tools:
 
 ```sh
 xcode-select --install
-```
-
-If you use Homebrew, install Python with:
-
-```sh
-brew install python@3.14
 ```
 
 ## 2. Download the project and set up a model
@@ -34,15 +28,21 @@ Follow the setup questions:
 
 1. **Choose a model.** Press Enter for **Z-Image Turbo**, or select Chroma1-HD, Chroma1-Flash, FLUX.2 Klein 4B/9B or Qwen-Image 2.1 Turbo.
 2. **Choose a storage folder.** Press Enter to keep model downloads and pictures inside the project. To use an external SSD, enter an absolute path such as `/Volumes/MySSD/models`.
-3. **Wait for setup to finish.** It installs dependencies and downloads the chosen image model plus a shared Qwen prompt-expansion model. Setup does not start either server.
+3. **Wait for setup to finish.** It selects Python, installs pinned dependencies into `.venv`, and downloads the chosen image model plus a shared Qwen prompt-expansion model. Setup does not start either server.
 
 The external folder is a parent store: setup creates model folders inside it and links them into the project. Your choice is remembered, so later setup runs reuse it. Keep the drive connected when generating. Queue databases always stay inside the project's `state/` folder.
 
-If setup cannot find Python, rerun it with the full executable path:
+Setup supports standard Apple Silicon CPython **3.12, 3.13 and 3.14**, except 3.14.1. It checks your target environment first, then installed interpreters, and downloads 3.14.9 only if none are compatible. Downloaded Python and its helper/cache stay in ignored `.python` and `.bootstrap` folders inside the project; `DATA_DIR` still controls models and pictures.
+
+An incompatible or broken environment is preserved with an explanation. Choose a fresh environment, for example `make setup VENV="$(pwd)/.venv-new"`, or move the old one aside yourself before retrying. Keep using the same VENV override when serving.
+
+If you prefer choosing Python yourself, provide an absolute executable path (optional):
 
 ```sh
-make setup BOOTSTRAP_PYTHON=/opt/homebrew/bin/python3.14
+make setup BOOTSTRAP_PYTHON=/absolute/path/to/python3.12
 ```
+
+Serving and model-only downloads use the environment already set up. They do not download Python or install packages; `BOOTSTRAP_PYTHON` is a setup-only override. See [Python selection](docs/setup.md#python-selection) for details.
 
 ## 3. Start the generator
 
