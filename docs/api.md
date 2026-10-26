@@ -61,7 +61,7 @@ The model still determines how strongly it follows those directions. [Z-Image’
 
 One request is one durable queue job. `completed_images` and `total_images` report progress; detail responses may include `partial_result.data[]` containing only fully saved options while running or after failure. `result` is reserved for a fully successful batch. List responses omit image result blobs. A mid-batch failure preserves completed files/catalog entries; inspect the job or gallery. An explicit retry creates a new full batch with a new identity. Restart recovery of an interrupted job reuses its completed options, seeds and saved expansion(s) and renders only missing options. IDs remain stable across recovery. A running batch finishes before the next job; priority/pause/clear never interrupt it. All options remain ordinary gallery images with searchable prompts/tags. The queue history's **View** action reopens the whole completed batch.
 
-The [README](../README.md#generating-images) includes a two-image example with selectable previews.
+The [README](../README.md#explore-multiple-options) includes a two-image example with selectable previews.
 
 ## Independent queue API (generator may be off)
 

@@ -1,6 +1,6 @@
 # Working on ImageGen-Service
 
-This file is for agents changing the repository. An agent operating the service should read `skill/image-model-server/SKILL.md`. Keep `README.md` written for a person setting up and using the app. Detailed contracts belong in `docs/api.md` and `docs/setup.md`.
+This file is for agents changing the repository. An agent operating the service should read `skill/image-model-server/SKILL.md`. Keep `README.md` written for people: explain what the project does and the implemented techniques behind its image workflow; put step-by-step usage in `QUICKSTART.md`. Detailed contracts belong in `docs/api.md` and `docs/setup.md`.
 
 ## Project layout
 
@@ -51,7 +51,7 @@ Git contains source, docs and the four approved screenshots under `docs/screensh
 
 Update these together when their behavior changes:
 
-- `README.md`: human quick start, everyday use, visible behavior and troubleshooting.
+- `README.md`: human project overview, supported capabilities and high-level image techniques; link the step-by-step quick start and detailed references.
 - `QUICKSTART.md`: step-by-step human setup, webpage/API walkthroughs and concise setting explanations; keep examples and defaults current.
 - `docs/setup.md` / `docs/api.md`: exact setup, storage, API and recovery contracts, aligned with implementation and both live schemas.
 - `skill/image-model-server/SKILL.md`: portable operating instructions; keep the Z-Image wrapper consistent.

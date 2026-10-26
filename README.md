@@ -1,18 +1,81 @@
 # ImageGen-Service
 
-Generate images on your Apple Silicon Mac, using a simple webpage or a local API. Write a description, optionally add a reference photo, and browse your results in a searchable gallery.
+**A local image generation studio and API for Apple Silicon Macs.** Turn a description or reference photo into images, explore several options, and keep the results in a searchable gallery. After the initial downloads, image generation and prompt expansion run on your Mac without a cloud API.
 
-The app supports **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**. They share the same interface; you choose which model to use when starting the server. A small local language model can expand your descriptions and suggest different compositions.
+The project brings **Z-Image Turbo**, **Chroma1-HD** and **Chroma1-Flash** into one app. They share a webpage, API and saved-image library; choose the model when you start the generator. A small local language model helps develop descriptions and explore compositions, while a persistent queue lets people and agents submit work whenever they need it.
+
+Use the webpage for hands-on experimentation, or call the API from scripts and other tools. You can leave the lightweight queue running all day and start the image generator only when you want to use your Mac's compute.
 
 ![Image generator with prompt and reference-photo controls](docs/screenshots/generator.png)
 
+For installation and a guided walkthrough of both interfaces, follow **[QUICKSTART.md](QUICKSTART.md)**.
+
+## Techniques for better images
+
+The service combines prompt development, creative alternatives and reference-based iteration. Each control is optional, so you can compare results and decide what helps your particular image.
+
+### Develop the description while preserving the original
+
+A local **Qwen3.5-2B model with 4-bit weights** can expand a short description with concrete details about light, palette, atmosphere, materials and composition. Your original text is kept verbatim, with added detail after it. The LLM is instructed to preserve your subjects, counts, actions, colors, viewpoint, quoted text and exclusions.
+
+The expansion is guided by the requested medium and aesthetic. A watercolor prompt can gain translucent washes and soft edge variation; a cel-animation prompt can gain clean ink contours, flat color shapes and limited shadow tones. The goal is to develop the look you asked for through visible rendering choices.
+
+Guidance also follows the selected image model. For Z-Image, expansions are checked against its actual tokenizer budget before rendering. You can preview the expanded description, edit and adopt it, or turn expansion off. Original and expanded prompts are saved with the image so you can see what was used. The expander reads text only; it does not inspect reference photos.
+
+### Explore multiple options
+
+Request **1–5 images** from the same description and compare them together. Each option uses a different seed. With **Different compositions with LLM** enabled, each also receives its own expanded prompt, exploring open choices such as a wide environmental view, closer framing, diagonal flow or layered depth.
+
+The LLM is instructed to keep framing and other details you've explicitly specified, and explore choices you've left open. This gives you another way to seek variety when seed changes produce similar layouts, although tightly constrained prompts or strongly preserved references can still yield similar images.
+
+![Multiple generated options with selectable previews](docs/screenshots/image-options.png)
+
+### Guide the result with a reference or style adapter
+
+A reference photo provides a visual starting point. **Keep the original** controls how closely the result follows it: lower values allow larger changes. The service preserves the reference's aspect ratio automatically, which helps avoid stretching the composition. You can use a generated image as the next reference to keep developing an idea. This is image-to-image variation; precise localized edits and exact identity retention are not guaranteed.
+
+Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters).
+
+### Make iteration easier to compare and repeat
+
+Every image is saved with its prompt, expansion when used, seed, model, dimensions, steps and reference/adapter settings. Reuse a seed to compare setting changes, reuse a description, or make a variation from the result you like best. Saved settings give you a record of the choices behind each result.
+
+The effect of prompt expansion and composition planning depends on the scene and model. Preview and compare results to decide which choices work best. The [prompt-expansion design and evidence](docs/prompt-expansion.md) explains the research, implementation choices and limits of the local evaluation.
+
+## Keep a searchable image library
+
+The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation.
+
+![Searchable image gallery with editable tags](docs/screenshots/gallery.png)
+
+PNG images and JSON generation records are saved automatically in `<storage folder>/<model>/images`, unless you choose another output location. Tag edits are stored separately so the original image and generation record remain intact.
+
+## Queue work around your schedule
+
+The app has two services that share a persistent SQLite queue:
+
+| Service | What it does |
+| --- | --- |
+| **Generator and webpage**, [localhost:5732](http://localhost:5732/) | Runs the selected image model and optional prompt expander, serves the UI/gallery, and processes that model's queue. |
+| **Lightweight queue API**, [localhost:55302/docs](http://localhost:55302/docs) | Accepts and manages jobs while the generator is off, without loading image models or the LLM. |
+
+Ordinary jobs run in order. The webpage defaults to **Generate immediately**, which puts your request in the next free slot ahead of ordinary queued work. Active batches finish first. You can pause ordinary work, cancel waiting jobs, clear the waiting list and retry failed jobs.
+
+![Saved generation queue with pause and cancellation controls](docs/screenshots/queue.png)
+
+Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Start the generator with another model when you want to process that model's waiting jobs.
+
+## Built for local hardware and storage
+
+Quantized model weights and Apple's Metal GPU help make local inference practical. Image options render sequentially, and the prompt-expansion process releases its memory before image rendering. Resolution, image count and model choice affect memory use and generation time; Chroma can be substantially slower on this Mac.
+
+Model downloads and generated media can live inside the project or on an external SSD. Setup remembers the location and creates links when needed. The source code, Python environment and SQLite queue databases stay in the project. Back up both your model/media store and the project's `state/` folder to preserve images, tags and waiting work. Downloaded weights and personal media are excluded from Git.
+
+The generator, gallery and queue screenshots use demonstration data and a simulated backend; their timings are not benchmarks. The multiple-options screenshot shows a real two-image Z-Image test.
+
 ## Quick start
 
-For a step-by-step walkthrough of setup, the webpage, API requests and configurable settings, follow **[QUICKSTART.md](QUICKSTART.md)**.
-
-You need an **Apple Silicon Mac**, Git, Make, and **Python 3.14**. If you use Homebrew, install Python with `brew install python@3.14`. Z-Image uses Apple's Metal GPU through MLX. The bundled Chroma runtime targets macOS 26.6.2 on Apple Silicon; other macOS versions may need a compatible build. Windows and NVIDIA/CUDA are not supported by this setup. If Git or Make is missing, install Apple's command line tools with `xcode-select --install`.
-
-Open Terminal and run:
+Requires an **Apple Silicon Mac**, Git, Make and **Python 3.14**. See the [quick-start guide](QUICKSTART.md#1-check-the-prerequisites) for prerequisites and Chroma runtime compatibility.
 
 ```sh
 git clone https://github.com/ashwinmahesh/ImageGen-Service.git
@@ -21,135 +84,27 @@ make setup
 make serve
 ```
 
-Already downloaded the project? Open Terminal in that folder and start with `make setup`.
+During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving offers installed models and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
 
-During setup, you'll make two choices:
+`make serve` also starts the background queue API if needed. Ctrl-C stops the generator after its active batch finishes; `make stop-queue` stops the queue API separately. Use `make serve NO_LLM=1` to disable prompt expansion or `make serve NO_LORAS=1` to disable adapters.
 
-1. **Image model:** press Enter for Z-Image Turbo, or select another model from the list.
-2. **Storage folder:** press Enter to keep the downloads inside the project, or enter a folder on an external drive.
+## Documentation
 
-Setup downloads the selected image model and a shared prompt-expansion model, and installs the required software. The first download can take a while. You only need to do this once for each image model you want to use. Setup doesn't start the server.
+- **[QUICKSTART.md](QUICKSTART.md)**: step-by-step setup, UI and API walkthroughs, settings and shutdown.
+- **[API reference](docs/api.md)**: generation requests, model/adapter discovery, queue management, results, pagination and recovery.
+- **[Setup reference](docs/setup.md)**: model sources, storage choices, startup options and runtime details.
+- **[Prompt-expansion design](docs/prompt-expansion.md)**: techniques, research and evaluation limits.
 
-When `make serve` asks about prompt expansion, press Enter to keep it enabled. Once startup finishes, open **[http://localhost:5732](http://localhost:5732/)** in your browser. Keep the terminal open while generating.
+While running, the generator publishes [interactive API docs](http://localhost:5732/docs). The standalone queue API has [its own docs](http://localhost:55302/docs) and a request envelope for routing work to offline models. The [quick-start API walkthrough](QUICKSTART.md#5-generate-through-the-api) explains the difference.
 
-If setup can't find Python, use its full path:
-
-```sh
-make setup BOOTSTRAP_PYTHON=/opt/homebrew/bin/python3.14
-```
-
-## Generating images
-
-Enter a description and click **Generate**. Start at 1024 × 1024 with the model's default settings; larger images and more steps take longer and use more memory. The resolution controls support dimensions up to 2048 × 2048.
-
-**Number of images** lets you request 1–5 options for the same description. Each uses a different seed and renders in turn. With prompt expansion enabled, **Different compositions with LLM** gives each option its own expanded description. This helps create variety, although tightly specified scenes or strongly preserved reference photos can still produce similar results.
-
-![Multiple image options with selectable previews](docs/screenshots/image-options.png)
-
-**Expand description with local LLM** adds visual details about your requested style, lighting and composition. Use **Preview expansion** to review it first, or turn it off for a particular image. Your original description is saved alongside the expanded version. The expander reads text only; it doesn't inspect reference photos.
-
-For a variation on an existing picture, upload a reference or enter its local file path. The result automatically follows the reference's aspect ratio. **Keep the original** controls how closely it follows the source: lower values allow bigger changes. This is a way to make variations; precise edits, inpainting and exact character identity are not guaranteed.
-
-Images and their generation settings are saved automatically in `<storage folder>/<model>/images`. With the default storage choice, that means a folder such as `z-image-turbo/images` inside the project. You can choose another output folder for a request. The API also returns the full image and metadata paths.
-
-## Finding your pictures
-
-Open **[the gallery](http://localhost:5732/gallery)** to browse results from all installed models. Search by description or tags, sort the results, and move through pages. Open an image to download it, see its settings, edit its tags or reuse it as a starting point.
-
-![Searchable image gallery with editable tags](docs/screenshots/gallery.png)
-
-The generator, queue and gallery screenshots use demonstration data and a simulated backend. Their timings are not benchmarks. The multiple-options screenshot shows a real two-image Z-Image test.
-
-## Starting, stopping and choosing models
-
-For everyday use, run:
-
-```sh
-make serve
-```
-
-The menu offers numbered choices for models you've already set up. Other supported models appear below with a command explaining how to install them. Pressing Enter chooses Z-Image Turbo when available, otherwise the first installed model.
-
-To add and use another model:
-
-```sh
-make setup MODEL=chroma1-flash
-make serve MODEL=chroma1-flash
-```
-
-The available IDs are `z-image-turbo`, `chroma1-hd` and `chroma1-flash`. One model runs at a time. Stop the generator before switching; each model's waiting jobs are kept until you start it again.
-
-Press **Ctrl-C** in the serving terminal to stop the generator after its active batch finishes. The separate queue service stays running, so agents can still submit work. To stop that too:
-
-```sh
-make stop-queue
-```
-
-Useful startup options:
-
-| Command | What it changes |
-| --- | --- |
-| `make serve NO_LLM=1` | Turns off prompt expansion for this run. |
-| `make serve NO_LORAS=1` | Uses the base model with adapters disabled. |
-| `make serve PORT=5733` | Uses another browser/API port. |
-
-LoRAs are optional style adapters. Normal setup downloads none. An optional Realism adapter for Z-Image is available with `make download-realism MODEL=z-image-turbo`; installed compatible adapters then appear in the webpage. See [adapter setup](docs/setup.md#optional-adapters) for details.
-
-## Queue work for later
-
-You can leave the lightweight queue service running without keeping an image model loaded:
-
-```sh
-make queue
-```
-
-Other tools can then submit requests to **[localhost:55302](http://localhost:55302/docs)**, even while the generator is off. When you're ready to use your Mac's compute, run `make serve`. It starts the queue service too if needed, then processes waiting work for the selected model. The webpage is available only while the generator is running.
-
-![Saved generation queue with pause and cancellation controls](docs/screenshots/queue.png)
-
-Ordinary queued work runs in order. The webpage enables **Generate immediately** by default, which puts your request in the next available slot ahead of ordinary work. It still waits for the active image or batch to finish. You can pause ordinary work, cancel waiting entries, clear the waiting list, or retry a failed job. Cancelling or clearing the queue keeps completed images and job history.
-
-Jobs are saved in SQLite inside the project's `state/` folder and survive restarts. The webpage accesses that database through the generator API, so it keeps working if the standalone queue service stops. Run `make queue` again to restore access for outside tools.
-
-## Using the API
-
-The generator's **[interactive API docs](http://localhost:5732/docs)** explain the available settings and responses. Here's a request that saves a job and returns its ID:
-
-```sh
-curl --fail-with-body http://localhost:5732/v1/jobs \
-  -H 'Content-Type: application/json' \
-  -H 'Idempotency-Key: fox-example-1' \
-  -d '{"prompt":"A watercolor fox in a snowy forest","response_format":"url"}'
-```
-
-Read `GET /v1/jobs/<id>` until its status is `succeeded`, `failed` or `cancelled`. A successful response includes each image's URL, full `file_path` and `metadata_path` in `result.data[]`. Acceptance alone doesn't mean the image has finished.
-
-The standalone queue service uses a slightly different format so it can route work to a model that's currently offline:
-
-```sh
-curl --fail-with-body http://localhost:55302/v1/jobs \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"z-image-turbo","request":{"prompt":"A watercolor fox in a snowy forest","response_format":"url"}}'
-```
-
-On the generator API, leaving out `model` uses the currently running model. On the standalone queue API, it always defaults to Z-Image Turbo. Both provide model and LoRA discovery endpoints. See the [full API and queue reference](docs/api.md) for settings, results, editing queued requests, pagination, retries and examples.
-
-## Storage and backups
-
-An external SSD is optional. If you choose one during setup, the project creates links to its model folders and remembers the location. Future starts reuse it. Keep the drive connected while generating; a missing drive produces an error rather than downloading another copy elsewhere.
-
-Weights, generated pictures, references and gallery indexes live in the chosen storage folder. The source code, Python environment and **queue databases stay in the project**. Back up both the data folder and the project's `state/` folder to preserve your pictures, tags and queued work. Local data and downloaded models are excluded from Git.
-
-For scripted setup, custom paths and model download sources, see the [setup reference](docs/setup.md).
+For code changes, read [AGENTS.md](AGENTS.md). An AI tool operating the service can use [the service skill](skill/image-model-server/SKILL.md).
 
 ## If something goes wrong
 
-- **Interrupted download:** rerun `make setup MODEL=<model-id>`. Existing downloads are reused or resumed.
-- **External drive missing:** reconnect it before starting the generator.
-- **Missing prompt-expansion model:** run `make download-llm`, or start with `make serve NO_LLM=1`.
-- **Port already in use:** choose another port with `make serve PORT=5733`, and use that port in the browser.
-- **Slow generation or memory pressure:** try a smaller image, fewer options, and close other apps using the GPU. Chroma can be considerably slower on this Mac.
+- **Interrupted download:** rerun `make setup MODEL=<model-id>` to reuse or resume it.
+- **External drive missing:** reconnect it; the generator won't silently download to another location.
+- **Missing prompt LLM:** run `make download-llm`, or start with `make serve NO_LLM=1`.
+- **Port conflict:** use `make serve PORT=5733` and open that port in the browser.
+- **Slow generation or memory pressure:** try smaller images or fewer options and close other GPU-heavy apps.
 
-Run `make health` to check a running generator. `make test` checks the code using simulated downloads and generation. `make smoke` makes a real 512-pixel test image and requires the generator to be running.
-
-For development, read [AGENTS.md](AGENTS.md). An AI tool operating the service can use [the service skill](skill/image-model-server/SKILL.md). Details of the prompt expander's design are in [the prompt-expansion guide](docs/prompt-expansion.md).
+`make health` checks a running generator. `make test` uses simulated downloads and generation; `make smoke` generates a real test image on a running server. Further details are in the [setup reference](docs/setup.md#verification-and-troubleshooting).
