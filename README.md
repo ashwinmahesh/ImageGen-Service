@@ -79,7 +79,7 @@ The app has two services that share a persistent SQLite queue:
 
 | Service | What it does |
 | --- | --- |
-| **Generator and webpage**, [localhost:5732](http://localhost:5732/) | Runs one image backend at a time and the optional prompt expander, serves the UI/gallery, and processes the shared queue across all setup models. |
+| **Generator and webpage**, [localhost:5742](http://localhost:5742/) | Runs one image backend at a time and the optional prompt expander, serves the UI/gallery, and processes the shared queue across all setup models. |
 | **Lightweight queue API**, [localhost:55302/docs](http://localhost:55302/docs) | Accepts and manages jobs while the generator is off, without loading image models or the LLM. |
 
 Ordinary jobs run in order. The webpage defaults to **Generate immediately**, which puts your request in the next free slot ahead of ordinary queued work. Active batches finish first. You can pause ordinary work, cancel waiting jobs, clear the waiting list and retry failed jobs.
@@ -115,7 +115,7 @@ make setup
 make serve
 ```
 
-During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving asks for a default from installed models; all setup models can process jobs. The saved default is shared by both APIs and used when a request omits its model. The menu labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
+During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving asks for a default from installed models; all setup models can process jobs. The saved default is shared by both APIs and used when a request omits its model. The menu labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5742](http://localhost:5742/)** once startup finishes.
 
 Setup is safe to rerun, including for a model marked `[SETUP COMPLETE]`: unchanged weights need no redownload, and missing or changed pinned files are updated in place. Dependencies and shared assets are still checked. Choose `q` at the setup model menu or press Ctrl+C during setup to cancel cleanly; downloaded files are kept for your next attempt.
 
@@ -128,7 +128,7 @@ Setup is safe to rerun, including for a model marked `[SETUP COMPLETE]`: unchang
 - **[Setup reference](docs/setup.md)**: model sources, storage choices, startup options and runtime details.
 - **[Prompt-expansion design](docs/prompt-expansion.md)**: techniques, research and evaluation limits.
 
-While running, the generator publishes [interactive API docs](http://localhost:5732/docs). The standalone queue API has [its own docs](http://localhost:55302/docs) and a request envelope for submitting work while the generator is stopped. The [quick-start API walkthrough](QUICKSTART.md#5-generate-through-the-api) explains the difference.
+While running, the generator publishes [interactive API docs](http://localhost:5742/docs). The standalone queue API has [its own docs](http://localhost:55302/docs) and a request envelope for submitting work while the generator is stopped. The [quick-start API walkthrough](QUICKSTART.md#5-generate-through-the-api) explains the difference.
 
 For code changes, read [AGENTS.md](AGENTS.md). An AI tool operating the service can use [the service skill](skill/image-model-server/SKILL.md).
 

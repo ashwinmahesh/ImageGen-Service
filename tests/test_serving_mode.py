@@ -71,7 +71,7 @@ class LauncherModeTest(unittest.TestCase):
         self.assertIn('8010',command)
         execute,_=self.run_launcher([])
         self.assertNotIn('--no-loras',execute.call_args.args[1])
-        self.assertEqual(execute.call_args.args[1][execute.call_args.args[1].index('--port')+1], '5732')
+        self.assertEqual(execute.call_args.args[1][execute.call_args.args[1].index('--port')+1], '5742')
 
     def test_same_model_switches_mode_only_while_idle(self):
         execute,kill=self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':False,'loras_enabled':True})

@@ -64,7 +64,7 @@ You now have two local services:
 
 | Address | Purpose |
 | --- | --- |
-| [localhost:5732](http://localhost:5732/) | Generator, webpage, gallery and image API. Processes all setup models, one at a time. |
+| [localhost:5742](http://localhost:5742/) | Generator, webpage, gallery and image API. Processes all setup models, one at a time. |
 | [localhost:55302/docs](http://localhost:55302/docs) | Lightweight queue API. Keeps accepting jobs when the generator is off. |
 
 `make serve` starts the queue service automatically if needed. To check generator readiness from another terminal in the project folder, run `make health`; look for `"status":"ready"`. Model loading happens when a job starts; the browser/API stays available during loading and switching.
@@ -96,7 +96,7 @@ Each setup downloads only its selected pre-quantized checkpoint and the shared p
 
 ## 4. Generate from the webpage
 
-1. Open **[http://localhost:5732](http://localhost:5732/)**. Grey question-mark icons beside settings explain them on hover, keyboard focus or tap; press Escape or click elsewhere to dismiss the help.
+1. Open **[http://localhost:5742](http://localhost:5742/)**. Grey question-mark icons beside settings explain them on hover, keyboard focus or tap; press Escape or click elsewhere to dismiss the help.
 2. Enter a prompt, such as **A watercolor fox in a snowy forest, soft morning light**.
 3. For a first image, choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the default steps alone.
 4. Keep **Prompt expansion** switched on if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice.
@@ -105,7 +105,7 @@ Each setup downloads only its selected pre-quantized checkpoint and the shared p
 
 For a photo variation, click **Choose photo** or expand **Or use a file path**. **Keep the original** defaults to 0.6; lower values allow larger changes. The output follows the photo's aspect ratio. This creates variations, with no guarantee of precise edits or exact identity preservation.
 
-Open **[Gallery](http://localhost:5732/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
+Open **[Gallery](http://localhost:5742/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
 
 ### Settings you can change for each request
 
@@ -147,7 +147,7 @@ Open **Queue** in the header. The modal keeps its header and pagination visible 
 
 ### Monitor resource use
 
-Choose **Observability** in the header, or open [http://localhost:5732/observability](http://localhost:5732/observability). Select 5m, 30m, 1h, 6h, 24h, 3 days or 7 days, and optionally filter by model. Hover a graph—or focus it and use the arrow keys—to inspect values and model names. Solid lines show sample means; dashed lines preserve sampled peaks in longer windows.
+Choose **Observability** in the header, or open [http://localhost:5742/observability](http://localhost:5742/observability). Select 5m, 30m, 1h, 6h, 24h, 3 days or 7 days, and optionally filter by model. Hover a graph—or focus it and use the arrow keys—to inspect values and model names. Solid lines show sample means; dashed lines preserve sampled peaks in longer windows.
 
 Choose **View job** in the measured-jobs table, or **Metrics** beside an attempted queue entry. Job view offers **Entire job**, **Last minute**, **Last 5 minutes** and **Last 15 minutes**, ending at completion for finished jobs. Retries/recovery attempts are identified separately. The table has Previous/Next pagination. Live updates refresh the webpage every five seconds; switching them off does not stop server-side recording.
 
@@ -157,14 +157,14 @@ Service CPU is a percentage of the machine’s total CPU capacity. Service RAM s
 
 ## 5. Generate through the API
 
-Keep the generator running. You can try requests directly in **[the interactive API docs](http://localhost:5732/docs)**: expand an endpoint, click **Try it out**, edit its JSON and click **Execute**. Or use the terminal steps below.
+Keep the generator running. You can try requests directly in **[the interactive API docs](http://localhost:5742/docs)**: expand an endpoint, click **Try it out**, edit its JSON and click **Execute**. Or use the terminal steps below.
 
 ### Submit a request
 
 Open another terminal and run:
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/jobs \
+curl --fail-with-body http://localhost:5742/v1/jobs \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: quickstart-fox-1' \
   -d '{
@@ -188,7 +188,7 @@ Copy the returned ID into the variable below:
 
 ```sh
 IMAGEGEN_JOB_ID="paste-the-returned-id-here"
-curl --fail-with-body "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID"
+curl --fail-with-body "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID"
 ```
 
 Run the second command again occasionally until the status is `succeeded`, `failed` or `cancelled`. On success, **`result.data[]`** contains every generated image, with its `url`, full `file_path`, `metadata_path` and seed. Open an image's `url` in your browser, or use the file already saved on disk. On failure, read the job's `error`. Closing your browser or timing out a request does not cancel a saved job.
@@ -198,9 +198,9 @@ Run the second command again occasionally until the status is `succeeded`, `fail
 Read `queue_position` from a job/list response. It starts at 1 across all waiting jobs, independent of pagination. Send the desired position to move it up/down:
 
 ```sh
-curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/move" \
+curl --fail-with-body --request POST "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID/move" \
   -H 'Content-Type: application/json' -d '{"position":1}'
-curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
+curl --fail-with-body --request POST "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
 ```
 
 Run Now marks that same job immediate and moves it first; it doesn't interrupt active work. These controls also exist on port 55302, using the job ID without a model query, even when the generator is off. Running/finished jobs return 409. If another client changes the queue, refresh positions before trying again.
@@ -208,9 +208,9 @@ Run Now marks that same job immediate and moves it first; it doesn't interrupt a
 ### Discover models, adapters and saved images
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/models
-curl --fail-with-body http://localhost:5732/v1/loras
-curl --fail-with-body 'http://localhost:5732/v1/images?q=forest&limit=24&offset=0'
+curl --fail-with-body http://localhost:5742/v1/models
+curl --fail-with-body http://localhost:5742/v1/loras
+curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&limit=24&offset=0'
 ```
 
 Use a LoRA entry with `available:true`, setting `lora` to its `id`. Adapter discovery reports disabled/empty when the generator starts with `NO_LORAS=1`. For API reference photos, pass `reference_image` as a server-local absolute path; see [uploading references](docs/api.md#reference-photos-and-variations) if you prefer sending image bytes.

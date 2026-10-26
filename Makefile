@@ -5,7 +5,7 @@ PYTHON := $(VENV)/bin/python
 BOOTSTRAP_PYTHON ?=
 export BOOTSTRAP_PYTHON
 BOOTSTRAP := sh ./bootstrap_python.sh
-PORT ?= 5732
+PORT ?= 5742
 QUEUE_PORT ?= 55302
 MODEL ?=
 ifneq ($(strip $(MODEL)),)
@@ -30,8 +30,8 @@ help:
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
 	@echo 'make queue     Start/reuse the lightweight queue API on localhost:55302 (no model/GPU)'
 	@echo 'make stop-queue  Stop only the queue API; retain all persisted jobs'
-	@echo 'make serve     Start one generator/UI for all setup models on localhost:5732; ensure the shared queue API'
-	@echo 'Observability: http://localhost:5732/observability (resource graphs and job timelines)'
+	@echo 'make serve     Start one generator/UI for all setup models on localhost:5742; ensure the shared queue API'
+	@echo 'Observability: http://localhost:5742/observability (resource graphs and job timelines)'
 	@echo 'Ctrl-C stops the generator after active work finishes; queue API stays running'
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
 	@echo 'make serve NO_LLM=1  Disable local prompt expansion explicitly'

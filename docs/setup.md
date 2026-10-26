@@ -133,13 +133,13 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 `make serve` ensures that same queue API is running, then runs one **generator and UI** for every setup model in the foreground; keep its terminal open. Startup briefly explains that the optional local text model can add visual detail to descriptions and can be disabled per image. Ctrl-C finishes active generation and stops the generator. **The queue API stays running**, and other agents can keep submitting jobs. `make stop-queue` stops only the verified queue process and retains every job. The generator reads/checkpoints SQLite directly, so previously accepted jobs can finish even if the queue HTTP process stops; UI requests still read/write SQLite through the generator API while the standalone queue API is down; only clients using its separate origin need it restarted.
 
-- Webpage: <http://127.0.0.1:5732/>
-- All-model image gallery: <http://127.0.0.1:5732/gallery>
-- Generator API docs and live schema: <http://127.0.0.1:5732/docs> and `/openapi.json`
+- Webpage: <http://127.0.0.1:5742/>
+- All-model image gallery: <http://127.0.0.1:5742/gallery>
+- Generator API docs and live schema: <http://127.0.0.1:5742/docs> and `/openapi.json`
 - Queue-only API docs: <http://127.0.0.1:55302/docs> (available without generation)
 - Readiness: `make health` or `GET /health`
 
-The default is **`http://127.0.0.1:5732/`**, also reachable as `http://localhost:5732/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. `QUEUE_PORT=...` changes the independent queue API port; use the same value for `make queue`, `make serve` and `make stop-queue`. The Python generator uses `IMAGEGEN_QUEUE_PORT` when invoked directly. Both services bind to loopback. No hosts-file mapping or `http://imagegen` shortcut is installed.
+The default is **`http://127.0.0.1:5742/`**, also reachable as `http://localhost:5742/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. `QUEUE_PORT=...` changes the independent queue API port; use the same value for `make queue`, `make serve` and `make stop-queue`. The Python generator uses `IMAGEGEN_QUEUE_PORT` when invoked directly. Both services bind to loopback. No hosts-file mapping or `http://imagegen` shortcut is installed.
 
 Health reports service/version, `runtime_model_switching:true`, `queue_scope:shared`, saved `default_model`, nullable `active_model`, `model_loaded`, busy/stage and global queue state. GET `/v1/models` lists only setup models with per-model capabilities/defaults. A marker alone is insufficient; the shared preflight checks all required local assets and runtime files. Models load on demand after the HTTP listener starts.
 

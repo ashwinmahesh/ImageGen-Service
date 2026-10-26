@@ -64,7 +64,7 @@ def select_llm_mode(*,interactive=None,prompt=input):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--port',type=int,default=5732)
+    parser.add_argument('--port',type=int,default=5742)
     parser.add_argument('--queue-port',type=int,default=DEFAULT_QUEUE_PORT)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
     parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')

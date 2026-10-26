@@ -164,7 +164,7 @@ class QueueStartupTest(unittest.TestCase):
             start.assert_not_called()
 
     def test_generator_requires_distinct_ports_and_does_not_stop_queue(self):
-        with patch.object(launch.sys,'argv',['launch.py','--model','z-image-turbo','--no-llm','--queue-port','5732']),patch.object(launch,'check_assets'),patch.object(launch,'ensure_queue') as ensure:
+        with patch.object(launch.sys,'argv',['launch.py','--model','z-image-turbo','--no-llm','--queue-port','5742']),patch.object(launch,'check_assets'),patch.object(launch,'ensure_queue') as ensure:
             with self.assertRaisesRegex(SystemExit,'different'):launch.main()
             ensure.assert_not_called()
 

@@ -22,7 +22,7 @@ This is the human-readable reference for **all HTTP endpoints in ImageGen-Servic
 
 | Service | Default base URL | Start it | Available while the generator is off? |
 | --- | --- | --- | --- |
-| **Generator** | `http://localhost:5732` | `make serve` | No. It owns image generation, the webpage, uploads and gallery. |
+| **Generator** | `http://localhost:5742` | `make serve` | No. It owns image generation, the webpage, uploads and gallery. |
 | **Queue** | `http://localhost:55302` | `make queue` | Yes. It accepts and manages persisted jobs without loading models. |
 
 `make serve` starts the queue API if necessary. `PORT` changes the generator port; `QUEUE_PORT` changes the queue port. Use overrides consistently. Both bind to loopback, accept trusted local clients and have no API-key authentication. No permissive cross-origin access is configured. Local file paths refer to the server's Mac.
@@ -147,7 +147,7 @@ Negative prompts, CFG/guidance, custom samplers/schedulers and multiple referenc
 ### Submit and poll an image
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/jobs \
+curl --fail-with-body http://localhost:5742/v1/jobs \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: forest-1' \
   -d '{"prompt":"A watercolor fox in a snowy forest","size":"512x512","response_format":"url"}'
@@ -157,7 +157,7 @@ The **202** response is a job record with `id`. Read **GET `/v1/jobs/{identifier
 
 ```sh
 IMAGEGEN_JOB_ID="paste-the-returned-id-here"
-curl --fail-with-body "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID"
+curl --fail-with-body "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID"
 ```
 
 A completed generator job returns images in **`result.data[]`**. An accepted or running job is not a finished image.
@@ -172,7 +172,7 @@ A completed generator job returns images in **`result.data[]`**. An accepted or 
 Accepts the full image-settings object and optional `Idempotency-Key` header. The only default difference is `generate_immediately:true`. Response is `{created, generation_seconds, data:[...]}`, without the job wrapper. The shared saved default is used if omitted.
 
 ```sh
-curl --fail-with-body --max-time 1800 http://localhost:5732/v1/images/generations \
+curl --fail-with-body --max-time 1800 http://localhost:5742/v1/images/generations \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: forest-sync-1' \
   -d '{"prompt":"A watercolor fox in a snowy forest","size":"512x512","response_format":"url"}'
@@ -202,10 +202,10 @@ All three editing entries still support text-to-image generation through `/v1/im
 
 Add `"mask_image":"/absolute/path/mask.png"` to the edit request. The mask must match the **oriented original source dimensions**, not the resized output canvas. White (255) repaints, black (0) preserves; intermediate grayscale values blend. An entirely black mask or mismatched dimensions returns **400** at generator admission; invalid opaque queue requests fail when consumed. Upload a mask PNG through the existing raw-byte **POST `/v1/reference-images`** and pass its returned local path if needed.
 
-Selected areas are supported by **both API servers**. The generator accepts a flat request on port 5732; request model must be Qwen (set it up first):
+Selected areas are supported by **both API servers**. The generator accepts a flat request on port 5742; request model must be Qwen (set it up first):
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/jobs \
+curl --fail-with-body http://localhost:5742/v1/jobs \
   -H 'Content-Type: application/json' -H 'Idempotency-Key: jacket-area-1' \
   -d '{"task":"edit","prompt":"Change the jacket to green.","reference_image":"/absolute/path/photo.png","mask_image":"/absolute/path/mask.png","preserve":"Face, pose and background","size":"1024x1024","response_format":"url"}'
 ```
@@ -260,7 +260,7 @@ Order is running first, then waiting work in its saved execution order, then fin
 Generator job lists omit full/partial image result bodies; fetch a job's detail for those. Queue lists return raw job records, including saved metadata when present.
 
 ```sh
-curl --fail-with-body 'http://localhost:5732/v1/jobs?status=pending&limit=24&offset=0'
+curl --fail-with-body 'http://localhost:5742/v1/jobs?status=pending&limit=24&offset=0'
 curl --fail-with-body 'http://localhost:55302/v1/jobs?model=chroma1-flash&limit=24&offset=0'
 ```
 
@@ -279,9 +279,9 @@ The header’s **Queue** button opens a modal with active/waiting counts, pause/
 ```sh
 # Replace this value with a waiting job ID.
 IMAGEGEN_JOB_ID="paste-the-job-id-here"
-curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/move" \
+curl --fail-with-body --request POST "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID/move" \
   -H 'Content-Type: application/json' -d '{"position":1}'
-curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
+curl --fail-with-body --request POST "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
 # Job IDs address the same shared queue on either service.
 curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID/move" \
   -H 'Content-Type: application/json' -d '{"position":2}'
@@ -298,7 +298,7 @@ Retry is allowed only for failed/cancelled entries (**409** otherwise), with a n
 Pause persists across restarts. The active batch finishes; explicitly immediate jobs may still run while ordinary queued work is paused. No cancellation endpoint interrupts active inference.
 
 ```sh
-curl --fail-with-body --request PATCH http://localhost:5732/v1/queue \
+curl --fail-with-body --request PATCH http://localhost:5742/v1/queue \
   -H 'Content-Type: application/json' -d '{"paused":true}'
 ```
 
@@ -344,7 +344,7 @@ Synchronous generation returns this object directly. Async detail puts it in `re
       "generation_size": "512x512",
       "file_path": "/absolute/store/z-image-turbo/images/0123456789abcdef0123456789abcdef.png",
       "metadata_path": "/absolute/store/z-image-turbo/images/0123456789abcdef0123456789abcdef.json",
-      "url": "http://localhost:5732/images/0123456789abcdef0123456789abcdef.png"
+      "url": "http://localhost:5742/images/0123456789abcdef0123456789abcdef.png"
     }
   ]
 }
@@ -408,7 +408,7 @@ One generator consumes all setup models from the shared queue. Jobs whose models
 Send **raw bytes**, not multipart or JSON. Documented content types are `image/png`, `image/jpeg`, `image/webp` and `application/octet-stream`. Uploads are limited to **20 MiB** and **40,000,000 decoded pixels**; exceeding either returns **413**. Invalid/unsavable images return **400**; unavailable configured storage can return **503**.
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/reference-images \
+curl --fail-with-body http://localhost:5742/v1/reference-images \
   -H 'Content-Type: image/jpeg' --data-binary @/absolute/path/reference.jpg
 ```
 
@@ -448,7 +448,7 @@ The same shape works for `qwen-image-2.1-turbo` when that model is serving. Its 
 Body: required `prompt` (nonblank string, max 4000 characters), optional `lora` (ID/null), `lora_strength` (0–2/null, requires a LoRA), `task` (`generate` default or `edit`) and `preserve` (edit only, max 1000 characters). Other fields are rejected. Adapter selection accounts for its configured trigger in token budgeting.
 
 ```sh
-curl --fail-with-body http://localhost:5732/v1/prompts/expand \
+curl --fail-with-body http://localhost:5742/v1/prompts/expand \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"A watercolor fox in a snowy forest"}'
 ```
@@ -497,7 +497,7 @@ Automatic expansion is part of the durable image job. Shared plans appear in `pr
 | `limit`, `offset` | 24, 0 | Integer limit 1–100 and nonnegative offset. |
 
 ```sh
-curl --fail-with-body 'http://localhost:5732/v1/images?q=forest&tag=Winter&limit=24&offset=0&sort=newest'
+curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&tag=Winter&limit=24&offset=0&sort=newest'
 ```
 
 Response has `object:"list"`, `data[]`, matching `total`, `limit`, `offset`, `has_previous`, `has_more`, and available `previous_offset` / `next_offset` (omitted at boundaries). References are excluded; no inference runs. Missing images are skipped. Valid PNGs can remain browsable even when metadata is missing/unreadable. Unavailable active image storage returns **503**.
@@ -522,13 +522,13 @@ GET detail returns **404** for unknown/missing images. PATCH tags requires `{"ta
 
 ```sh
 curl --fail-with-body --request PATCH \
-  http://localhost:5732/v1/images/0123456789abcdef0123456789abcdef/tags \
+  http://localhost:5742/v1/images/0123456789abcdef0123456789abcdef/tags \
   -H 'Content-Type: application/json' -d '{"tags":["Winter","Campaign"]}'
 ```
 
 ## Observability
 
-These read-only endpoints are on the **generator (5732)**, with a webpage at `/observability`. They read separate project-local resource history; the queue API (55302) does not expose them. Recording begins with generator startup, including model loading, and ends when it stops. Old activity cannot be backfilled.
+These read-only endpoints are on the **generator (5742)**, with a webpage at `/observability`. They read separate project-local resource history; the queue API (55302) does not expose them. Recording begins with generator startup, including model loading, and ends when it stops. Old activity cannot be backfilled.
 
 | Method / path | Parameters and behavior |
 | --- | --- |
@@ -540,10 +540,10 @@ These read-only endpoints are on the **generator (5732)**, with a webpage at `/o
 Example requests:
 
 ```sh
-curl 'http://127.0.0.1:5732/v1/observability'
-curl 'http://127.0.0.1:5732/v1/observability/metrics?window=30m&model=z-image-turbo&max_points=300'
-curl 'http://127.0.0.1:5732/v1/observability/jobs?limit=20&offset=0'
-curl "http://127.0.0.1:5732/v1/observability/jobs/$JOB_ID?model=z-image-turbo&window=full"
+curl 'http://127.0.0.1:5742/v1/observability'
+curl 'http://127.0.0.1:5742/v1/observability/metrics?window=30m&model=z-image-turbo&max_points=300'
+curl 'http://127.0.0.1:5742/v1/observability/jobs?limit=20&offset=0'
+curl "http://127.0.0.1:5742/v1/observability/jobs/$JOB_ID?model=z-image-turbo&window=full"
 ```
 
 Graph responses have `start`/`end` Unix seconds, `bucket_seconds`, `points[]` and `summary`. Each point contains the actual first/last sample timestamps, midpoint `timestamp`, sample `count`, recorded `models[]`, `sessions[]`, `stages[]`, `values` (bucket means) and `peaks` (sampled maxima). Missing counters are **null**, not zero; absent buckets are not fabricated. Means are sample means, not elapsed-time-weighted averages. The UI breaks lines across missing intervals and session/model changes.

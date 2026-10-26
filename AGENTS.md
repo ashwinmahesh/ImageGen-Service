@@ -22,7 +22,7 @@ This file is for agents changing the repository. An agent operating the service 
 
 ## Architecture to preserve
 
-There are two services: queue API on loopback port **55302**, generator/UI on **5732**. They share one shared SQLite database. The browser calls generator APIs whose handlers access `JobStore` directly. Do not proxy those operations through the standalone queue API. Its outage is informational for the generator: submission, polling, queue controls, results and generation continue. Use a bounded health probe. Local SQLite failures are different (`503`, `code:queue_storage_unavailable`, `Retry-After:2`).
+There are two services: queue API on loopback port **55302**, generator/UI on **5742**. They share one shared SQLite database. The browser calls generator APIs whose handlers access `JobStore` directly. Do not proxy those operations through the standalone queue API. Its outage is informational for the generator: submission, polling, queue controls, results and generation continue. Use a bounded health probe. Local SQLite failures are different (`503`, `code:queue_storage_unavailable`, `Retry-After:2`).
 
 The queue service owns no GPU, model loading, UI or running-job recovery. It accepts `{model,request}`; omitted model resolves the saved shared default (fresh ready Z-Image, or first ready fallback). Discovery and admission expose/accept only models passing the shared actual asset/runtime preflight. Missing weights never trigger serve-time downloads. Deferred generation/media validation still belongs to the consumer. Preserve readable history/CRUD if the SSD disappears.
 

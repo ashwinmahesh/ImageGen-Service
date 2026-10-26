@@ -1256,7 +1256,7 @@ configure_schema(app,PROJECT_ROOT,['GenerateRequest','SyncGenerateRequest','Edit
 
 def parse_server_args(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=5732)
+    parser.add_argument("--port", type=int, default=5742)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
     parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')
     parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
