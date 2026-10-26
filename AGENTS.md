@@ -53,7 +53,8 @@ Update these together when their behavior changes:
 
 - `README.md`: human project overview, supported capabilities and high-level image techniques; link the step-by-step quick start and detailed references.
 - `QUICKSTART.md`: step-by-step human setup, webpage/API walkthroughs and concise setting explanations; keep examples and defaults current.
-- `docs/setup.md` / `docs/api.md`: exact setup, storage, API and recovery contracts, aligned with implementation and both live schemas.
+- `docs/setup.md`: exact setup, storage and startup behavior.
+- `docs/api.md`: human-readable specifications for every endpoint on both services, including methods, ports, request/response fields, errors, media routes and recovery. Check its endpoint inventory against the registered routes and both live schemas when APIs change.
 - `skill/image-model-server/SKILL.md`: portable operating instructions; keep the Z-Image wrapper consistent.
 - `AGENTS.md`: contributor guidance and architectural constraints.
 

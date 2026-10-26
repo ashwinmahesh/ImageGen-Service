@@ -91,7 +91,7 @@ During first setup, Enter chooses Z-Image Turbo and project-local storage; you c
 ## Documentation
 
 - **[QUICKSTART.md](QUICKSTART.md)**: step-by-step setup, UI and API walkthroughs, settings and shutdown.
-- **[API reference](docs/api.md)**: generation requests, model/adapter discovery, queue management, results, pagination and recovery.
+- **[Complete API reference](docs/api.md)**: every endpoint on both services, request/response fields, examples, errors, queue management and media downloads.
 - **[Setup reference](docs/setup.md)**: model sources, storage choices, startup options and runtime details.
 - **[Prompt-expansion design](docs/prompt-expansion.md)**: techniques, research and evaluation limits.
 
