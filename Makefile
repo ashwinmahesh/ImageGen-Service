@@ -88,7 +88,7 @@ health:
 	@echo
 
 smoke:
-	"$(PYTHON)" smoke_test.py --port $(PORT)
+	"$(PYTHON)" -m tests.smoke_test --port $(PORT)
 
 test:
-	"$(PYTHON)" -m unittest discover -v
+	"$(PYTHON)" -m unittest discover -s tests -t . -v

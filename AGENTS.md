@@ -13,7 +13,8 @@ This file is for agents changing the repository. An agent operating the service 
 - `adapter_catalog.py` / `lora_catalog.py`: queue discovery and generator adapter validation.
 - `prompt_expander.py` / `prompt_policy.py` / `enhancer_profile.py`: local prompt expansion; consult `docs/prompt-expansion.md` before changing policy.
 - `ui/index.html` / `ui/gallery.html` / `image_catalog.py`: browser UI and catalog.
-- `test_*.py`: fake-backend, storage, API, queue and recovery tests.
+- `tests/test_*.py`: fake-backend, storage, API, queue and recovery tests.
+- `tests/smoke_test.py`: explicit real HTTP generation check, run by `make smoke` rather than unit-test discovery.
 
 ## Architecture to preserve
 
@@ -41,7 +42,7 @@ Only Realism is an optional public adapter preset. Default setup downloads no Lo
 
 ## Verification and data boundaries
 
-Use `make test` for routine checks: fake downloads/inference, no model load. Run focused tests while iterating and relevant complete checks for behavior changes. Documentation-only edits need link/example/schema review rather than GPU generation. `make smoke` requires a running generator and creates a real image; report it separately from unit tests.
+From the project root, use `make test` for routine checks: fake downloads/inference, no model load. Tests form a package; run a focused module with `.venv/bin/python -m unittest tests.test_queue -v`. Keep cross-test imports under `tests` and resolve source/assets relative to the project root, one directory above the test files. Run focused tests while iterating and relevant complete checks for behavior changes. Documentation-only edits need link/example/schema review rather than GPU generation. `make smoke` requires a running generator and creates a real image; report it separately from unit tests.
 
 Use benign browser fixtures and label simulated screenshots/timings. Do not change user queues, use private media, start a second GPU model or restart busy services just to test. Preserve unrelated and pre-existing user-started processes. After maintenance, stop generator/queue instances you started unless asked to leave them running; this user starts ImageGen manually.
 

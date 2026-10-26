@@ -18,7 +18,7 @@ from PIL import Image
 import server
 from job_queue import JobStore, QueueConflict, fingerprint
 from generation_worker import QueueWorker
-import test_api as api_tests
+from tests import test_api as api_tests
 
 
 def until(predicate):
@@ -99,7 +99,7 @@ class StoreTest(unittest.TestCase):
     def test_abrupt_process_exit_recovers_the_original_job(self):
         job=self.add(); self.add('second')
         code="from pathlib import Path; from job_queue import JobStore; import os,sys; store=JobStore(Path(sys.argv[1])); store.claim(); os._exit(17)"
-        process=subprocess.run([sys.executable,'-c',code,str(self.store.path)],cwd=Path(__file__).parent)
+        process=subprocess.run([sys.executable,'-c',code,str(self.store.path)],cwd=Path(__file__).resolve().parents[1])
         self.assertEqual(process.returncode,17)
         self.assertEqual(self.store.get(job['id'])['status'],'running')
         worker=QueueWorker(self.store,lambda _:None); worker.acquire()
@@ -119,7 +119,7 @@ subprocess.Popen([sys.executable,'-c','import time;time.sleep(1)'],pass_fds=(wor
 os._exit(18)
 """
         gpu_path=self.root/'native-gpu.lock'
-        process=subprocess.run([sys.executable,'-c',code,str(self.store.path),str(gpu_path)],cwd=Path(__file__).parent)
+        process=subprocess.run([sys.executable,'-c',code,str(self.store.path),str(gpu_path)],cwd=Path(__file__).resolve().parents[1])
         self.assertEqual(process.returncode,18)
         with gpu_path.open('a+') as handle:
             with self.assertRaises(BlockingIOError): fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)

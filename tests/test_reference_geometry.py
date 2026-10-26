@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 from PIL import Image, ImageChops
-import test_api
+from tests import test_api
 import reference_geometry
 
 

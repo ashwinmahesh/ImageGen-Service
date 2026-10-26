@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import config
 import lora_catalog
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class SetupTest(unittest.TestCase):

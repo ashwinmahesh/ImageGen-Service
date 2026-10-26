@@ -10,8 +10,8 @@ import urllib.error
 from unittest.mock import patch
 from queue_client import QueueClient
 import server
-import test_api
-from test_queue import until
+from tests import test_api
+from tests.test_queue import until
 
 
 class HealthResponse(io.BytesIO):

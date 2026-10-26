@@ -15,7 +15,7 @@ import lora_catalog
 import server
 import queue_api
 from queue_client import QueueClient
-from test_api import FakeModel
+from tests.test_api import FakeModel
 
 
 class LoRATest(unittest.TestCase):

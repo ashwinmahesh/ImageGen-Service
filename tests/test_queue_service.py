@@ -12,7 +12,7 @@ import queue_api
 import queue_launch
 import launch
 import server
-import test_api
+from tests import test_api
 
 
 class QueueServiceTest(unittest.TestCase):
@@ -107,7 +107,7 @@ class QueueServiceTest(unittest.TestCase):
 
     def test_queue_imports_do_not_load_inference_or_worker(self):
         code="import sys,queue_api; assert not any(k in sys.modules for k in ['server','config','lora_catalog','generation_worker','mlx','torch','mflux','prompt_expander','engine','chroma_engine'])"
-        result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).parent,capture_output=True,text=True)
+        result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
 
@@ -133,7 +133,7 @@ class DeferredGeneratorTest(unittest.TestCase):
 
     def test_bad_raw_request_fails_and_later_request_generates(self):
         invalid=self.add(steps=0).json();valid=self.add().json()
-        from test_queue import until
+        from tests.test_queue import until
         until(lambda:self.store.get(valid['id'])['status']=='succeeded')
         self.assertEqual(self.store.get(invalid['id'])['status'],'failed')
         self.assertIn('steps',self.store.get(invalid['id'])['error'])

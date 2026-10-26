@@ -70,7 +70,7 @@ print(json.dumps({'model':server.API_MODEL,'steps':request.steps,'root':str(serv
         with tempfile.TemporaryDirectory() as folder:
             for identifier,profile in model_profiles.PROFILES.items():
                 env={**os.environ,'IMAGE_MODEL':identifier,'DATA_DIR':folder}
-                result=subprocess.run([sys.executable,'-c',script],cwd=Path(__file__).parent,env=env,capture_output=True,text=True,check=True)
+                result=subprocess.run([sys.executable,'-c',script],cwd=Path(__file__).resolve().parents[1],env=env,capture_output=True,text=True,check=True)
                 state=json.loads(result.stdout)
                 self.assertEqual(state['steps'],profile['steps'])
                 self.assertEqual(state['root'],str(Path(folder).resolve()/identifier))
@@ -205,7 +205,7 @@ class NativeAdapterTest(unittest.TestCase):
 
 class StartupSafetyTest(unittest.TestCase):
     def test_explicit_model_is_forwarded_and_busy_cross_model_switch_is_refused(self):
-        from test_serving_mode import LauncherModeTest
+        from tests.test_serving_mode import LauncherModeTest
         helper=LauncherModeTest()
         execute,_=helper.run_launcher(['--model','chroma1-flash'])
         command=execute.call_args.args[1]

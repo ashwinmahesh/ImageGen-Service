@@ -6,9 +6,9 @@ import threading
 import unittest
 from unittest.mock import patch
 import server
-import test_api
-from test_queue import until
-from test_prompt_expansion import fake_expand
+from tests import test_api
+from tests.test_queue import until
+from tests.test_prompt_expansion import fake_expand
 
 
 def fake_variations(prompt,*,count,**kwargs):

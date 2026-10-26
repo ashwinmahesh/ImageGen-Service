@@ -10,8 +10,8 @@ import prompt_expander
 import server
 import launch
 from job_queue import JobStore, fingerprint
-import test_api
-import test_serving_mode
+from tests import test_api
+from tests import test_serving_mode
 
 
 def fake_expand(prompt, **kwargs):

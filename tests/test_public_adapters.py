@@ -12,7 +12,7 @@ import lora_catalog
 
 class PublicAdaptersTest(unittest.TestCase):
     def test_shipped_catalog_contains_only_optional_realism(self):
-        entries=json.loads((Path(__file__).parent/'lora-catalog.json').read_text())
+        entries=json.loads((Path(__file__).resolve().parents[1]/'lora-catalog.json').read_text())
         self.assertEqual([entry['id'] for entry in entries], ['realism'])
         self.assertEqual(entries[0]['repository'], 'suayptalha/Z-Image-Turbo-Realism-LoRA')
 

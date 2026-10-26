@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 import launch
 import server
-import test_serving_mode
+from tests import test_serving_mode
 
 
 class LLMStartup(unittest.TestCase):
@@ -69,7 +69,7 @@ class LLMStartup(unittest.TestCase):
 
     def test_make_passes_the_single_opt_out_and_validates_it(self):
         environment={key:value for key,value in os.environ.items() if key not in {'NO_LLM','MAKEFLAGS','MFLAGS'}}
-        root=Path(__file__).resolve().parent
+        root=Path(__file__).resolve().parents[1]
         def dry(*options):
             return subprocess.run(['make','-n','serve','MODEL=z-image-turbo',*options],cwd=root,env=environment,capture_output=True,text=True)
         default=dry();self.assertEqual(default.returncode,0,default.stderr)

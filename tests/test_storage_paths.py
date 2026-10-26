@@ -114,10 +114,10 @@ class StoragePathsTest(unittest.TestCase):
 print(json.dumps({'project':str(config.PROJECT_ROOT),'data':str(config.ROOT),
 'weights':str(config.MODEL_DIR),'images':str(config.IMAGE_DIR),'cache':os.environ['HF_HOME'],
 'runtime':str(getattr(config,'RUNTIME_DIR','')),'queue':str(config.QUEUE_DATABASE)}))'''
-        result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).parent,
+        result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).resolve().parents[1],
             env={**os.environ,'DATA_DIR':str(data)},capture_output=True,text=True,check=True)
         paths=json.loads(result.stdout)
-        self.assertEqual(paths['project'],str(Path(__file__).resolve().parent))
+        self.assertEqual(paths['project'],str(Path(__file__).resolve().parents[1]))
         self.assertEqual(paths['data'],str(data/'z-image-turbo'))
         self.assertEqual(paths['weights'],str(data/'z-image-turbo/weights'))
         self.assertEqual(paths['images'],str(data/'z-image-turbo/images'))

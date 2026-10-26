@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 import launch
 import server
-import test_api
+from tests import test_api
 
 
 class ServingModeTest(unittest.TestCase):
