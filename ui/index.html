@@ -36,6 +36,13 @@
         <textarea id="prompt" required maxlength="4000" placeholder="Describe the subject, setting, light, and style you have in mind…"></textarea>
         <p class="hint" id="prompt-hint">Loading model settings…</p>
         <p class="hint" id="base-only-mode" hidden>Base model only · LoRAs disabled for this server.</p>
+        <section id="expansion-controls" hidden>
+          <label class="immediate-choice"><input id="expand-prompt" type="checkbox">Expand description with local LLM</label>
+          <p class="hint">Keeps your words and adds visual detail. Text only; reference photos are not sent to the LLM.</p>
+          <p class="hint" id="expansion-guidance"></p>
+          <button type="button" class="secondary" id="preview-expansion">Preview expansion</button>
+        </section>
+        <details id="expanded-details" hidden><summary>Expanded description</summary><p id="expanded-text" style="white-space:pre-wrap"></p><p class="hint" id="expanded-info"></p><button type="button" class="secondary" id="use-expansion">Use this description</button></details>
         <div class="field" id="lora-section">
           <label for="lora">Style LoRA</label>
           <select id="lora" aria-describedby="lora-hint"><option value="">None — original model</option></select>
@@ -90,7 +97,7 @@
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
-    let loraCatalog = [], lorasEnabled = true;
+    let loraCatalog = [], lorasEnabled = true, expansionEnabled = null, previewingExpansion = false, expansionPreview = null;
     function setLoRAMode(enabled) {
       lorasEnabled = enabled;
       $('lora-section').hidden = !enabled;
@@ -121,7 +128,7 @@
     }
     $('lora').addEventListener('change', () => updateLoRA());
     function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
-    function updateButton() { $('generate').disabled = generating || !ready; if (!generating) $('button-text').textContent = $('generate-immediately').checked ? 'Generate image' : 'Add to queue'; }
+    function updateButton() { $('generate').disabled = generating || previewingExpansion || !ready; if (!generating) $('button-text').textContent = $('generate-immediately').checked ? 'Generate image' : 'Add to queue'; }
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
@@ -192,6 +199,15 @@
         if (typeof data.loras_enabled === 'boolean' && data.loras_enabled !== lorasEnabled) {
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
         }
+        const expansion = cap.prompt_expansion || {};
+        const guidance = cap[data.model]?.prompt_expansion_guidance;
+        $('expansion-guidance').textContent = guidance ? `Guidance: ${guidance.id}${guidance.verified_token_count ? ' · image token budget checked' : ' · native token count unavailable'}` : '';
+        if (expansionEnabled !== !!expansion.enabled) {
+          expansionEnabled = !!expansion.enabled;
+          $('expansion-controls').hidden = !expansionEnabled;
+          $('expand-prompt').checked = expansionEnabled;
+        }
+        $('preview-expansion').disabled = !expansionEnabled || serverBusy || previewingExpansion || generating;
         ready = data.status === 'ready'; serverBusy = data.busy;
         if (!generating) status(serverBusy ? 'Generating an image' : ready ? 'Ready on your Mac' : 'Loading model…', serverBusy ? 'busy' : ready ? 'ready' : 'checking');
       } catch { ready = false; if (!generating) status('Server offline', 'offline'); }
@@ -219,10 +235,11 @@
     });
     $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
     $('form').addEventListener('submit', async event => {
-      event.preventDefault(); if (generating || !ready) return;
+      event.preventDefault(); if (generating || previewingExpansion || !ready) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
       const payload = {model: activeModel, prompt, size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
+      if (expansionEnabled && $('expand-prompt').checked) payload.expand_prompt = true;
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
       if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
@@ -267,6 +284,35 @@
         generating = false; updateButton(); await checkHealth();
       }
     });
+    function showExpansion(data) {
+      expansionPreview = data;
+      $('expanded-text').textContent = data.expanded_prompt;
+      $('expanded-info').textContent = `${data.seconds}s for expansion` + (data.expanded_image_tokens != null ? ` · ${data.expanded_image_tokens}/${data.image_token_limit} image-model tokens` : ' · Image-model token count unavailable for this backend');
+      $('expanded-details').hidden = false; $('expanded-details').open = true;
+    }
+    $('use-expansion').addEventListener('click', () => {
+      if (!expansionPreview) return;
+      $('prompt').value = expansionPreview.expanded_prompt;
+      $('expand-prompt').checked = false;
+      $('prompt').focus();
+      $('announcement').textContent = 'Expanded description copied to the prompt. Automatic expansion is off to avoid expanding twice.';
+    });
+    $('preview-expansion').addEventListener('click', async () => {
+      if (previewingExpansion || generating || !ready) return;
+      const prompt=$('prompt').value.trim();
+      if (!prompt) { showError('Describe the image before previewing expansion.'); return; }
+      const payload={prompt};
+      if (lorasEnabled && $('lora').value) { payload.lora=$('lora').value; payload.lora_strength=Number($('lora-strength').value); }
+      previewingExpansion=true; $('preview-expansion').disabled=true; updateButton(); $('error').hidden=true;
+      $('preview-expansion').textContent='Expanding…';
+      try {
+        const response=await fetch('/v1/prompts/expand',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const data=await response.json();
+        if (!response.ok) throw new Error(typeof data.detail==='string' ? data.detail : 'Could not expand this description.');
+        showExpansion(data);
+      } catch(error) { showError(error.message); }
+      finally { previewingExpansion=false; $('preview-expansion').textContent='Preview expansion'; await checkHealth(); updateButton(); }
+    });
     $('generate-immediately').addEventListener('change', updateButton);
     function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching:' + activeModel, id); }
     async function displayJob(job) {
@@ -278,6 +324,8 @@
       $('result').src=url.href; $('result').alt=payload.prompt; $('result').hidden=false; $('empty').hidden=true;
       lastSeed=item.seed;
       lastResult={file_path:item.file_path,url:url.href,prompt:payload.prompt,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
+      if (item.prompt_expansion) showExpansion(item.prompt_expansion);
+      else { $('expanded-details').hidden = true; expansionPreview = null; }
       $('result-info').textContent=`${item.size.replace('x',' × ')} · ${data.generation_seconds}s · Seed ${lastSeed}`;
       $('download').href=url.href; $('download').download=`${activeModel}-${lastSeed}.png`; $('actions').hidden=false;
       $('saved-path').textContent=item.file_path; $('announcement').textContent='Your image is ready and saved.';
@@ -335,7 +383,7 @@
           const job=await requestJSON('/v1/jobs/'+watchingJob);
           const finished=['succeeded','failed','cancelled'].includes(job.status);
           $('working').hidden=finished; $('preview').setAttribute('aria-busy',String(!finished));
-          $('elapsed').textContent=job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed`) : 'Saved · waiting for the next slot…';
+          $('elapsed').textContent=job.status==='running' && summary.stage==='expanding_prompt' ? 'Expanding your description with the local LLM…' : job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed`) : 'Saved · waiting for the next slot…';
           if (finished) {
             if (job.status==='succeeded') await displayJob(job);
             else showError(job.error || 'The followed job was cancelled.');
@@ -374,7 +422,8 @@
         if (!sameModel) warnings.push(`This image used ${item.model}; the server currently runs ${activeModel}. Model-specific settings use current defaults.`);
         const url = new URL(item.url, location.origin);
         if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
-        $('prompt').value = item.prompt || ''; $('tags').value = (item.tags || []).join(', ');
+        $('prompt').value = metadata.expanded_prompt || item.prompt || '';
+        if (metadata.prompt_expansion) { showExpansion(metadata.prompt_expansion); $('expand-prompt').checked=false; } $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
         if (sameModel && Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= maxSteps) $('steps').value = item.steps;
         if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');

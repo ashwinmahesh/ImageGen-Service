@@ -37,7 +37,7 @@ Choose an image model:
 Model [1 / Z-Image Turbo]:
 ```
 
-Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads only the selected model's required assets; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
+Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads the selected image model's required assets plus one shared prompt-expansion LLM; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
 
 **`make serve` numbers only models already set up.** Other supported models are shown separately without numbers, with the command to set each up. For example, with only Z-Image installed:
 
@@ -74,6 +74,7 @@ First setup also asks for a model store folder. **Blank/Enter uses the project d
 <store>/z-image-turbo/{weights,images,references,image-index,cache,loras,logs}
 <store>/chroma1-hd/{weights,images,references,image-index,cache,loras,logs}
 <store>/chroma1-flash/{weights,images,references,image-index,cache,loras,logs}
+<store>/prompt-enhancer/weights  # shared Qwen3.5-2B 4-bit, about 1.7 GB
 ```
 
 Source, Git, UI, the native runtime, `.venv`, and **SQLite state** stay in the project. Per-model queue databases and their journals/worker leases live in `<project>/state/queues/<model-id>/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
@@ -102,13 +103,49 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 The default is **`http://127.0.0.1:5732/`**, also reachable as `http://localhost:5732/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. No hosts-file mapping or `http://imagegen` shortcut is installed.
 
-Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, model `capabilities`, and durable `queue` counts/state/database path. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
+Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, `prompt_expansion`, model `capabilities`, and durable `queue` counts/state/database path. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
 
 To switch, stop the server and run `make serve` again, or run `make serve MODEL=...` in another terminal. The launcher reuses an identical instance or gracefully replaces a **verified managed idle** service. It refuses to interrupt generation or replace unrelated listeners. It never hot-swaps models inside an inference request. A request's `model`, if specified, must equal the active model; mismatches return 422. Serving never downloads models. If assets are missing, run `make setup MODEL=<id>` first.
 
 If the launcher finds the same model/mode already running from this checkout, it prints the URL and exits successfully; the original terminal still owns that server. A model switch leaves its waiting queue persisted until that model starts again. During initial model loading the HTTP listener may not yet be reachable; connection refusal can be normal until startup completes. Read logs if readiness never arrives.
 
 The original Mac's shortcuts `serve-images`, `serve-z-image-turbo`, `serve-chroma1-hd`, `serve-chroma1-flash` and the three `-no-loras` variants all use this one project. Other users can use Make directly without aliases.
+
+## Optional local prompt expansion
+
+First `make setup` also downloads **[Qwen3.5-2B 4-bit](https://huggingface.co/mlx-community/Qwen3.5-2B-4bit)** (Apache-2.0) to `<store>/prompt-enhancer/weights`. All image models share it; repeated setup reuses the files. Revision `674aaa7240b91e8012fcad5d791b7dfe5ba90207` and the weights SHA256 are pinned in `enhancer_profile.py`. The text-only loader uses pinned `mlx-lm==0.32.2`. Serving is offline. For an existing installation, run `make setup MODEL=z-image-turbo` to install the new dependency, or use `make download-llm` if dependencies are already installed.
+
+```sh
+make serve MODEL=z-image-turbo WITH_LLM=1   # Enable the optional prompt LLM
+make serve MODEL=z-image-turbo              # Image model alone (default)
+make serve MODEL=chroma1-flash WITH_LLM=1 NO_LORAS=1
+make download-llm                            # Download/resume shared LLM only
+```
+
+`WITH_LLM` is independent of adapters and image-model selection. Its presence is checked before replacing an idle managed service. Missing prompt assets do not block plain serving. `/health.prompt_expansion.enabled` and `/health.capabilities.prompt_expansion` describe the current mode. Switching modes requires restarting; the launcher refuses a busy switch.
+
+The LLM has explicit image-specific instructions to expand the description using evocative, concrete visual language. It develops the requested medium/style/look/aesthetic through compatible line work, shading, palette, materials, atmosphere, lighting, framing and depth. It is told to preserve subjects, counts, actions, colors, composition, quoted text and exclusions, and to avoid conflicting styles or generic quality filler. **Your original text is kept verbatim**, followed by added visual detail, with style development first. The LLM returns separate `style_details` and optional `additional_composition` fields; their accepted text is combined after the original. See [research and policy decisions](docs/prompt-expansion.md). This is expansion, with no compression pass. Check the preview when exact creative choices matter: model-generated additions can still be imperfect. The LLM sees only text and does not analyze reference photos.
+
+When enabled at startup, the webpage shows **Expand description with local LLM** (initially checked). Turn it off for any image. **Preview expansion** returns the expanded text without creating an image job; **Use this description** copies it into the editable prompt and turns automatic expansion off to avoid expanding it twice. Generating with expansion checked saves original and expanded prompts together. Accepting a preview manually makes that edited text the new request prompt. Gallery settings reuse an existing expanded prompt with automatic expansion off.
+
+API generation routes accept common strict boolean **`expand_prompt`**, default **false**, independently of priority:
+
+```sh
+curl -sS http://127.0.0.1:5732/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Three cloaked adventurers in a misty gothic village, old-school cel animation, no text","expand_prompt":true,"generate_immediately":true,"size":"512x512","response_format":"url"}'
+
+# Text preview only; returns original_prompt, expanded_prompt, model/revision, seconds and token counts.
+curl -sS http://127.0.0.1:5732/v1/prompts/expand \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"A fox in a snowy forest, watercolor"}'
+```
+
+The preview optionally accepts `lora`/`lora_strength` so token counts include its configured trigger. It returns409 while the shared accelerator/another inference is busy; retry after it finishes. It does not create a durable job. Expansion requests while the feature is disabled return422. Automatic expansion runs as part of the durable image job, under the shared accelerator lease; its result is committed to SQLite **before** rendering and reused after an interrupted render. Restarting without LLM mode preserves waiting expansion jobs at the head until that capability is enabled or the job is removed. Failed expansion marks that job failed without rendering or silently using the original; inspect the saved error and retry or submit without expansion.
+
+Expanded text must fit the API's 4000-character cap. For Z-Image, the exact local image tokenizer checks the **512-token** budget including chat formatting and adapter trigger. Almost-full original prompts and over-budget expansions fail clearly; neither is compressed or truncated by this feature. Chroma's native GGUF T5 tokenizer is not counted by the Python preview; token counts/limit are null there, and its backend prompt limits still apply. Guidance is selected automatically for Z-Image, Chroma HD or Chroma Flash. `/health.capabilities["<model-id>"].prompt_expansion_guidance` reports the profile; Flash currently inherits HD content guidance because fewer diffusion steps alone do not establish different prompting needs. Records include `image_model`, `guidance_profile`, `guidance_version`, `policy_version`, `policy_sha256`, `sampling` and structured `details`. The LLM uses greedy non-thinking decoding, at most320 generated tokens and a180-second timeout. It runs in a short-lived subprocess; its weights/KV cache are released before image rendering. The selected image backend can remain resident.
+
+Job detail/list responses expose `prompt_expansion` once available. Completed `result.data[0].prompt_expansion` and synchronous `data[0].prompt_expansion` contain the same record. The sidecar keeps `prompt` as the original, `expanded_prompt` as expanded text, `effective_prompt` as actual expanded text plus any adapter trigger, and `prompt_expansion` with provenance/token counts/timing. `generation_seconds` measures image rendering; `prompt_expansion.seconds` is additional latency. Default non-expanded requests keep their legacy idempotency fingerprints. Optional `peak_mlx_memory_gb` and `peak_process_rss_gb` report decimal GB for the LLM child; these overlapping counters must not be added. In one local test, expansion took8.9s and peaked at1.96GB process RSS (including1.63GB MLX allocation). The two512px,9-step same-seed images rendered in14.8s and14.2s, respectively; these are individual measurements, not general performance guarantees.
 
 ## Models and effective settings
 
@@ -202,7 +239,7 @@ Shutdown finishes the active image and leaves waiting jobs on disk. If the proce
 
 Upgrading from the former `<store>/<model-id>/queue/jobs.sqlite3` layout automatically migrates that model at startup, before recovery/inference. Stop its old server and let native inference finish first. Migration holds both worker leases, uses SQLite backup (including committed WAL rows), verifies integrity/content and retains a standalone `legacy-backup-*.sqlite3` beside the new database before retiring the old database and sidecars. Identical copies after an interrupted migration are recognized; differing databases cause a clear error without merging or overwriting them. No external queue fallback is used. Keep `state/` as well as the media store when moving/backing up a project; a source-only clone starts with an empty local queue.
 
-SQLite uses short transactions, a rollback journal and `synchronous=FULL`; inference runs outside database transactions. The database, journals and lock files are ignored by Git. Back up the database while the service is stopped or with SQLite's backup API, together with output/reference/index files. This protects against process restarts; it does not replace backups or guarantee survival of disk failure. Missing media SSDs block startup/inference without creating fallback weights/media; queue listing/removal on an already-running service uses its local database.
+Queue schema2 adds persisted prompt expansions and upgrades schema1 in place without changing job IDs/order. Older server versions cannot read schema2; keep the updated server when restarting. SQLite uses short transactions, a rollback journal and `synchronous=FULL`; inference runs outside database transactions. The database, journals and lock files are ignored by Git. Back up the database while the service is stopped or with SQLite's backup API, together with output/reference/index files. This protects against process restarts; it does not replace backups or guarantee survival of disk failure. Missing media SSDs block startup/inference without creating fallback weights/media; queue listing/removal on an already-running service uses its local database.
 
 The worker cooperates with other local services through a configurable filesystem GPU lock. `GPU_LOCK_FILE=/absolute/path/gpu.lock` or ignored `storage.json` key `gpu_lock_file` selects it; the portable default is `<store>/.model-services/gpu.lock`. This Mac explicitly shares `/Volumes/ASH-SSD/models/.voice-studio/gpu.lock` with the voice services. A contended accelerator makes pending jobs wait, rather than fail; they remain removable until inference begins. Model loading also holds this lock. Serializing inference does not evict idle resident weights; stop/unload unused models if memory is tight. `/health.queue.stage` distinguishes waiting for the accelerator from generating, and storage failures appear as errors without discarding accepted jobs.
 

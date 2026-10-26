@@ -54,7 +54,7 @@ class JobStore:
         self.path.parent.mkdir(parents=True,exist_ok=True)
         with self.connection() as db:
             version=db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0,1):
+            if version not in (0,1,2):
                 raise RuntimeError('Unsupported queue database version; use a compatible server')
             # Short rollback-journal transactions; all queue files stay project-local.
             db.execute('PRAGMA journal_mode=DELETE')
@@ -80,8 +80,13 @@ class JobStore:
                 CREATE INDEX IF NOT EXISTS job_order ON jobs(status,immediate DESC,sequence);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 INSERT OR IGNORE INTO settings VALUES('paused','false');
-                PRAGMA user_version=1;
+
             ''')
+            with self.connection(write=True) as migration:
+                columns={row[1] for row in migration.execute('PRAGMA table_info(jobs)')}
+                if 'prompt_expansion' not in columns:
+                    migration.execute('ALTER TABLE jobs ADD COLUMN prompt_expansion TEXT')
+                migration.execute('PRAGMA user_version=2')
 
     @staticmethod
     def record(row):
@@ -89,6 +94,7 @@ class JobStore:
             raise FileNotFoundError('Unknown job ID')
         item=dict(row)
         item['request']=json.loads(item.pop('payload'))
+        item['prompt_expansion']=json.loads(item['prompt_expansion']) if item.get('prompt_expansion') else None
         item['result']=json.loads(item['result']) if item['result'] else None
         item['generate_immediately']=bool(item.pop('immediate'))
         for key in ['adapter_sha','idempotency_key','fingerprint']:
@@ -127,14 +133,16 @@ class JobStore:
         with self.connection(write=True) as db:
             return db.execute("UPDATE jobs SET status='queued',started=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
 
-    def has_work(self,*,loras_enabled=True):
+    def has_work(self,*,loras_enabled=True,llm_enabled=True):
         with self.connection() as db:
             paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
             condition=" AND immediate=1" if paused else ''
             row=db.execute("SELECT payload FROM jobs WHERE status='queued'"+condition+" ORDER BY immediate DESC,sequence LIMIT 1").fetchone()
-            return bool(row and (loras_enabled or not json.loads(row['payload']).get('lora')))
+            if not row: return False
+            request=json.loads(row['payload'])
+            return (loras_enabled or not request.get('lora')) and (llm_enabled or not request.get('expand_prompt'))
 
-    def claim(self,*,loras_enabled=True):
+    def claim(self,*,loras_enabled=True,llm_enabled=True):
         with self.connection(write=True) as db:
             paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
             condition=" AND immediate=1" if paused else ''
@@ -143,10 +151,20 @@ class JobStore:
                 return None
             if json.loads(row['payload']).get('lora') and not loras_enabled:
                 return None  # Preserve the head job until adapters are enabled or it is cancelled.
+            if json.loads(row['payload']).get('expand_prompt') and not llm_enabled:
+                return None  # Preserve jobs requiring an optional startup capability.
             db.execute("UPDATE jobs SET status='running',started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
             item['_adapter_sha']=row['adapter_sha']
             return item
+
+    def save_expansion(self,identifier,expansion):
+        with self.connection(write=True) as db:
+            changed=db.execute("UPDATE jobs SET prompt_expansion=? WHERE id=? AND status='running' AND prompt_expansion IS NULL",
+                               (json.dumps(expansion,allow_nan=False),identifier)).rowcount
+            if changed != 1:
+                raise QueueConflict('Cannot replace a saved expansion or change an inactive job')
+        return self.get(identifier)['prompt_expansion']
 
     def finish(self,identifier,*,result=None,error=None,error_status=None):
         with self.connection(write=True) as db:
@@ -184,6 +202,7 @@ class JobStore:
             counts['database_path']=str(self.path)
             head=db.execute("SELECT id,payload FROM jobs WHERE status='queued' ORDER BY immediate DESC,sequence LIMIT 1").fetchone()
             counts['next_job_id']=head['id'] if head else None
+            counts['next_requires_llm']=bool(head and json.loads(head['payload']).get('expand_prompt'))
             counts['next_requires_lora']=bool(head and json.loads(head['payload']).get('lora'))
             return counts
 
@@ -197,9 +216,10 @@ class JobStore:
 
 
 class QueueWorker:
-    def __init__(self,store,execute,*,loras_enabled=lambda:True,busy=None,gpu_lock_file=None):
+    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None):
         self.store,self.execute=store,execute
         self.loras_enabled=loras_enabled
+        self.llm_enabled=llm_enabled
         self.busy=busy or threading.Lock()
         self.stopping=threading.Event()
         self.wake=threading.Event()
@@ -247,7 +267,7 @@ class QueueWorker:
         try:
             while not self.stopping.is_set():
                 self.wake.clear()
-                if not self.store.has_work(loras_enabled=self.loras_enabled()):
+                if not self.store.has_work(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled()):
                     self.stage='idle'
                     self.wake.wait(.5)
                     continue
@@ -259,7 +279,7 @@ class QueueWorker:
                 job=None
                 try:
                     # Claim only when the GPU is available. Waiting jobs stay removable.
-                    job=self.store.claim(loras_enabled=self.loras_enabled())
+                    job=self.store.claim(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled())
                     if job is None:
                         if gpu: gpu.close()
                         continue

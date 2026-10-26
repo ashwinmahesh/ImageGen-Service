@@ -105,3 +105,6 @@ storage.json
 !/docs/screenshots/generator.png
 !/docs/screenshots/queue.png
 !/docs/screenshots/gallery.png
+
+# Shared local prompt-expansion LLM (directory or external symlink)
+/prompt-enhancer

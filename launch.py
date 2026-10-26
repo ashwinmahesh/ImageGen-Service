@@ -11,6 +11,7 @@ import time
 import urllib.request
 from model_profiles import PROFILES, DEFAULT_MODEL, select_model, SHARED_ASSETS
 from storage_paths import data_directory, require_storage
+from enhancer_profile import check_assets as check_enhancer_assets
 ROOT=Path(__file__).resolve().parent
 API_MODEL=DEFAULT_MODEL
 
@@ -57,6 +58,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=5732)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
+    parser.add_argument('--with-llm',action='store_true',help='Enable the optional local prompt expander')
     parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
     args=parser.parse_args()
     try:
@@ -65,6 +67,11 @@ def main():
     except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)
+    if args.with_llm:
+        try:
+            check_enhancer_assets(ROOT)
+        except (RuntimeError, OSError, ValueError) as error:
+            raise SystemExit(str(error)) from error
     if not port_free(args.port):
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health',timeout=5) as response:
@@ -86,7 +93,7 @@ def main():
         command_line=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True)
         if 'server.py' not in command_line or 'python' not in command_line.lower():
             raise SystemExit('The existing listener is not a managed Python image server; leaving it running.')
-        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras):
+        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == args.with_llm:
             print(f'{selected} is already serving at http://127.0.0.1:{args.port}/')
             return
         if state.get('busy'):
@@ -104,6 +111,8 @@ def main():
     command=[sys.executable,str(ROOT/'server.py'),'--model',selected,'--port',str(args.port)]
     if args.no_loras:
         command.append('--no-loras')
+    if args.with_llm:
+        command.append('--with-llm')
     os.execv(sys.executable,command)
 
 

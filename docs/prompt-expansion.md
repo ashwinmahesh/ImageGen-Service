@@ -1,0 +1,31 @@
+# Prompt-expansion design and evidence
+
+Researched 2026-10-25 with an independent Astra review of primary sources. This service uses stock Qwen3.5-2B 4-bit with a small, image-specific policy; it does not claim the performance of a trained prompt-enhancer checkpoint.
+
+## What the research supports
+
+- [Z-Image's official enhancer](https://huggingface.co/spaces/Tongyi-MAI/Z-Image-Turbo/blob/main/pe.py) protects essential subjects, counts, actions, colors and literal text before adding concrete composition, light and spatial detail. We condition surface/light detail on the requested medium so it does not pull flat art toward photography.
+- [Qwen-Image 2.1's policy](https://github.com/QwenLM/Qwen-Image-2.1/blob/main/prompt_rewrite/prompts/system_prompt_t2i.txt) separates fixed information from open decisions and establishes medium/style early. We adapt those principles, without copying its long-output target, broad invention or portrait inventory. Its [implementation](https://github.com/QwenLM/Qwen-Image-2.1/blob/main/prompt_rewrite/README.md) uses dedicated fine-tuned9B checkpoints with required thinking; those contracts/settings do not transfer automatically to our stock2B model.
+- [NVIDIA APE](https://arxiv.org/html/2606.00204v1) evaluates small Qwen enhancers, including with Z-Image. In its experiments, ordinary one-shot expansion can underperform the original prompt; decomposed/post-trained variants perform better. This motivates separating style from composition and evaluating original-request fidelity. Its multi-stage trained pipeline is different from our single-pass JSON output.
+- [Microsoft Promptist](https://arxiv.org/abs/2212.09611) balances relevance to the original input with aesthetics. Its GPT-2/Stable-Diffusion setup and prompt-tag recipe are not validated for our models. [PromptEnhancer](https://arxiv.org/html/2509.04545v5) separately evaluates style, counting, negation and attribute/spatial binding, supporting evaluation beyond whether the prose sounds polished.
+- [Google Prompt Expansion](https://arxiv.org/html/2312.16720) finds downstream-model adaptation valuable and reports longer expansion outperforming shorter alternatives in its setting. Thus research does not prove that shorter is universally better. Our length controls reflect actual encoder limits, latency and product scope.
+
+## Implemented policy
+
+`prompt_policy.py` contains the explicit instructions, a small set of medium-specific examples (one selected per request), decoding settings and per-image-model guidance. The model returns two strings: `style_details` develops the requested aesthetic through visible rendering properties; optional `additional_composition` adds compatible spacing, light or atmosphere. Their accepted content is appended to the exact original. This avoids omitting user details; it is an engineering choice rather than a proven universally best expansion method. No compression pass is used.
+
+Positive request-conditioned guidance covers photography, watercolor, vector art, animation, pixel art and explicit hybrid2D/3D treatments; unknown named styles receive general fidelity guidance. Directly excluded media are not treated as requested styles. Deterministic style detection is heuristic, not complete semantic classification. The policy protects counts, actions, colors, spatial/viewpoint constraints, quoted text and exclusions. It avoids new subjects/props/text, style replacement, generic quality slogans, and photographic microtexture in flat art. Narrow regression guards catch certain rear-view facial details and flat-art photographic additions; these checks do not prove general semantic consistency. Structured parsing proves format, not creative quality. Failed or over-budget expansion reports an error without silently rendering the original.
+
+## Backend guidance
+
+Every profile has its own ID/version, provenance and soft new-word allowance. Current profiles use a110-word soft cap; this is an engineering limit, not a model maximum. Z checks the real local tokenizer's512-token budget including formatting and adapter triggers. Chroma HD uses coherent T5-oriented natural-language guidance; native token counts remain unknown. Flash has a separate identity but inherits the same Chroma content guidance. Its lower step count alone does not justify simplifying prompts. [Chroma HD](https://huggingface.co/lodestones/Chroma1-HD), [Flash](https://huggingface.co/lodestones/Chroma1-Flash).
+
+Health capabilities expose model-specific guidance under the exact model-ID key. Saved expansion records include selected image model, guidance profile/version, common policy version/hash, model revision, sampling settings, text/token counts, time and memory. Sidecars retain original, expanded and effective prompts. Existing saved expansions are reused after interrupted rendering even if a newer policy is installed.
+
+## Local evaluation and limits
+
+A small benign evaluation compared greedy decoding with temperature0.4/top_p0.9/top_k20/presence0.2 on rear-view flat cel animation, a sparse flat vector logo, and watercolor with exact count/lettering. The first free-form policy often repeated the input. The structured variant completed all six cases, with useful style additions; sampled outputs sometimes repeated subjects or phrases. We retained greedy, non-thinking decoding. This tiny qualitative comparison does not establish statistical superiority or improved image quality.
+
+Additional text checks cover photography, unspecified medium, and selection of HD/Flash guidance. Those checks exposed unrelated-example bias on unspecified media; the selected example now matches the requested medium, and an unspecified medium leaves style additions empty rather than imposing cel animation. Real512px same-seed image checks exercise the durable expansion/render pipeline. We preserve previews, original metadata and per-image opt-out so the user can compare against the actual original request.
+
+[Qwen3.5-2B's card](https://huggingface.co/Qwen/Qwen3.5-2B) provides general sampling recommendations, which differ from our conservative task-specific choice. Neither one few-shot example, JSON nor greedy decoding is established as optimal for this particular quantized model. Broader image-level tests across styles/seeds would be needed to make that claim.

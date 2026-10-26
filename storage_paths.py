@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 from model_profiles import PROFILES
 
-DATA_FOLDERS = tuple(PROFILES)
+DATA_FOLDERS = (*PROFILES, 'prompt-enhancer')
 MODEL_FOLDERS = ('weights', 'cache', 'images', 'references', 'image-index', 'loras', 'logs')
 
 

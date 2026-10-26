@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import json
 import hashlib
+import fcntl
 import sqlite3
 import io
 import logging
@@ -33,6 +34,9 @@ from reference_geometry import prepare_geometry, ReferenceError
 import image_catalog
 from job_queue import JobStore, QueueWorker, QueueConflict, fingerprint, TERMINAL
 from queue_storage import initialize_queue
+import prompt_expander
+from prompt_policy import public_guidance
+from enhancer_profile import check_assets as check_enhancer_assets
 
 # Downloads are an explicit separate step. Serving never needs the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -49,6 +53,7 @@ busy = threading.Lock()
 model = None
 job_store = None
 job_worker = None
+preview_gate = threading.Lock()
 
 
 def load_model():
@@ -72,8 +77,10 @@ def load_model():
 
 def initialize_service():
     global job_store,job_worker
+    if app.state.llm_enabled:
+        check_enhancer_assets(PROJECT_ROOT)
     job_store=JobStore(QUEUE_DATABASE)
-    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE)
+    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE)
     job_worker.acquire(prepare=lambda:initialize_queue(job_store,ROOT/'queue'/'jobs.sqlite3'))
     try:
         # Model loading and inference cooperate with the same cross-service GPU lock.
@@ -99,7 +106,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.1.1", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.2.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -111,6 +118,7 @@ app = FastAPI(
     ),
 )
 app.state.loras_enabled = True
+app.state.llm_enabled = False
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
 
 
@@ -133,6 +141,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
+    expand_prompt: bool = Field(default=False, strict=True, description="Requires make serve WITH_LLM=1. Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
     n: Literal[1] = 1
     steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
@@ -209,7 +218,30 @@ class GenerateRequest(BaseModel):
         return f"{width}x{height}"
 
 
+class PromptExpansion(BaseModel):
+    original_prompt: str
+    expanded_prompt: str
+    mode: Literal['expand']
+    model: str
+    revision: str
+    policy_version: int
+    seconds: float
+    original_image_tokens: int | None = None
+    expanded_image_tokens: int | None = None
+    image_token_limit: int | None = None
+    style_anchor: str | None = None
+    image_model: str | None = None
+    guidance_profile: str | None = None
+    guidance_version: int | None = None
+    details: dict[str,str] | None = None
+    sampling: dict | None = None
+    policy_sha256: str | None = None
+    peak_mlx_memory_gb: float | None = Field(default=None,description="Peak MLX allocator memory in decimal GB in the short-lived LLM child; overlaps process RSS, do not add them.")
+    peak_process_rss_gb: float | None = Field(default=None,description="Peak LLM-child resident memory in decimal GB; total service memory is higher because the image model may remain loaded.")
+
+
 class ImageResult(BaseModel):
+    prompt_expansion: PromptExpansion | None = None
     tags: list[str] = Field(default_factory=list)
     seed: int
     size: str = Field(description="Actual saved PNG dimensions, WIDTHxHEIGHT. With a reference, these follow its oriented aspect ratio and may differ from the request size.")
@@ -365,7 +397,7 @@ def generate_with_geometry(payload, geometry, job=None):
             "backend": PROFILE["backend"], **PROFILE.get("applied", {}),
             "model": API_MODEL, "source": MODEL_ID, "revision": MODEL_REVISION,
             "created": int(time.time()), "tags": payload.tags,
-            "prompt": payload.prompt, "seed": seed, "size": f"{output_width}x{output_height}",
+            "prompt": job['request']['prompt'] if job else payload.prompt, "seed": seed, "size": f"{output_width}x{output_height}",
             "requested_size": payload.size, "generation_size": f"{width}x{height}",
             "reference_size": list(geometry.reference_size) if geometry.reference_size else None,
             "steps": payload.steps, "seconds": elapsed,
@@ -378,6 +410,9 @@ def generate_with_geometry(payload, geometry, job=None):
         }
         if job:
             metadata.update(job_id=identifier,request_fingerprint=fingerprint(job['request']))
+            if job.get('prompt_expansion'):
+                metadata.update(prompt_expansion=job['prompt_expansion'],expanded_prompt=payload.prompt)
+                metadata[API_MODEL]={'prompt_expansion_guidance':public_guidance(API_MODEL)}
         temporary=output_dir/f'.{identifier}.metadata.tmp'
         temporary.write_text(json.dumps(metadata,indent=2)+'\n')
         temporary.replace(final_path.with_suffix('.json'))
@@ -406,7 +441,7 @@ def root():
 
 @app.get("/health")
 def health():
-    state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked(), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
+    state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
     if state['busy'] and hasattr(model,'progress'):
         state['progress']=model.progress()
     if job_store:
@@ -415,6 +450,8 @@ def health():
             state['busy']=state['busy'] or bool(state['queue']['running'])
             state['queue']['stage']=job_worker.stage if job_worker else 'idle'
             state['queue']['blocked_reason']='Next job requires LoRAs; restart with adapters enabled or cancel it.' if state['queue']['next_requires_lora'] and not app.state.loras_enabled else None
+            if state['queue'].get('next_requires_llm') and not app.state.llm_enabled:
+                state['queue']['blocked_reason']='Next job requires prompt expansion; restart with make serve WITH_LLM=1 or cancel it.'
             state['queue']['error']=job_worker.error if job_worker else None
             if state['queue']['error']: state['status']='error'
         except (OSError,RuntimeError,sqlite3.Error):
@@ -425,9 +462,10 @@ def health():
 def capabilities():
     return {'model':API_MODEL,'name':PROFILE['name'],'backend':PROFILE['backend'],
             'default_steps':PROFILE['steps'],'max_steps':PROFILE['max_steps'],
+            API_MODEL:{'prompt_expansion_guidance':public_guidance(API_MODEL)},
             'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
             'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
-            'loras_enabled':app.state.loras_enabled,'persistent_queue':True,'immediate_generation':True}
+            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'persistent_queue':True,'immediate_generation':True}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -445,12 +483,73 @@ def models():
         for identifier,profile in PROFILES.items()]}
 
 
+class ExpandPromptRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    prompt: str = Field(min_length=1,max_length=4000)
+    lora: str | None = None
+    lora_strength: float | None = Field(default=None,ge=0,le=2,allow_inf_nan=False)
+
+    @field_validator('prompt')
+    @classmethod
+    def prompt_text(cls,value):
+        return GenerateRequest.validate_prompt(value)
+
+    @model_validator(mode='after')
+    def strength_requires_adapter(self):
+        if self.lora is None and self.lora_strength is not None:
+            raise ValueError('lora_strength requires lora')
+        return self
+
+
+@app.post('/v1/prompts/expand',response_model=PromptExpansion,summary='Preview local prompt expansion',
+          description='Requires WITH_LLM=1. Text only; does not inspect a reference image or create an image job. Keeps original description verbatim. Returns 409 if inference/the shared accelerator is occupied; preview is not queued. Expansion failures return 422 and never silently fall back. Long image prompts are not compressed.')
+def expand_prompt(payload:ExpandPromptRequest):
+    if not app.state.llm_enabled:
+        raise HTTPException(422,'Prompt expansion is disabled; restart with make serve WITH_LLM=1.')
+    queue_ready()
+    if not preview_gate.acquire(blocking=False):
+        raise HTTPException(409,'Another prompt preview is running; retry after it completes.')
+    gpu=None
+    inference_owned=False
+    try:
+        if payload.lora and not app.state.loras_enabled:
+            raise HTTPException(422,'LoRAs are disabled for this server.')
+        selection=resolve_lora(payload.lora,payload.lora_strength)
+        # Same order as the image worker: accelerator, then inference lock.
+        require_storage(GPU_LOCK_FILE)
+        GPU_LOCK_FILE.parent.mkdir(parents=True,exist_ok=True)
+        gpu=GPU_LOCK_FILE.open('a+')
+        try:
+            fcntl.flock(gpu,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise HTTPException(409,'The shared GPU is busy. Wait for inference to finish, then preview again.') from None
+        inference_owned=busy.acquire(blocking=False)
+        if not inference_owned:
+            raise HTTPException(409,'Image inference is busy; preview again after it finishes.')
+        return prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
+               image_weights=MODEL_DIR,selection=selection,
+               inherited_fds=tuple(handle.fileno() for handle in [job_worker.lease,gpu] if handle))
+    except prompt_expander.ExpansionError as error:
+        raise HTTPException(422,str(error)) from error
+    except ValueError as error:
+        raise HTTPException(400,str(error)) from error
+    except (OSError,RuntimeError) as error:
+        raise HTTPException(503,'Prompt assets or GPU-lock storage unavailable; check setup and storage.') from error
+    finally:
+        if inference_owned: busy.release()
+        if gpu: gpu.close()
+        preview_gate.release()
+
+
 class SyncGenerateRequest(GenerateRequest):
     generate_immediately: bool=Field(default=True,strict=True,description='Synchronous route defaults to immediate priority (next free slot); false waits in ordinary FIFO order.')
 
 
 def normalized_request(payload):
     data=payload.model_dump()
+    # Keep legacy request fingerprints stable for the default disabled feature.
+    if not data['expand_prompt']:
+        data.pop('expand_prompt')
     if data['reference_image'] is None:
         data.pop('image_strength',None)
     return data
@@ -472,6 +571,8 @@ def submit_job(payload,key=None,retry_of=None):
         if existing: return existing
         if payload.lora is not None and not app.state.loras_enabled:
             raise HTTPException(422,'LoRAs are disabled for this server; restart without --no-loras to enable them.')
+        if payload.expand_prompt and not app.state.llm_enabled:
+            raise HTTPException(422,'Prompt expansion is disabled; restart with make serve WITH_LLM=1 or set expand_prompt:false.')
         require_storage(ROOT); require_storage(payload.output_dir)
         # Check input headers without resizing/re-encoding every waiting request.
         if payload.reference_image:
@@ -516,6 +617,18 @@ def execute_job(job):
         selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
         if selection and selection['sha256']!=job.get('_adapter_sha'):
             raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
+        if payload.expand_prompt:
+            if not app.state.llm_enabled:
+                raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
+            if not job.get('prompt_expansion'):
+                job_worker.stage='expanding_prompt'
+                expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
+                      image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
+                job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
+            prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
+            # The immutable request/fingerprint remains original; rendering uses the saved expansion.
+            payload=payload.model_copy(update={'prompt':job['prompt_expansion']['expanded_prompt']})
+            job_worker.stage='generating'
         path,metadata=generate(payload,job)
     return metadata
 
@@ -524,6 +637,8 @@ def generation_response(path,metadata,request,response_format='url'):
     width,height=map(int,metadata['size'].split('x'))
     item={'tags':metadata['tags'],'seed':metadata['seed'],'file_path':str(path),'metadata_path':str(path.with_suffix('.json')),
           'size':metadata['size'],'width':width,'height':height,'generation_size':metadata['generation_size']}
+    if metadata.get('prompt_expansion'):
+        item['prompt_expansion']=metadata['prompt_expansion']
     if response_format=='b64_json':
         item['b64_json']=base64.b64encode(path.read_bytes()).decode('ascii')
     else:
@@ -543,6 +658,7 @@ class JobResponse(BaseModel):
     request: dict
     error: str | None=None
     retry_of: str | None=None
+    prompt_expansion: PromptExpansion | None=None
     result: GenerateResponse | None=None
 
 
@@ -829,8 +945,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5732)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
+    parser.add_argument("--with-llm", action="store_true", help="Enable local prompt expansion")
     parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
     args = parser.parse_args()
+    app.state.llm_enabled = args.with_llm
+    log.warning("Local prompt expansion: %s", "enabled (Qwen3.5-2B 4-bit, text only)" if args.with_llm else "disabled; use WITH_LLM=1 to enable")
     app.state.loras_enabled = not args.no_loras
     if args.no_loras:
         app.description += " This server is running in base-only mode: LoRAs are disabled."
