@@ -72,8 +72,8 @@ def main():
     args=parser.parse_args()
     try:
         explicit=args.model or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
-        ready=None if explicit else available_models()
-        selected=select_model(explicit,choices=ready,preferred=default_model(ROOT,ready) if ready is not None else None)
+        ready=available_models()
+        selected=select_model(explicit,choices=ready,preferred=default_model(ROOT,ready) if ready else None)
     except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)

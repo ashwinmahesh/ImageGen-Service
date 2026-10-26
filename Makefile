@@ -83,6 +83,7 @@ stop-queue:
 	"$(PYTHON)" queue_launch.py --port $(QUEUE_PORT) --stop
 
 serve:
+	@test -x "$(PYTHON)" || { echo 'Setup is required before serving. Run make setup to install dependencies and set up at least one model, then retry make serve.' >&2; exit 1; }
 	"$(PYTHON)" launch.py --port $(PORT) --queue-port $(QUEUE_PORT) $(SERVER_FLAGS)
 
 serve-no-loras:

@@ -8,7 +8,7 @@ Use the webpage for hands-on experimentation, or call the API from scripts and o
 
 ![Image generator with prompt and reference-photo controls](docs/screenshots/generator.png)
 
-For installation and a guided walkthrough of both interfaces, follow **[QUICKSTART.md](QUICKSTART.md)**.
+For installation and a guided walkthrough of both interfaces, follow **[QUICKSTART.md](QUICKSTART.md)**. Run `make setup` successfully for at least one model before `make serve`; serving fails with setup instructions if the environment or all models are missing/incomplete.
 
 ## Techniques for better images
 

@@ -51,7 +51,7 @@ Run a model's setup command to add it to the numbered options, then run make ser
 Model [1 / Z-Image Turbo]:
 ```
 
-Enter prefers a ready saved default, otherwise ready Z-Image or the first ready model in registry order. Menu numbers refer only to the ready list. A listed but unready model cannot be selected by ID either; set it up first. If none are ready, the launcher shows setup commands and exits without starting or stopping a server. Discovery checks the completion marker and required local paths, including Chroma's shared encoder/VAE and native runtime/library. It does not load GPU weights or perform a full checksum scan; startup remains the final loadability check. A missing external volume reports a mount error, not an empty fallback store.
+Enter prefers a ready saved default, otherwise ready Z-Image or the first ready model in registry order. Menu numbers refer only to the ready list. A listed but unready model cannot be selected by ID either; set it up first. At least one model must have completed setup and pass readiness checks before serving, including explicit `MODEL` and `NO_LLM`/`NO_LORAS` startup. If the environment is missing or no models are ready, serving exits nonzero with `make setup` guidance before any LLM question, queue startup, SQLite creation or changes to running services. Discovery checks the completion marker and required local paths, including Chroma's shared encoder/VAE and native runtime/library. It does not load GPU weights or perform a full checksum scan; startup remains the final loadability check. A missing external volume reports a mount error, not an empty fallback store.
 
 Explicit selection skips the menu and still validates the selected model's assets before touching a running server:
 

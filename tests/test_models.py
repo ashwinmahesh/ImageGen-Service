@@ -176,14 +176,47 @@ class InstalledModelMenuTest(unittest.TestCase):
         self.assertEqual(launch.available_models(),[])
 
     def test_no_setup_or_explicit_missing_model_leaves_existing_services_untouched(self):
-        for args,message in [([], 'No models are set up'),(['--model','chroma1-flash'],'make setup MODEL=chroma1-flash')]:
-            with patch.object(sys,'argv',['launch.py',*args]),patch.object(launch,'port_free') as port,patch.object(launch.os,'kill') as kill,patch.object(launch.os,'execv') as execute,contextlib.redirect_stderr(io.StringIO()) as errors:
-                with self.assertRaises(SystemExit) as stopped:launch.main()
-                if args:self.assertIn(message,str(stopped.exception))
-                else:
+        # No downloads and an interrupted download must both stop startup,
+        # including explicit-model and optional-feature opt-outs.
+        for partial in (False,True):
+            if partial:
+                weights=self.z_image();(weights/'download.json').unlink()
+            for args in ([],['--model','chroma1-flash'],['--no-llm','--no-loras']):
+                with self.subTest(partial=partial,args=args),contextlib.ExitStack() as stack:
+                    stack.enter_context(patch.object(sys,'argv',['launch.py',*args]))
+                    guards=[stack.enter_context(patch.object(owner,name)) for owner,name in (
+                        (launch,'select_llm_mode'),(launch,'check_enhancer_assets'),
+                        (launch,'ensure_queue'),(launch,'initialize_shared_queue'),
+                        (launch,'port_free'),(launch.os,'kill'),(launch.os,'execv'))]
+                    errors=stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+                    with self.assertRaises(SystemExit) as stopped:launch.main()
                     self.assertEqual(stopped.exception.code,2)
-                    self.assertIn(message,errors.getvalue())
-                port.assert_not_called();kill.assert_not_called();execute.assert_not_called()
+                    self.assertIn('No models are set up. Run make setup first',errors.getvalue())
+                    for guard in guards:guard.assert_not_called()
+            self.assertFalse((self.project/'state').exists())
+
+    def test_explicit_missing_model_is_rejected_even_when_another_is_setup(self):
+        self.z_image()
+        with patch.object(sys,'argv',['launch.py','--model','chroma1-flash']), \
+             patch.object(launch,'ensure_queue') as queue,contextlib.redirect_stderr(io.StringIO()) as errors:
+            with self.assertRaises(SystemExit) as stopped:launch.main()
+        self.assertEqual(stopped.exception.code,2)
+        self.assertIn('make setup MODEL=chroma1-flash',errors.getvalue())
+        queue.assert_not_called()
+
+    def test_make_serve_without_environment_explains_setup_without_launching(self):
+        makefile=Path(__file__).resolve().parents[1]/'Makefile'
+        (self.project/'Makefile').write_bytes(makefile.read_bytes())
+        environment={**os.environ,'NONINTERACTIVE':'1'}
+        for target in ('serve','serve-no-loras','start'):
+            with self.subTest(target=target):
+                result=subprocess.run(['make',target,'VENV='+str(self.project/'missing-venv')],
+                    cwd=self.project,env=environment,capture_output=True,text=True)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn('Run make setup',result.stderr)
+                self.assertNotIn('No such file',result.stderr)
+                self.assertFalse((self.project/'state').exists())
+                self.assertFalse((self.project/'missing-venv').exists())
 
     def test_missing_storage_mount_fails_without_creating_a_fallback(self):
         with patch.dict(os.environ,{'DATA_DIR':'/Volumes/model-menu-test-unmounted/models'}),patch('storage_paths.Path.is_mount',return_value=False),patch.object(Path,'mkdir') as mkdir:

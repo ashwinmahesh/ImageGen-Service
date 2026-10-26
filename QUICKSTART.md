@@ -48,6 +48,8 @@ Serving and model-only downloads use the environment already set up. They do not
 
 ## 3. Start the generator
 
+First complete `make setup` for at least one model. Serving exits with setup instructions if its environment is missing or no model passes readiness checks; it does not start the queue/generator, prompt for the LLM, or download anything. `MODEL`, `NO_LLM` and `NO_LORAS` do not bypass this requirement.
+
 From the project folder, run:
 
 ```sh
