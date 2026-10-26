@@ -1,0 +1,199 @@
+"""Always-available SQLite CRUD API. No model assets, inference, worker or UI."""
+import argparse
+from functools import lru_cache
+from pathlib import Path
+import re
+import sqlite3
+from typing import Literal
+
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from job_queue import JobStore, QueueConflict, fingerprint
+from model_profiles import PROFILES, DEFAULT_MODEL
+from queue_storage import queue_database
+
+PROJECT_ROOT=Path(__file__).resolve().parent
+DEFAULT_QUEUE_PORT=55302
+Model=Literal['z-image-turbo','chroma1-hd','chroma1-flash']
+Status=Literal['pending','queued','running','succeeded','failed','cancelled']
+
+
+class QueueJob(BaseModel):
+    id:str
+    model:Model
+    status:Literal['queued','running','succeeded','failed','cancelled']
+    sequence:int
+    request:dict=Field(description='Original queued settings, then frozen effective defaults/seed once consumed.')
+    generate_immediately:bool
+    created:float
+    started:float|None=None
+    finished:float|None=None
+    attempts:int
+    retry_of:str|None=None
+    error:str|None=None
+    error_status:int|None=None
+    prompt_expansion:dict|None=None
+    result:dict|None=Field(default=None,description='Saved generator metadata/checkpoint. May contain partial batch images before success. Use status to distinguish complete success. Contains server-local paths; the generator provides download URLs.')
+
+
+class QueuePage(BaseModel):
+    model:Model
+    data:list[QueueJob]
+    total:int
+    limit:int
+    offset:int
+    has_more:bool
+    next_offset:int|None=None
+    has_previous:bool
+    previous_offset:int|None=None
+
+
+def create_app(project=PROJECT_ROOT):
+    project=Path(project).resolve()
+    app=FastAPI(title='ImageGen Queue API',version='3.0.0',description=(
+        'Durable model-scoped queue CRUD, available without the generator or model weights. '
+        'An omitted model selects z-image-turbo on every queue operation. Requests are validated by the selected '
+        'generator when consumed, not by this lightweight API. No inference or UI runs here. '
+        'All SQLite state stays under the serving project. DELETE cancels waiting entries; '
+        'running work, history and media are retained. Results contain server-local paths; '
+        'image download URLs and the catalog are provided by the generator.'))
+    app.add_middleware(TrustedHostMiddleware,allowed_hosts=['localhost','127.0.0.1','[::1]','testserver'])
+
+    @lru_cache(maxsize=len(PROFILES))
+    def store(model):
+        value=JobStore(queue_database(project,model))
+        value.initialize()  # Never recovers running jobs; only the generator holding its lease may do that.
+        return value
+    app.state.store=store
+
+    @app.exception_handler(QueueConflict)
+    async def conflict(request,error):
+        return JSONResponse({'detail':str(error)},status_code=409)
+
+    @app.exception_handler(FileNotFoundError)
+    async def missing(request,error):
+        return JSONResponse({'detail':'Unknown job ID in this model queue'},status_code=404)
+
+    @app.exception_handler(sqlite3.Error)
+    @app.exception_handler(RuntimeError)
+    async def unavailable(request,error):
+        return JSONResponse({'detail':'Project-local queue storage is unavailable; check its path and permissions.'},status_code=503)
+
+    def find(model,identifier):
+        if not re.fullmatch('[a-f0-9]{32}',identifier):
+            raise HTTPException(404,'Unknown job ID')
+        return store(model).get(identifier)
+
+    def record(item):
+        return {**item,'model':item['request']['model']}
+
+    @app.get('/health')
+    def health():
+        return {'status':'ready','service':'imagegen-queue','project_dir':str(project),'default_model':DEFAULT_MODEL,'version':'3.0.0'}
+
+    @app.get('/v1/models',summary='List supported queue model IDs')
+    def models():
+        return {'default_model':DEFAULT_MODEL,'data':[{'id':identifier,'name':profile['name']} for identifier,profile in PROFILES.items()]}
+
+    @app.post('/v1/jobs',response_model=QueueJob,status_code=202,summary='Commit a request to its model queue',description=(
+        'model (default z-image-turbo) routes the entry to state/queues/<model>/jobs.sqlite3. request contains '
+        'the image settings, such as prompt, size, seed, n and expand_prompt. Missing generation '
+        'defaults and a random seed are frozen by the generator before rendering. '
+        'generate_immediately:true inside request gives next-free-slot priority, without interrupting '
+        'active work; default false is FIFO. Idempotency-Key is scoped to the model: matching '
+        'settings return the same ID, different settings return 409. 202 confirms the SQLite commit.'))
+    def enqueue(payload:Submission,idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
+        data=payload.data()
+        return record(store(payload.model).enqueue(data,fingerprint(data),key=idempotency_key,adapter_sha=payload.adapter_sha256))
+
+    @app.get('/v1/jobs',response_model=QueuePage,summary='List one model queue with pagination')
+    def listing(model:Model=DEFAULT_MODEL,limit:int=Query(24,ge=1,le=100),offset:int=Query(0,ge=0),status:Status|None=None):
+        items,total=store(model).listing(limit,offset,status)
+        following=offset+len(items)
+        return {'model':model,'data':[record(item) for item in items],'total':total,'limit':limit,'offset':offset,
+                'has_more':following<total,'next_offset':following if following<total else None,
+                'has_previous':offset>0,'previous_offset':max(0,offset-limit) if offset else None}
+
+    @app.get('/v1/jobs/{identifier}',response_model=QueueJob,summary='Read a job and saved result from its model queue')
+    def get(identifier:str,model:Model=DEFAULT_MODEL):
+        return record(find(model,identifier))
+
+    @app.patch('/v1/jobs/{identifier}',response_model=QueueJob,summary='Replace settings of a never-started waiting job',description=(
+        'Send the complete replacement request. Only queued entries with attempts=0 can be changed; '
+        'running, interrupted and finished entries return 409. Model cannot be changed. Existing '
+        'idempotency keys remain associated with the updated settings.'))
+    def update(identifier:str,payload:Replacement,model:Model=DEFAULT_MODEL):
+        find(model,identifier)
+        data=with_model(payload.request,model)
+        return record(store(model).update(identifier,data))
+
+    @app.delete('/v1/jobs/{identifier}',response_model=QueueJob,summary='Cancel a waiting job; preserve its record')
+    def cancel(identifier:str,model:Model=DEFAULT_MODEL):
+        find(model,identifier)
+        return record(store(model).cancel(identifier))
+
+    @app.delete('/v1/jobs',summary='Cancel all waiting entries for one model',description='Running and completed entries and their media are preserved.')
+    def clear(model:Model=DEFAULT_MODEL):
+        return {'cancelled':store(model).clear()}
+
+    @app.post('/v1/jobs/{identifier}/retry',response_model=QueueJob,status_code=202,summary='Create a fresh FIFO job from a failed or cancelled entry')
+    def retry(identifier:str,model:Model=DEFAULT_MODEL):
+        item=find(model,identifier)
+        if item['status'] not in ('failed','cancelled'):
+            raise QueueConflict('Only failed or cancelled jobs can be retried')
+        data={**item['request'],'generate_immediately':False}
+        return record(store(model).enqueue(data,fingerprint(data),retry_of=identifier))
+
+    @app.get('/v1/queue',summary='Read persisted counts and pause state for one model')
+    def summary(model:Model=DEFAULT_MODEL):
+        return {'model':model,**store(model).summary()}
+
+    @app.patch('/v1/queue',summary='Pause or resume a model queue',description='Persisted across process restarts. Immediate-priority entries can still run while ordinary FIFO work is paused.')
+    def pause(payload:Pause,model:Model=DEFAULT_MODEL):
+        return {'model':model,**store(model).pause(payload.paused)}
+
+    return app
+
+
+def with_model(request,model):
+    if 'model' in request and request['model']!=model:
+        raise HTTPException(422,'request.model must match the queue model')
+    data={**request,'model':model}
+    immediate=data.setdefault('generate_immediately',False)
+    if type(immediate) is not bool:
+        raise HTTPException(422,'generate_immediately must be a boolean')
+    try:
+        fingerprint(data)  # Reject non-finite values before a SQLite transaction.
+    except (ValueError,TypeError):
+        raise HTTPException(422,'request must contain finite JSON values') from None
+    return data
+
+
+class Replacement(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed.',examples=[{'prompt':'A lantern in a misty forest','size':'1024x1024','n':1,'expand_prompt':True}])
+
+
+class Submission(Replacement):
+    model:Model=Field(default=DEFAULT_MODEL,description='Queue/model ID; omitted uses z-image-turbo regardless of the active generator. May be enqueued before its weights are set up.')
+    adapter_sha256:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$',description='Optional adapter checksum pinned by the generator admission API. Omit for normal queue submissions.')
+
+    def data(self):
+        return with_model(self.request,self.model)
+
+
+class Pause(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    paused:bool=Field(strict=True)
+
+
+app=create_app()
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port',type=int,default=DEFAULT_QUEUE_PORT)
+    args=parser.parse_args()
+    import uvicorn
+    uvicorn.run(app,host='127.0.0.1',port=args.port,access_log=False)

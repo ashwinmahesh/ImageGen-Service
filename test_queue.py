@@ -16,7 +16,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from PIL import Image
 import server
-from job_queue import JobStore, QueueWorker, QueueConflict, fingerprint
+from job_queue import JobStore, QueueConflict, fingerprint
+from generation_worker import QueueWorker
 import test_api as api_tests
 
 
@@ -110,7 +111,8 @@ class StoreTest(unittest.TestCase):
         job=self.add()
         code="""from pathlib import Path
 import os,subprocess,sys
-from job_queue import JobStore,QueueWorker
+from job_queue import JobStore
+from generation_worker import QueueWorker
 store=JobStore(Path(sys.argv[1]));worker=QueueWorker(store,lambda _:None,gpu_lock_file=Path(sys.argv[2]))
 worker.acquire();gpu=worker.acquire_accelerator();store.claim()
 subprocess.Popen([sys.executable,'-c','import time;time.sleep(1)'],pass_fds=(worker.lease.fileno(),gpu.fileno()),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -194,7 +196,7 @@ class QueueAPITest(unittest.TestCase):
         self.assertEqual(first.status_code,202,first.text); self.assertEqual(second.status_code,202,second.text)
         self.assertEqual(first.json()['id'],second.json()['id'])
         self.assertEqual(first.json()['request']['seed'],second.json()['request']['seed'])
-        self.assertIsInstance(first.json()['request']['seed'],int)
+        self.assertIsNone(first.json()['request']['seed'])  # Deferred until the consumer freezes defaults.
         self.assertEqual(self.client.post('/v1/jobs',json={**payload,'prompt':'other'},headers=headers).status_code,409)
         self.assertEqual(self.enqueue(generate_immediately='true').status_code,422)
         for query in ['limit=0','offset=-1','status=invalid']:

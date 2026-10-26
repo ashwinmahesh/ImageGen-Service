@@ -32,8 +32,11 @@ from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, ReferenceError
 import image_catalog
-from job_queue import JobStore, QueueWorker, QueueConflict, fingerprint, TERMINAL
+from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
+from generation_worker import QueueWorker
 from queue_storage import initialize_queue
+from queue_client import QueueClient
+from queue_api import DEFAULT_QUEUE_PORT
 import prompt_expander
 from prompt_policy import public_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
@@ -44,7 +47,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 log = logging.getLogger("image-model-server")
@@ -53,6 +56,7 @@ busy = threading.Lock()
 model = None
 job_store = None
 job_worker = None
+queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)))
 preview_gate = threading.Lock()
 
 
@@ -106,7 +110,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.3.1", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="3.0.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -114,7 +118,10 @@ app = FastAPI(
         "These are server-local filesystem paths; `url` is the browser-accessible PNG. "
         "Use `reference_image` for one local reference photo (image-to-image); `image_strength` "
         "controls how strongly the starting image is preserved. The webpage can also upload a photo "
-        "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`."
+        "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`. "
+        f"Queue CRUD is forwarded to the independent queue API at `{queue_client.url}`; "
+        "that API accepts requests for other model queues while this generator is stopped. "
+        "This generator serves only its startup model."
     ),
 )
 app.state.loras_enabled = True
@@ -477,7 +484,7 @@ def capabilities():
             API_MODEL:{'prompt_expansion_guidance':public_guidance(API_MODEL)},
             'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
             'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
-            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
+            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'queue_api_url':queue_client.url,'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -576,7 +583,7 @@ def queue_ready(require_worker=True):
         raise HTTPException(503,'Queue worker is not ready; check health and server logs')
 
 
-def submit_job(payload,key=None,retry_of=None):
+def submit_job(payload,key=None):
     queue_ready()
     data=normalized_request(payload)
     request_hash=fingerprint(data)
@@ -599,9 +606,8 @@ def submit_job(payload,key=None,retry_of=None):
             except (OSError,ValueError,Image.DecompressionBombError) as error:
                 raise ReferenceError(f'Cannot read reference_image: {error}') from error
         selection=resolve_lora(payload.lora,payload.lora_strength)
-        if selection: data['lora_strength']=selection['strength']
-        data['seed']=payload.seed if payload.seed is not None else secrets.randbelow(2**32)
-        record=job_store.enqueue(data,request_hash,key=key,adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
+        record=queue_client.call('POST','/v1/jobs',payload={'model':API_MODEL,'request':data,
+            'adapter_sha256':selection['sha256'] if selection else None},key=key)
         job_worker.wake.set()
         return record
     except QueueConflict as error:
@@ -692,6 +698,16 @@ def prepare_candidate_prompts(payload,job):
 
 def execute_job(job):
     payload=GenerateRequest.model_validate(job['request'])
+    if not job.get('_prepared'):
+        data=normalized_request(payload)
+        data['seed']=payload.seed if payload.seed is not None else secrets.randbelow(2**32)
+        selection=resolve_lora(payload.lora,payload.lora_strength)
+        if selection and job.get('_adapter_sha') and selection['sha256']!=job['_adapter_sha']:
+            raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
+        if selection: data['lora_strength']=selection['strength']
+        frozen=job_store.prepare(job['id'],data,selection['sha256'] if selection else None)
+        job.update(frozen)
+        payload=GenerateRequest.model_validate(job['request'])
     rendered=[]
     prepared=None
     expansions=None
@@ -764,9 +780,10 @@ def job_response(job,request,*,include_result=True):
         item['candidate_expansions']=job['prompt_expansion']['candidates']
         item['prompt_expansion']=None
     metadata=job['result']
-    item['total_images']=job['request'].get('n',1)
+    count=job['request'].get('n',1)
+    item['total_images']=count if type(count) is int and 1<=count<=5 else 1
     item['completed_images']=len(result_images(metadata))
-    response=generation_response(None,metadata,request,job['request']['response_format']) if metadata and include_result else None
+    response=generation_response(None,metadata,request,job['request'].get('response_format','url')) if metadata and include_result else None
     item['result']=response if job['status']=='succeeded' else None
     item['partial_result']=response if job['status']!='succeeded' else None
     return item
@@ -784,18 +801,15 @@ def enqueue_job(payload:GenerateRequest,request:Request,
 def list_jobs(request:Request,limit:int=Query(24,ge=1,le=100),offset:int=Query(0,ge=0),
               status:Literal['pending','queued','running','succeeded','failed','cancelled']|None=None):
     queue_ready(require_worker=False)
-    records,total=job_store.listing(limit,offset,status)
-    following=offset+len(records)
-    return {'data':[job_response(job,request,include_result=False) for job in records],'total':total,'limit':limit,'offset':offset,
-            'has_more':following<total,'next_offset':following if following<total else None,
-            'has_previous':offset>0,'previous_offset':max(0,offset-limit) if offset else None}
+    page=queue_client.call('GET','/v1/jobs',model=API_MODEL,query={'limit':limit,'offset':offset,'status':status})
+    return {**page,'data':[job_response(job,request,include_result=False) for job in page['data']]}
 
 
 def find_job(identifier):
     queue_ready(require_worker=False)
     if not image_catalog.valid_identifier(identifier): raise HTTPException(404,'Unknown job ID')
     try:
-        return job_store.get(identifier)
+        return queue_client.call('GET','/v1/jobs/'+identifier,model=API_MODEL)
     except FileNotFoundError:
         raise HTTPException(404,'Unknown job ID') from None
 
@@ -805,12 +819,21 @@ def get_job(identifier:str,request:Request):
     return job_response(find_job(identifier),request)
 
 
+@app.patch('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,
+           summary='Replace settings of a never-started waiting job')
+def update_job(identifier:str,payload:GenerateRequest,request:Request):
+    find_job(identifier)
+    item=queue_client.call('PATCH','/v1/jobs/'+identifier,model=API_MODEL,payload={'request':normalized_request(payload)})
+    job_worker.wake.set()
+    return job_response(item,request)
+
+
 @app.delete('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Cancel one waiting job',
             description='Retains its cancelled record. Running inference cannot be cancelled and returns 409.')
 def cancel_job(identifier:str,request:Request):
     find_job(identifier)
     try:
-        item=job_store.cancel(identifier)
+        item=queue_client.call('DELETE','/v1/jobs/'+identifier,model=API_MODEL)
     except QueueConflict as error:
         raise HTTPException(409,str(error)) from None
     job_worker.wake.set()
@@ -820,8 +843,8 @@ def cancel_job(identifier:str,request:Request):
 @app.delete('/v1/jobs',summary='Clear waiting jobs',description='Cancels all waiting jobs for the active model. Running work and completed records/files are preserved.')
 def clear_jobs():
     queue_ready(require_worker=False)
-    count=job_store.clear(); job_worker.wake.set()
-    return {'cancelled':count}
+    result=queue_client.call('DELETE','/v1/jobs',model=API_MODEL); job_worker.wake.set()
+    return result
 
 
 @app.post('/v1/jobs/{identifier}/retry',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
@@ -829,8 +852,16 @@ def clear_jobs():
 def retry_job(identifier:str,request:Request):
     item=find_job(identifier)
     if item['status'] not in ['failed','cancelled']: raise HTTPException(409,'Only failed or cancelled jobs can be retried')
-    data={**item['request'],'generate_immediately':False}
-    return job_response(submit_job(GenerateRequest.model_validate(data),retry_of=identifier),request)
+    # A deferred queue request may contain invalid generation fields.
+    try:
+        payload=GenerateRequest.model_validate(item['request'])
+    except ValidationError as error:
+        raise HTTPException(422,str(error)) from error
+    if payload.reference_image and not Path(payload.reference_image).is_file():
+        raise HTTPException(400,'Cannot read reference_image; restore it before retrying')
+    result=queue_client.call('POST',f'/v1/jobs/{identifier}/retry',model=API_MODEL)
+    job_worker.wake.set()
+    return job_response(result,request)
 
 
 class QueueSettings(BaseModel):
@@ -841,7 +872,7 @@ class QueueSettings(BaseModel):
 @app.patch('/v1/queue',summary='Pause or resume ordinary FIFO work',description='Persisted across restarts. An active image finishes. Explicit immediate requests may still run while FIFO work is paused.')
 def queue_settings(payload:QueueSettings):
     queue_ready(require_worker=False)
-    state=job_store.pause(payload.paused); job_worker.wake.set()
+    state=queue_client.call('PATCH','/v1/queue',model=API_MODEL,payload={'paused':payload.paused}); job_worker.wake.set()
     return state
 
 
@@ -1049,4 +1080,9 @@ if __name__ == "__main__":
     app.state.loras_enabled = not args.no_loras
     if args.no_loras:
         app.description += " This server is running in base-only mode: LoRAs are disabled."
+    from queue_launch import ensure_queue
+    queue_port=int(os.environ.get('IMAGEGEN_QUEUE_PORT',DEFAULT_QUEUE_PORT))
+    if args.port==queue_port:
+        raise SystemExit('Generator and queue API ports must be different')
+    ensure_queue(queue_port)
     uvicorn.run(app, host="127.0.0.1", port=args.port, workers=1)

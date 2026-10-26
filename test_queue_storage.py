@@ -5,7 +5,8 @@ import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
-from job_queue import JobStore, QueueWorker, fingerprint
+from job_queue import JobStore, fingerprint
+from generation_worker import QueueWorker
 from queue_storage import initialize_queue, queue_database
 from storage_paths import configure_storage
 

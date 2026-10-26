@@ -11,6 +11,7 @@ import time
 import urllib.request
 from model_profiles import PROFILES, DEFAULT_MODEL, select_model, SHARED_ASSETS
 from storage_paths import data_directory, require_storage
+from queue_launch import ensure_queue, DEFAULT_QUEUE_PORT
 from enhancer_profile import check_assets as check_enhancer_assets
 ROOT=Path(__file__).resolve().parent
 API_MODEL=DEFAULT_MODEL
@@ -74,6 +75,7 @@ def select_llm_mode(*,interactive=None,prompt=input):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=5732)
+    parser.add_argument('--queue-port',type=int,default=DEFAULT_QUEUE_PORT)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
     parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')
     parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
@@ -90,6 +92,10 @@ def main():
             check_enhancer_assets(ROOT)
         except (RuntimeError, OSError, ValueError) as error:
             raise SystemExit(str(error)+' To serve without the LLM, use make serve NO_LLM=1.') from error
+    if args.port==args.queue_port:
+        raise SystemExit('PORT and QUEUE_PORT must be different')
+    ensure_queue(args.queue_port)
+    os.environ['IMAGEGEN_QUEUE_PORT']=str(args.queue_port)
     if not port_free(args.port):
         try:
             with urllib.request.urlopen(f'http://127.0.0.1:{args.port}/health',timeout=5) as response:
@@ -111,7 +117,7 @@ def main():
         command_line=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True)
         if 'server.py' not in command_line or 'python' not in command_line.lower():
             raise SystemExit('The existing listener is not a managed Python image server; leaving it running.')
-        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == llm_enabled:
+        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == llm_enabled and state.get('capabilities',{}).get('queue_api_url',f'http://127.0.0.1:{DEFAULT_QUEUE_PORT}') == f'http://127.0.0.1:{args.queue_port}':
             print(f'{selected} is already serving at http://127.0.0.1:{args.port}/')
             return
         if state.get('busy'):

@@ -1,18 +1,13 @@
-"""Durable single-worker image jobs. Inference never runs inside a SQL transaction."""
+"""Durable queue storage. Inference never runs inside a SQL transaction."""
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
-import logging
-import os
 from pathlib import Path
 import sqlite3
-import threading
 import time
 import uuid
 from storage_paths import require_storage
 
-log=logging.getLogger('image-queue')
 TERMINAL={'succeeded','failed','cancelled'}
 
 
@@ -54,7 +49,7 @@ class JobStore:
         self.path.parent.mkdir(parents=True,exist_ok=True)
         with self.connection() as db:
             version=db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0,1,2):
+            if version not in (0,1,2,3):
                 raise RuntimeError('Unsupported queue database version; use a compatible server')
             # Short rollback-journal transactions; all queue files stay project-local.
             db.execute('PRAGMA journal_mode=DELETE')
@@ -86,7 +81,12 @@ class JobStore:
                 columns={row[1] for row in migration.execute('PRAGMA table_info(jobs)')}
                 if 'prompt_expansion' not in columns:
                     migration.execute('ALTER TABLE jobs ADD COLUMN prompt_expansion TEXT')
-                migration.execute('PRAGMA user_version=2')
+                if 'prepared' not in columns:
+                    migration.execute('ALTER TABLE jobs ADD COLUMN prepared INTEGER NOT NULL DEFAULT 0')
+                    if version in (1,2):
+                        # Older admissions had already resolved defaults, seeds and adapter checksums.
+                        migration.execute('UPDATE jobs SET prepared=1')
+                migration.execute('PRAGMA user_version=3')
 
     @staticmethod
     def record(row):
@@ -97,7 +97,7 @@ class JobStore:
         item['prompt_expansion']=json.loads(item['prompt_expansion']) if item.get('prompt_expansion') else None
         item['result']=json.loads(item['result']) if item['result'] else None
         item['generate_immediately']=bool(item.pop('immediate'))
-        for key in ['adapter_sha','idempotency_key','fingerprint']:
+        for key in ['adapter_sha','idempotency_key','fingerprint','prepared']:
             item.pop(key,None)
         return item
 
@@ -122,11 +122,37 @@ class JobStore:
                     if row['fingerprint']!=request_fingerprint:
                         raise QueueConflict('Idempotency-Key was already used for different settings')
                     return self.record(row)
-            immediate=payload['generate_immediately']
+            immediate=payload.get('generate_immediately',False)
             identifier=uuid.uuid4().hex
             db.execute('INSERT INTO jobs(id,status,payload,fingerprint,adapter_sha,idempotency_key,created,immediate,retry_of) VALUES(?,?,?,?,?,?,?,?,?)',
                 (identifier,'queued',json.dumps(payload,allow_nan=False),request_fingerprint,adapter_sha,key,time.time(),int(immediate),retry_of))
             return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
+
+    def update(self,identifier,payload):
+        """Replace a never-started waiting request atomically with its priority/hash."""
+        with self.connection(write=True) as db:
+            row=db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone()
+            if row is None:
+                raise FileNotFoundError('Unknown job ID')
+            if row['status']!='queued' or row['attempts']:
+                raise QueueConflict('Only never-started waiting jobs can be edited; retry an interrupted job instead')
+            db.execute('UPDATE jobs SET payload=?,fingerprint=?,immediate=?,adapter_sha=NULL,prepared=0 WHERE id=?',
+                       (json.dumps(payload,allow_nan=False),fingerprint(payload),int(payload.get('generate_immediately',False)),identifier))
+            return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
+
+    def prepare(self,identifier,payload,adapter_sha=None):
+        """Freeze deferred defaults/seed before any model work, once per job."""
+        with self.connection(write=True) as db:
+            row=db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone()
+            if row is None or row['status']!='running':
+                raise QueueConflict('Cannot prepare an inactive job')
+            if not row['prepared']:
+                db.execute('UPDATE jobs SET payload=?,adapter_sha=?,prepared=1 WHERE id=?',
+                           (json.dumps(payload,allow_nan=False),adapter_sha,identifier))
+            record=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
+            record['_adapter_sha']=db.execute('SELECT adapter_sha FROM jobs WHERE id=?',(identifier,)).fetchone()[0]
+            record['_prepared']=True
+            return record
 
     def recover(self):
         # Called only after acquiring the process-wide worker lease.
@@ -156,6 +182,7 @@ class JobStore:
             db.execute("UPDATE jobs SET status='running',started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
             item['_adapter_sha']=row['adapter_sha']
+            item['_prepared']=bool(row['prepared'])
             return item
 
     def save_expansion(self,identifier,expansion):
@@ -220,118 +247,3 @@ class JobStore:
             total=db.execute('SELECT COUNT(*) FROM jobs'+where,values).fetchone()[0]
             rows=db.execute("SELECT * FROM jobs"+where+" ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, CASE WHEN status='queued' THEN immediate END DESC, CASE WHEN status IN ('queued','running') THEN sequence END ASC, sequence DESC LIMIT ? OFFSET ?",[*values,limit,offset]).fetchall()
             return [self.record(row) for row in rows],total
-
-
-class QueueWorker:
-    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None):
-        self.store,self.execute=store,execute
-        self.loras_enabled=loras_enabled
-        self.llm_enabled=llm_enabled
-        self.busy=busy or threading.Lock()
-        self.stopping=threading.Event()
-        self.wake=threading.Event()
-        self.future=None
-        self.lease=None
-        self.error=None
-        self.gpu_lock_file=Path(gpu_lock_file) if gpu_lock_file else None
-        self.stage='idle'
-
-    def acquire(self, *, prepare=None):
-        self.store.path.parent.mkdir(parents=True,exist_ok=True)
-        self.lease=(self.store.path.parent/'worker.lock').open('a+')
-        warned=False
-        while True:
-            try:
-                fcntl.flock(self.lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                self.lease.seek(0)
-                try:
-                    owner=int(self.lease.read().strip())
-                    os.kill(owner,0)
-                except (ValueError,ProcessLookupError):
-                    if not warned:
-                        log.warning('Waiting for the previous native generation to release this queue')
-                        warned=True
-                    if self.stopping.wait(.5):
-                        raise RuntimeError('Startup interrupted while waiting for previous inference')
-                else:
-                    self.lease.close(); self.lease=None
-                    raise RuntimeError('This model queue already has a live worker; use its existing server') from None
-        self.lease.seek(0); self.lease.truncate(); self.lease.write(str(os.getpid())); self.lease.flush()
-        try:
-            if prepare:
-                prepare()
-            self.store.recover()
-        except BaseException:
-            self.release()
-            raise
-
-    def start(self,executor):
-        self.future=executor.submit(self.run)
-
-    def run(self):
-        try:
-            while not self.stopping.is_set():
-                self.wake.clear()
-                if not self.store.has_work(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled()):
-                    self.stage='idle'
-                    self.wake.wait(.5)
-                    continue
-                self.stage='waiting_for_accelerator'
-                gpu=self.acquire_accelerator()
-                if self.stopping.is_set():
-                    if gpu: gpu.close()
-                    break
-                job=None
-                try:
-                    # Claim only when the GPU is available. Waiting jobs stay removable.
-                    job=self.store.claim(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled())
-                    if job is None:
-                        if gpu: gpu.close()
-                        continue
-                    try:
-                        self.stage='generating'
-                        job['_inherited_fds']=tuple(handle.fileno() for handle in [self.lease,gpu] if handle)
-                        with self.busy:
-                            result=self.execute(job)
-                    finally:
-                        if gpu: gpu.close()
-                        self.stage='idle'
-                except Exception as error:
-                    if job is None:
-                        if gpu: gpu.close()
-                        raise
-                    log.exception('Job %s failed',job['id'])
-                    self.store.finish(job['id'],error=str(error)[:2000] or type(error).__name__,error_status=getattr(error,'http_status',500))
-                else:
-                    # If this commit fails, leave it running for recovery from its saved artifact.
-                    self.store.finish(job['id'],result=result)
-        except Exception:
-            self.error='Queue worker stopped; inspect storage and GPU-lock configuration, then restart. Accepted jobs remain persisted.'
-            log.exception('Queue worker stopped')
-
-    def acquire_accelerator(self):
-        if self.gpu_lock_file is None:
-            return None
-        require_storage(self.gpu_lock_file)
-        self.gpu_lock_file.parent.mkdir(parents=True,exist_ok=True)
-        handle=self.gpu_lock_file.open('a+')
-        while not self.stopping.is_set():
-            try:
-                fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                return handle
-            except BlockingIOError:
-                self.stopping.wait(.25)
-        handle.close()
-        return None
-
-    def stop(self):
-        self.stopping.set(); self.wake.set()
-        if self.future:
-            self.future.result()  # Finish the current image; leave unclaimed jobs persisted.
-        self.release()
-
-    def release(self):
-        if self.lease:
-            self.lease.close(); self.lease=None

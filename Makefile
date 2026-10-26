@@ -3,6 +3,7 @@ VENV ?= $(CURDIR)/.venv
 PYTHON := $(VENV)/bin/python
 BOOTSTRAP_PYTHON ?= python3.14
 PORT ?= 5732
+QUEUE_PORT ?= 55302
 MODEL ?=
 ifneq ($(strip $(MODEL)),)
 export IMAGE_MODEL := $(MODEL)
@@ -20,10 +21,13 @@ endif
 SERVER_FLAGS := $(if $(filter 1,$(NO_LORAS)),--no-loras,) $(if $(filter 1,$(NO_LLM)),--no-llm,)
 LORA_ID ?= realism
 
-.PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism download-llm
+.PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism download-llm queue stop-queue
 help:
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
-	@echo 'make serve     Choose a model and start http://127.0.0.1:5732 (Ctrl-C stops it)'
+	@echo 'make queue     Start/reuse the lightweight queue API on localhost:55302 (no model/GPU)'
+	@echo 'make stop-queue  Stop only the queue API; retain all persisted jobs'
+	@echo 'make serve     Start the generator/UI on localhost:5732; starts queue API if needed'
+	@echo 'Ctrl-C stops the generator after active work finishes; queue API stays running'
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
 	@echo 'make serve NO_LLM=1  Disable local prompt expansion explicitly'
 	@echo 'make download-llm  Download/resume the shared 2B prompt LLM'
@@ -65,8 +69,14 @@ download-llm: storage
 download: storage
 	"$(PYTHON)" download.py
 
+queue:
+	"$(PYTHON)" queue_launch.py --port $(QUEUE_PORT)
+
+stop-queue:
+	"$(PYTHON)" queue_launch.py --port $(QUEUE_PORT) --stop
+
 serve:
-	"$(PYTHON)" launch.py --port $(PORT) $(SERVER_FLAGS)
+	"$(PYTHON)" launch.py --port $(PORT) --queue-port $(QUEUE_PORT) $(SERVER_FLAGS)
 
 serve-no-loras:
 	$(MAKE) serve NO_LORAS=1

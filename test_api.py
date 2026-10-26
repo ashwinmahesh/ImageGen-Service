@@ -12,6 +12,8 @@ from unittest.mock import patch
 from PIL import Image
 from fastapi.testclient import TestClient
 import server
+import queue_api
+from queue_client import QueueClient
 
 
 class FakeModel:
@@ -57,6 +59,13 @@ class APITest(unittest.TestCase):
         self.job_executor=ThreadPoolExecutor(max_workers=1)
         for p in [patch.object(server,'job_store',self.store),patch.object(server,'job_worker',self.worker)]:
             p.start(); self.patches.append(p)
+        queue_app=queue_api.create_app(self.root)
+        self.queue_http=TestClient(queue_app)
+        # Routes call their cached store closure, so point it at the fixture's database.
+        patcher=patch.object(queue_api,'queue_database',return_value=self.store.path)
+        patcher.start(); self.patches.append(patcher)
+        patcher=patch.object(server,'queue_client',QueueClient(transport=self.queue_http))
+        patcher.start(); self.patches.append(patcher)
         self.worker.start(self.job_executor)
         # No context manager: skip real GPU startup/lifespan.
         self.client = TestClient(server.app, base_url='http://127.0.0.1')
@@ -65,6 +74,7 @@ class APITest(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self.queue_http.close()
         self.worker.stop(); self.job_executor.shutdown(wait=True)
         for p in reversed(self.patches):
             p.stop()

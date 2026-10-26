@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 import install_lora
 import lora_catalog
 import server
+import queue_api
+from queue_client import QueueClient
 from test_api import FakeModel
 
 
@@ -43,6 +45,11 @@ class LoRATest(unittest.TestCase):
         self.worker.acquire(); self.job_executor=ThreadPoolExecutor(max_workers=1)
         for item in [patch.object(server,'job_store',self.store),patch.object(server,'job_worker',self.worker)]:
             item.start(); self.patches.append(item)
+        queue_app=queue_api.create_app(self.root)
+        self.queue_http=TestClient(queue_app)
+        for item in [patch.object(queue_api,'queue_database',return_value=self.store.path),
+                     patch.object(server,'queue_client',QueueClient(transport=self.queue_http))]:
+            item.start(); self.patches.append(item)
         self.worker.start(self.job_executor)
         self.client = TestClient(server.app, base_url="http://127.0.0.1")
 
@@ -51,6 +58,7 @@ class LoRATest(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self.queue_http.close()
         self.worker.stop(); self.job_executor.shutdown(wait=True)
         for item in reversed(self.patches):
             item.stop()
@@ -87,6 +95,19 @@ class LoRATest(unittest.TestCase):
         self.assertEqual(self.fake.calls[-1]["lora"]["strength"], 0.5)
         self.assertEqual(self.post(lora=None).status_code, 200)
         self.assertIsNone(self.fake.calls[-1]["lora"])
+
+    def test_completed_artifact_recovers_even_if_adapter_is_later_unavailable(self):
+        self.worker.stop(); self.job_executor.shutdown(wait=True)
+        payload=server.GenerateRequest(prompt='A castle',size='256x256',seed=42,
+            output_dir=str(self.root/'images'),lora='test-style')
+        saved=server.submit_job(payload)
+        claimed=self.store.claim();first=server.execute_job(claimed)
+        self.file.unlink()
+        self.store.recover();claimed=self.store.claim();self.fake.calls.clear()
+        second=server.execute_job(claimed)
+        self.assertEqual(first,second)
+        self.assertEqual(self.fake.calls,[])
+        self.assertEqual(saved['id'],claimed['id'])
 
     def test_missing_unknown_and_changed_weights_fail_before_inference(self):
         self.assertEqual(self.post(lora="missing").status_code, 400)

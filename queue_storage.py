@@ -25,7 +25,7 @@ def queue_database(project, model):
 def _check(db):
     if db.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
         raise RuntimeError('Queue integrity check failed; original files were left unchanged')
-    if db.execute('PRAGMA user_version').fetchone()[0] not in (1,2):
+    if db.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3):
         raise RuntimeError('Unsupported legacy queue database version; original files were left unchanged')
 
 

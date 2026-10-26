@@ -1,6 +1,6 @@
 # ImageGen-Service
 
-One Apple Silicon project for **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**, with a shared webpage, API, and searchable image gallery. Select a model when starting the server; one backend runs at a time. Source repository: [ImageGen-Service](https://github.com/ashwinmahesh/ImageGen-Service).
+One Apple Silicon project for **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**, with a shared webpage, API, and searchable image gallery. Select a model when starting the generator; one backend runs at a time. A separate lightweight queue API accepts jobs even while the generator is off. Source repository: [ImageGen-Service](https://github.com/ashwinmahesh/ImageGen-Service).
 
 ## UI preview
 
@@ -94,14 +94,17 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 ## Start, switch and stop
 
-`make serve` runs in the foreground; keep the terminal open. Ctrl-C stops it gracefully. AI tools should retain the terminal session and use another session for checks. When an AI tool starts a temporary server for maintenance/testing, it should stop that server when checks finish unless asked to leave it running. On the original Mac the user starts ImageGen manually; leave agent-started test instances stopped. Preserve pre-existing user-started services and active generation.
+`make queue` starts or reuses the lightweight queue API in the background at **http://127.0.0.1:55302**; it returns once ready. It needs the installed Python environment, but no model weights, LLM, SSD or GPU. Logs are in ignored `state/queue-api/server.log`. No login/autostart service is installed.
+
+`make serve` ensures that same queue API is running, then runs the selected **generator and UI** in the foreground; keep its terminal open. Ctrl-C finishes active generation and stops the generator. **The queue API stays running**, and other agents can keep submitting jobs. `make stop-queue` stops only the verified queue process and retains every job. The generator reads/checkpoints SQLite directly, so previously accepted jobs can finish even if the queue HTTP process stops; new CRUD requests need it running again. AI tools should retain the terminal session and use another session for checks. When an AI tool starts a temporary server for maintenance/testing, it should stop that server when checks finish unless asked to leave it running. On the original Mac the user starts ImageGen manually; leave agent-started test instances stopped. Preserve pre-existing user-started services and active generation.
 
 - Webpage: <http://127.0.0.1:5732/>
 - All-model image gallery: <http://127.0.0.1:5732/gallery>
-- API docs and live schema: <http://127.0.0.1:5732/docs> and `/openapi.json`
+- Generator API docs and live schema: <http://127.0.0.1:5732/docs> and `/openapi.json`
+- Queue-only API docs: <http://127.0.0.1:55302/docs> (available without generation)
 - Readiness: `make health` or `GET /health`
 
-The default is **`http://127.0.0.1:5732/`**, also reachable as `http://localhost:5732/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. No hosts-file mapping or `http://imagegen` shortcut is installed.
+The default is **`http://127.0.0.1:5732/`**, also reachable as `http://localhost:5732/`. `PORT=...` changes the port for serving, health and smoke commands; use the same override for each command. `QUEUE_PORT=...` changes the independent queue API port; use the same value for `make queue`, `make serve` and `make stop-queue`. The Python generator uses `IMAGEGEN_QUEUE_PORT` when invoked directly. Both services bind to loopback. No hosts-file mapping or `http://imagegen` shortcut is installed.
 
 Health reports `status`, active `model`, `busy`, `project_dir`, active `data_dir`, `loras_enabled`, `prompt_expansion`, model `capabilities`, and durable `queue` counts/state/database path. `GET /v1/models` lists all supported models, download markers and the active one. A download marker indicates completed setup, not a full startup integrity check; startup verifies required local assets too. The UI reads model identity, step defaults and limits from health.
 
@@ -216,6 +219,46 @@ The option picker below shows a real two-image Z-Image Turbo test at 512 × 512 
 
 ![Two generated options with distinct seeds and selectable previews](docs/screenshots/image-options.png)
 
+## Independent queue API (generator may be off)
+
+There are two processes: **queue API** (`55302`) handles only SQLite CRUD; **generator** (`5732`) owns the webpage, catalog, LLM, image generation and queue consumption. No worker registry, heartbeat, remote worker selection or per-job model switching is involved. Start the generator with the model whose queue you want to drain.
+
+```sh
+make queue
+# Agents can enqueue even with no generator running. Omit model for Z-Image Turbo.
+curl --fail-with-body http://127.0.0.1:55302/v1/jobs \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: agent-forest-1' \
+  -d '{"request":{"prompt":"A lantern in a misty forest","size":"512x512","n":2,"expand_prompt":true,"response_format":"url"}}'
+# Route a request to another model explicitly (it need not be set up yet).
+curl --fail-with-body http://127.0.0.1:55302/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"chroma1-flash","request":{"prompt":"A watercolor mountain village","response_format":"url"}}'
+
+curl 'http://127.0.0.1:55302/v1/jobs?model=chroma1-flash&status=pending&limit=24&offset=0'
+curl 'http://127.0.0.1:55302/v1/jobs/<job-id>?model=chroma1-flash'
+curl --request PATCH 'http://127.0.0.1:55302/v1/jobs/<job-id>?model=chroma1-flash' \
+  -H 'Content-Type: application/json' -d '{"request":{"prompt":"A snowy mountain village","n":2}}'
+curl --request DELETE 'http://127.0.0.1:55302/v1/jobs/<job-id>?model=chroma1-flash'
+curl --request DELETE 'http://127.0.0.1:55302/v1/jobs?model=chroma1-flash'
+curl --request POST 'http://127.0.0.1:55302/v1/jobs/<job-id>/retry?model=chroma1-flash'
+curl 'http://127.0.0.1:55302/v1/queue?model=chroma1-flash'
+curl --request PATCH 'http://127.0.0.1:55302/v1/queue?model=chroma1-flash' \
+  -H 'Content-Type: application/json' -d '{"paused":true}'
+
+# Later, when willing to use the accelerator:
+make serve MODEL=z-image-turbo
+# Ctrl-C leaves the queue API running; optionally stop it separately:
+make stop-queue
+```
+
+`POST /v1/jobs` on the **queue port** takes an envelope: `{"model":"z-image-turbo","request":{...image settings...}}`. Model is optional and defaults to **Z-Image Turbo** (`z-image-turbo`), independent of the running generator. Other operations take an optional `?model=<id>` query with that same default. Supported IDs are `z-image-turbo`, `chroma1-hd`, `chroma1-flash`; invalid IDs are rejected. Every job response includes the resolved top-level `model`. A nested `request.model`, if supplied, must match the selected queue. `GET /v1/models` and `/health` on the queue port report `default_model`.
+
+The lightweight process checks the envelope, model, JSON values and strict `generate_immediately` boolean, then commits opaque image settings. **202 means persisted, not model-validated or generated.** The generator later validates image parameters, resolves the selected model's defaults/output folder, pins adapter checksums and freezes any random seed in SQLite **before** expansion/rendering. Invalid requests become failed records with errors; subsequent jobs continue. Keep referenced files accessible until consumption. Jobs needing an unavailable optional LLM/adapter mode remain waiting until that mode is enabled or they are cancelled. Other model queues wait until their generator is selected. Queue startup/restart never recovers a running job or takes accelerator/worker ownership.
+
+Use PATCH with the **complete replacement request**, not a partial merge. It is allowed only for queued jobs with `attempts=0`; running/interrupted/finished entries return409. PATCH cannot move a job to another model. The ID/order/creation time stay the same, while priority and the idempotency comparison update to the new settings. DELETE and clear cancel waiting entries and preserve history/media, including partial batch files. Retry creates a new FIFO identity. Idempotency keys are model-scoped, so the same key can be used independently for different models.
+
+Queue detail/list responses contain raw persisted `request`, optional `prompt_expansion`, `result` metadata (single-image paths or batch `images[]`), timestamps/attempts/error and state. A partial checkpoint may be present while running or failed: only `status:"succeeded"` means a fully completed request. Pagination returns totals and navigation, with null offsets at boundaries. The queue process does **not** provide image/base64 download routes, uploads, the catalog or a UI; those stay on the generator. `GET /` on the queue port returns404. Use the generator's job endpoint for the existing `result.data[]` download response when it is running.
+
 ## Persistent generation queue
 
 Each startup model has its own SQLite database at **`<project>/state/queues/<model-id>/jobs.sqlite3`**. On the original Mac, Z-Image uses `~/Documents/models/ImageGen-Service/state/queues/z-image-turbo/jobs.sqlite3`. SQLite databases, journals, backups and worker leases stay in the serving project, even when model weights and media use an external SSD. `DATA_DIR` does not relocate SQLite. The same queue is read automatically whenever that model starts. Changing the startup model leaves the other model's waiting jobs persisted until it is served again; models are not hot-swapped per job.
@@ -242,13 +285,14 @@ curl --request PATCH 'http://127.0.0.1:5732/v1/queue' \
   -H 'Content-Type: application/json' -d '{"paused":true}'
 ```
 
-The queue APIs operate on the startup-selected model only:
+These compatibility routes on the **generator port (5732)** forward CRUD to the independent queue API and operate on the startup-selected model. They keep the existing flat image request and image-specific response format; they do not use the queue-port envelope:
 
 | Method / path | Use |
 | --- | --- |
 | POST `/v1/jobs` | Persist a job; return 202 and an ID after the SQLite commit |
 | GET `/v1/jobs?status=pending&limit=24&offset=0` | List running/waiting jobs with pagination; omit status for history |
 | GET `/v1/jobs/{id}` | Read one job; completed jobs include `result` |
+| PATCH `/v1/jobs/{id}` | Replace a never-started waiting request (complete flat image settings) |
 | DELETE `/v1/jobs/{id}` | Cancel waiting work; running/finished409, unknown404 |
 | DELETE `/v1/jobs` | Cancel all waiting entries; return `{"cancelled": count}` |
 | POST `/v1/jobs/{id}/retry` | New ordinary FIFO job for a failed/cancelled entry |
@@ -258,13 +302,13 @@ A job response includes `id`, `model`, `status`, normalized `request`, `generate
 
 DELETE of one entry cancels **waiting work only**; deleting a running/finished job returns409. Clearing returns `{"cancelled": count}`, cancels all waiting work for the active model and preserves the running image, completed files and job history. This removes entries from the active queue, not from the audit history. Failed/cancelled jobs can be explicitly retried as new ordinary FIFO jobs with the saved seed/settings and a new ID; restore missing references/adapters first. Failed jobs do not block later jobs or retry forever. A base-only server preserves a queued adapter job at the head until adapters are enabled or that waiting entry is removed.
 
-`Idempotency-Key` is optional on both submission routes (1–128 ASCII letters/digits/`._:-`). Reuse the **same key and settings** after a network timeout to get the original job, including its originally chosen random seed. A changed request with that key returns409. A new key intentionally creates another image. The UI remembers its unacknowledged submission key in session storage, and its followed job ID across page reloads. Idempotency does not deduplicate intentionally different keys.
+`Idempotency-Key` is optional on both submission routes (1–128 ASCII letters/digits/`._:-`). Reuse the **same key and settings** after a network timeout to get the original job, with its one frozen random seed once generation starts. An unconsumed request may still omit the seed or show null. A changed request with that key returns409. A new key intentionally creates another image. The UI remembers its unacknowledged submission key in session storage, and its followed job ID across page reloads. Idempotency does not deduplicate intentionally different keys.
 
-Shutdown finishes the active image and leaves waiting jobs on disk. If the process is abruptly killed during inference, startup retries the interrupted job using its original ID, effective settings and seed; it starts sampling again, not from an intermediate diffusion step. Outputs are published from private working files. If a complete matching PNG and metadata were published before the database success commit, recovery validates/adopts that artifact instead of generating another image. The custom-output index is restored if needed. References and adapter files must remain available; image bytes are not stored inside SQLite. Native subprocesses inherit worker/GPU leases so killing their Python parent cannot permit overlapping native inference; a restarting worker waits for the old native process to exit before recovery. Completed history is not automatically rerun.
+Generator shutdown finishes the active image and leaves waiting jobs on disk; the separate queue API keeps accepting requests. If the process is abruptly killed during inference, startup retries the interrupted job using its original ID, effective settings and seed; it starts sampling again, not from an intermediate diffusion step. Outputs are published from private working files. If a complete matching PNG and metadata were published before the database success commit, recovery validates/adopts that artifact instead of generating another image. The custom-output index is restored if needed. References and adapter files must remain available; image bytes are not stored inside SQLite. Native subprocesses inherit worker/GPU leases so killing their Python parent cannot permit overlapping native inference; a restarting worker waits for the old native process to exit before recovery. Completed history is not automatically rerun.
 
 Upgrading from the former `<store>/<model-id>/queue/jobs.sqlite3` layout automatically migrates that model at startup, before recovery/inference. Stop its old server and let native inference finish first. Migration holds both worker leases, uses SQLite backup (including committed WAL rows), verifies integrity/content and retains a standalone `legacy-backup-*.sqlite3` beside the new database before retiring the old database and sidecars. Identical copies after an interrupted migration are recognized; differing databases cause a clear error without merging or overwriting them. No external queue fallback is used. Keep `state/` as well as the media store when moving/backing up a project; a source-only clone starts with an empty local queue.
 
-Queue schema2 adds persisted prompt expansions and upgrades schema1 in place without changing job IDs/order. Older server versions cannot read schema2; keep the updated server when restarting. SQLite uses short transactions, a rollback journal and `synchronous=FULL`; inference runs outside database transactions. The database, journals and lock files are ignored by Git. Back up the database while the service is stopped or with SQLite's backup API, together with output/reference/index files. This protects against process restarts; it does not replace backups or guarantee survival of disk failure. Missing media SSDs block startup/inference without creating fallback weights/media; queue listing/removal on an already-running service uses its local database.
+Queue schema3 adds a one-time preparation checkpoint for deferred defaults/seeds, upgrading schema1/2 in place without changing job IDs/order. Existing admissions retain their resolved defaults, seeds and adapter snapshots. Older servers refuse schema3 rather than processing requests they cannot prepare; keep the updated server when restarting. SQLite uses short transactions, a rollback journal and `synchronous=FULL`; inference runs outside database transactions. The database, journals and lock files are ignored by Git. Back up the database while the service is stopped or with SQLite's backup API, together with output/reference/index files. This protects against process restarts; it does not replace backups or guarantee survival of disk failure. Missing media SSDs block startup/inference without creating fallback weights/media; the independent queue API can still submit/list/update/cancel local jobs with the media SSD disconnected.
 
 The worker cooperates with other local services through a configurable filesystem GPU lock. `GPU_LOCK_FILE=/absolute/path/gpu.lock` or ignored `storage.json` key `gpu_lock_file` selects it; the portable default is `<store>/.model-services/gpu.lock`. This Mac explicitly shares `/Volumes/ASH-SSD/models/.voice-studio/gpu.lock` with the voice services. A contended accelerator makes pending jobs wait, rather than fail; they remain removable until inference begins. Model loading also holds this lock. Serializing inference does not evict idle resident weights; stop/unload unused models if memory is tight. `/health.queue.stage` distinguishes waiting for the accelerator from generating, and storage failures appear as errors without discarding accepted jobs.
 
@@ -318,6 +362,6 @@ If a download is interrupted, rerun `make setup MODEL=<id>` or `make download MO
 
 For another AI tool:
 
-> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. SQLite queues stay in project-local state/queues/<model-id>/jobs.sqlite3 independently of DATA_DIR. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report http://127.0.0.1:5732/ (or the explicit PORT override). Prefer POST /v1/jobs, reuse Idempotency-Key plus the same request after an uncertain submission, poll GET /v1/jobs/{id}, and iterate result.data[] only after succeeded. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings, SQLite state and storage symlinks outside Git.
+> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. SQLite queues stay in project-local state/queues/<model-id>/jobs.sqlite3 independently of DATA_DIR. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report http://127.0.0.1:5732/ (or the explicit PORT override). For enqueueing while generation is off, run make queue and use http://127.0.0.1:55302/v1/jobs with {model,request}; omitted model defaults to z-image-turbo and query operations use ?model=<id>. make serve starts/reuses that queue API before the foreground generator/UI. On the generator port, prefer POST /v1/jobs with the existing flat image settings, reuse Idempotency-Key plus the same request after an uncertain submission, poll GET /v1/jobs/{id}, and iterate result.data[] only after succeeded. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings, SQLite state and storage symlinks outside Git.
 
 No Codex plugin, original paths, shell aliases, or chat history is required. The service accepts local file paths and is intended for trusted local clients; it binds to `127.0.0.1` with host checks and no permissive CORS. Do not expose it to a network without an access-control design. The source-only repository ignores model folders, environments, runtime binaries, output/reference images, indexes, logs, credentials and local settings. The only tracked image files are the four approved README screenshots under docs/screenshots/. Cleanup should preserve actual data unless explicitly requested.

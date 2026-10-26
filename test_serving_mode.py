@@ -46,7 +46,7 @@ class ServingModeTest(unittest.TestCase):
 class LauncherModeTest(unittest.TestCase):
     def run_launcher(self, args, state=None, *, stub_enhancer=True):
         patches=[patch.object(sys,'argv',['launch.py',*args]), patch.object(launch.os,'chdir'),
-                 patch.object(launch.os,'execv'),patch.object(launch.os,'kill'),patch.object(launch,'check_assets')]
+                 patch.object(launch.os,'execv'),patch.object(launch.os,'kill'),patch.object(launch,'check_assets'),patch.object(launch,'ensure_queue')]
         if state is None:
             patches.append(patch.object(launch,'port_free',return_value=True))
         else:
