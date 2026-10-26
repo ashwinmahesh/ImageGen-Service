@@ -9,11 +9,10 @@ import subprocess
 import sys
 import time
 import urllib.request
-from model_profiles import PROFILES, DEFAULT_MODEL, select_model, SHARED_ASSETS
-from storage_paths import data_directory, require_storage
+from model_profiles import PROFILES, DEFAULT_MODEL, select_model
 from queue_launch import ensure_queue, DEFAULT_QUEUE_PORT
 from enhancer_profile import check_assets as check_enhancer_assets
-from model_assets import validate_snapshot
+from model_assets import check_model_assets
 ROOT=Path(__file__).resolve().parent
 API_MODEL=DEFAULT_MODEL
 
@@ -29,25 +28,7 @@ def port_free(port):
 
 
 def check_assets(selected):
-    store=data_directory(ROOT)
-    folder=store/selected/'weights'
-    require_storage(folder)
-    profile=PROFILES[selected]
-    required=[folder/'download.json']
-    directories=[]
-    if profile['backend']=='sd-cpp':
-        required += [folder/profile['filename'],ROOT/'runtime'/'sd-cli',ROOT/'runtime'/'libstable-diffusion.dylib']
-        required += [store/'chroma1-hd'/'weights'/asset[2] for asset in SHARED_ASSETS]
-    elif profile.get('cli_module'):
-        try:
-            validate_snapshot(folder,profile,completed=True)
-        except (OSError,ValueError,TypeError) as error:
-            raise SystemExit(f'Model assets incomplete; run make setup MODEL={selected} first. {error}') from error
-    else:
-        directories=[folder/name for name in ['transformer','text_encoder','tokenizer','vae']]
-    missing=[path for path in required if not path.is_file()]+[path for path in directories if not path.is_dir()]
-    if missing:
-        raise SystemExit(f'Model assets missing; run make setup MODEL={selected} first. Missing: {missing[0]}')
+    check_model_assets(ROOT,selected)
 
 
 def available_models():

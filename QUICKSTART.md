@@ -26,7 +26,7 @@ If you already have the project, open Terminal in that folder and run `make setu
 
 Follow the setup questions:
 
-1. **Choose a model.** Press Enter for **Z-Image Turbo**, or select Chroma1-HD, Chroma1-Flash, FLUX.2 Klein 4B/9B or Qwen-Image 2.1 Turbo.
+1. **Choose a model.** Press Enter for **Z-Image Turbo**, or select Chroma1-HD, Chroma1-Flash, FLUX.2 Klein 4B/9B or Qwen-Image 2.1 Turbo. Models whose required local assets are ready show `[SETUP COMPLETE]` beside their name; you can still select them to rerun setup.
 2. **Choose a storage folder.** Press Enter to keep model downloads and pictures inside the project. To use an external SSD, enter an absolute path such as `/Volumes/MySSD/models`.
 3. **Wait for setup to finish.** It selects Python, installs pinned dependencies into `.venv`, and downloads the chosen image model plus a shared Qwen prompt-expansion model. Setup does not start either server.
 

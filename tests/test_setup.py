@@ -24,7 +24,7 @@ class SetupTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_make_setup_creates_environment_then_downloads_and_can_repeat(self):
-        for name in ['Makefile','setup.py','model_profiles.py','python_runtime.py','runtime_setup.py','bootstrap_python.sh']:
+        for name in ['Makefile','setup.py','model_profiles.py','model_assets.py','storage_paths.py','python_runtime.py','runtime_setup.py','bootstrap_python.sh']:
             shutil.copyfile(ROOT/name,self.root/name)
         log=self.root/'calls.jsonl';fake=self.root/'bootstrap'
         fake.write_text(f'''#!{sys.executable}

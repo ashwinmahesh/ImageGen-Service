@@ -85,7 +85,7 @@ def _show_unavailable(identifiers):
         print('Run a model\'s setup command to add it to the numbered options, then run make serve again.')
 
 
-def select_model(explicit=None, *, interactive=None, prompt=input, choices=None):
+def select_model(explicit=None, *, interactive=None, prompt=input, choices=None, setup_complete=None):
     identifiers=tuple(PROFILES if choices is None else (name for name in PROFILES if name in choices))
     selected=explicit or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
     if interactive is None:
@@ -98,9 +98,12 @@ def select_model(explicit=None, *, interactive=None, prompt=input, choices=None)
     default=DEFAULT_MODEL if DEFAULT_MODEL in identifiers else identifiers[0]
     if not selected and interactive:
         print('Choose an image model:' if choices is None else 'Choose a set up image model:')
+        completed=setup_complete() if choices is None and setup_complete else ()
         for index,identifier in enumerate(identifiers,1):
             profile=PROFILES[identifier]
             label=_editing_label(profile) if choices is not None else ''
+            if identifier in completed:
+                label += ' [SETUP COMPLETE]'
             print(f"  {index}. {profile['name']}{label} ({identifier})")
         if choices is not None:
             _show_unavailable(identifiers)

@@ -61,7 +61,7 @@ The model selector shows setup/start instructions for inactive models. The serve
 | `flux2-klein-9b` | MLX 4-bit | 4 | Instruction editing |
 | `qwen-image-2.1-turbo` | MLX 4-bit, including vision encoder | 8 | Whole-photo/masked editing and RGBA output |
 
-Add a model with `make setup MODEL=<model-id>`, then select it with `make serve MODEL=<model-id>`. Setup downloads weights; serving uses local assets only. Start Qwen Turbo around 1024px for detail; peak memory depends on the reference and output size. These additions have fake-backend coverage; real performance on a 24GB Mac still needs measurement.
+Add a model with `make setup MODEL=<model-id>`, then select it with `make serve MODEL=<model-id>`. The interactive setup list marks models whose local assets are ready with `[SETUP COMPLETE]`. Setup downloads weights; serving uses local assets only. Start Qwen Turbo around 1024px for detail; peak memory depends on the reference and output size. These additions have fake-backend coverage; real performance on a 24GB Mac still needs measurement.
 
 Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) and [Qwen Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) requires the respective owner's separate license. The service shows their model-specific notices at startup and in the webpage/API.
 

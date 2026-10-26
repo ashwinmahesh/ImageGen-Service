@@ -1,6 +1,43 @@
 """Cheap local preflight for pinned, pre-quantized MLX editing checkpoints."""
 import json
 from pathlib import Path
+from model_profiles import PROFILES, SHARED_ASSETS
+from storage_paths import data_directory, require_storage
+
+
+def check_model_assets(project, selected):
+    """Read-only readiness shared by setup labels and the serving menu."""
+    project=Path(project)
+    store=data_directory(project)
+    folder=store/selected/'weights'
+    require_storage(folder)
+    profile=PROFILES[selected]
+    required=[folder/'download.json']
+    directories=[]
+    if profile['backend']=='sd-cpp':
+        required += [folder/profile['filename'],project/'runtime'/'sd-cli',project/'runtime'/'libstable-diffusion.dylib']
+        required += [store/'chroma1-hd'/'weights'/asset[2] for asset in SHARED_ASSETS]
+    elif profile.get('cli_module'):
+        try:
+            validate_snapshot(folder,profile,completed=True)
+        except (OSError,ValueError,TypeError) as error:
+            raise SystemExit(f'Model assets incomplete; run make setup MODEL={selected} first. {error}') from error
+    else:
+        directories=[folder/name for name in ['transformer','text_encoder','tokenizer','vae']]
+    missing=[path for path in required if not path.is_file()]+[path for path in directories if not path.is_dir()]
+    if missing:
+        raise SystemExit(f'Model assets missing; run make setup MODEL={selected} first. Missing: {missing[0]}')
+
+
+def available_models(project):
+    ready=[]
+    for identifier in PROFILES:
+        try:
+            check_model_assets(project,identifier)
+        except SystemExit:
+            continue
+        ready.append(identifier)
+    return ready
 
 
 def validate_snapshot(folder, profile, *, completed=False):

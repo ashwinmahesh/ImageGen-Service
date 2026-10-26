@@ -13,11 +13,11 @@ make test
 make serve
 ```
 
-**`make setup` lists all supported models** in a terminal:
+**`make setup` lists all supported models** in a terminal. Ready models show `[SETUP COMPLETE]` beside their name; for example, with Z-Image Turbo already installed:
 
 ```text
 Choose an image model:
-  1. Z-Image Turbo (z-image-turbo)
+  1. Z-Image Turbo [SETUP COMPLETE] (z-image-turbo)
   2. Chroma1-HD (chroma1-hd)
   3. Chroma1-Flash (chroma1-flash)
   4. FLUX.2 Klein 4B (flux2-klein-4b)
@@ -27,6 +27,8 @@ Model [1 / Z-Image Turbo]:
 ```
 
 Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads the selected image model's required assets plus one shared prompt-expansion LLM; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
+
+Setup labels use the same read-only local asset preflight as the serving menu, including shared Chroma files/runtime and indexed MLX checkpoint shards. An old completion marker alone is insufficient. The label reports model assets, not a running server or optional LLM/LoRA readiness. It does not load weights, hash large files or download anything. Missing/unreadable storage gets no completion labels; the storage setup step still reports configuration or mount errors. All models remain selectable with unchanged numbers/default, including completed models. Explicit model selection and noninteractive setup skip the menu and its readiness scan.
 
 **`make serve` numbers only models already set up.** Klein names show `(edits enabled)` and Qwen shows `(edit selected area enabled)`. Other supported models are shown separately without numbers, with the command to set each up. For example, with only Z-Image installed:
 

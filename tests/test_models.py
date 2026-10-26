@@ -17,6 +17,7 @@ import server
 import chroma_engine
 import download
 import launch
+import setup as model_setup
 
 
 class SelectionTest(unittest.TestCase):
@@ -106,6 +107,51 @@ class InstalledModelMenuTest(unittest.TestCase):
             path=self.store/'chroma1-hd/weights'/asset[2]
             path.parent.mkdir(parents=True,exist_ok=True);path.touch()
 
+    def setup_menu(self, answer=''):
+        select=lambda **kwargs:model_profiles.select_model(interactive=True,prompt=lambda _:answer,**kwargs)
+        with patch.object(model_setup,'ROOT',self.project),patch.object(model_setup,'select_model',side_effect=select), \
+             patch.object(model_setup.subprocess,'call',return_value=0) as run,contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(model_setup.main(),0)
+        return output.getvalue(),run.call_args.kwargs['env']['IMAGE_MODEL']
+
+    def test_setup_menu_labels_ready_assets_and_keeps_every_model_selectable(self):
+        self.z_image();self.flash()
+        output,selected=self.setup_menu('2')
+        self.assertEqual(selected,'chroma1-hd')
+        self.assertIn('1. Z-Image Turbo [SETUP COMPLETE] (z-image-turbo)',output)
+        self.assertIn('2. Chroma1-HD (chroma1-hd)',output)
+        self.assertIn('3. Chroma1-Flash [SETUP COMPLETE] (chroma1-flash)',output)
+        self.assertEqual(output.count('[SETUP COMPLETE]'),2)
+        for index,(identifier,profile) in enumerate(model_profiles.PROFILES.items(),1):
+            self.assertIn(f"{index}. {profile['name']}",output)
+        library=self.project/'runtime/libstable-diffusion.dylib';library.unlink()
+        output,selected=self.setup_menu('3')
+        self.assertEqual(selected,'chroma1-flash')
+        self.assertEqual(output.count('[SETUP COMPLETE]'),1)
+        library.touch()
+        # Shared files are checked each time, rather than trusting download.json.
+        (self.store/'chroma1-hd/weights'/model_profiles.SHARED_ASSETS[0][2]).unlink()
+        output,selected=self.setup_menu()
+        self.assertEqual(selected,'z-image-turbo')
+        self.assertEqual(output.count('[SETUP COMPLETE]'),1)
+        self.assertNotIn('Chroma1-Flash [SETUP COMPLETE]',output)
+
+    def test_setup_menu_missing_mount_has_no_completion_labels_or_writes(self):
+        with patch.dict(os.environ,{'DATA_DIR':'/Volumes/setup-label-test-unmounted/models'}), \
+             patch('storage_paths.Path.is_mount',return_value=False),patch.object(Path,'mkdir') as mkdir:
+            output,selected=self.setup_menu()
+            self.assertEqual(selected,'z-image-turbo')
+            self.assertNotIn('[SETUP COMPLETE]',output)
+            mkdir.assert_not_called()
+
+    def test_setup_skips_readiness_scan_for_explicit_and_noninteractive_selection(self):
+        for environment in ({'MODEL':'chroma1-flash'}, {'NONINTERACTIVE':'1'}):
+            with patch.dict(os.environ,environment,clear=True),patch.object(model_setup,'completed_models') as scan, \
+                 patch.object(model_setup.subprocess,'call',return_value=0),contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(model_setup.main(),0)
+                scan.assert_not_called()
+                self.assertNotIn('Choose an image model:',output.getvalue())
+
     def test_discovery_checks_shared_assets_and_does_not_require_hd_checkpoint_for_flash(self):
         weights=self.z_image();self.flash()
         self.assertEqual(launch.available_models(),['z-image-turbo','chroma1-flash'])
@@ -119,6 +165,8 @@ class InstalledModelMenuTest(unittest.TestCase):
         weights=self.z_image()
         (weights/'vae').rmdir();(weights/'vae').touch()
         self.assertEqual(launch.available_models(),[])
+        output,_=self.setup_menu()
+        self.assertNotIn('[SETUP COMPLETE]',output)
         (weights/'vae').unlink();(weights/'vae').mkdir()
         (weights/'download.json').unlink();(weights/'download.json').mkdir()
         self.assertEqual(launch.available_models(),[])
