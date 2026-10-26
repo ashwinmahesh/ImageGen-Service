@@ -1,0 +1,59 @@
+# Working on ImageGen-Service
+
+This file is for agents changing the repository. An agent operating the service should read `skill/image-model-server/SKILL.md`. Keep `README.md` written for a person setting up and using the app. Detailed contracts belong in `docs/api.md` and `docs/setup.md`.
+
+## Project layout
+
+- `server.py`: generator FastAPI app, validation, media, gallery and direct SQLite queue endpoints.
+- `queue_api.py` / `queue_launch.py`: independent queue API and background-process launcher.
+- `job_queue.py`: shared SQLite `JobStore`, ordering, mutations and durable checkpoints.
+- `generation_worker.py` / `queue_storage.py`: exclusive consumer, recovery, accelerator coordination and project-local database migration.
+- `model_profiles.py` / `config.py` / `launch.py`: backend defaults, asset checks and startup.
+- `storage_paths.py`, setup/download scripts: portable storage selection and reproducible assets.
+- `adapter_catalog.py` / `lora_catalog.py`: queue discovery and generator adapter validation.
+- `prompt_expander.py` / `prompt_policy.py` / `enhancer_profile.py`: local prompt expansion; consult `docs/prompt-expansion.md` before changing policy.
+- `ui/index.html` / `ui/gallery.html` / `image_catalog.py`: browser UI and catalog.
+- `test_*.py`: fake-backend, storage, API, queue and recovery tests.
+
+## Architecture to preserve
+
+There are two services: queue API on loopback port **55302**, generator/UI on **5732**. They share per-model SQLite databases. The browser calls generator APIs whose handlers access `JobStore` directly. Do not proxy those operations through the standalone queue API. Its outage is informational for the generator: submission, polling, queue controls, results and generation continue. Use a bounded health probe. Local SQLite failures are different (`503`, `code:queue_storage_unavailable`, `Retry-After:2`).
+
+The queue service owns no GPU, model loading, UI or running-job recovery. It accepts `{model,request}`; omitted model defaults to `z-image-turbo`. Model discovery lists all supported models, even before setup. LoRA discovery reads metadata/presence without loading or hashing weights; a missing store must not prevent unrelated queue CRUD.
+
+The generator selects one model at startup and consumes only its queue under an exclusive lease. Its request body is flat; omitted model means the startup model, and a different model is rejected. No worker registry, heartbeat, remote worker selection or per-request model switching is needed. Preserve both API shapes and their different result formats; see `docs/api.md`.
+
+SQLite databases, journals, backups and worker leases stay under `<project>/state/queues/<model-id>/`, never the external model store. `DATA_DIR` changes weights/media storage, not SQLite. Both services use the same short atomic transactions; inference runs outside them. Only the leased generator recovers interrupted jobs. Preserve schema checks and guarded legacy migration.
+
+A batch contains 1–5 sequential images. Persist effective defaults, adapter snapshots, seeds and all planned expansions before rendering. Recovery reuses them and completed artifacts, rendering only missing options. HTTP 202 is acceptance, not completion; partial checkpoints are not full success. Preserve idempotent resubmission. Immediate priority means the next free slot without interrupting an active batch. Pause affects ordinary FIFO work only. Delete/clear cancel waiting entries while preserving history/media. Request replacement is allowed only before the first attempt.
+
+Keep the shared accelerator lock separate from the queue worker lease. Native children retain ownership until they exit. Preserve existing user jobs and processes when testing or switching modes.
+
+## Setup and startup
+
+`make setup` lists all supported models (Enter: Z-Image Turbo), then asks for storage (Enter: project-local). External choices create reusable per-model symlinks. Never silently download to a fallback when a configured volume is missing, overwrite conflicting data or recreate retired per-model source projects. Chroma Flash shares the HD encoder/VAE without downloading HD's diffusion checkpoint.
+
+`make serve` numbers only ready models; list unready models separately with setup commands. Serving never downloads assets. Validate the model/mode before replacing an idle managed server; never replace a busy or unrelated listener. Start/reuse the detached queue API, then run the generator in the foreground. Ctrl-C finishes active work; the queue service stays up. `make stop-queue` stops only the verified queue process.
+
+LLM capability defaults on, with an interactive `[Y/n]` choice. `NO_LLM=1` is the single startup opt-out (`--no-llm` in Python); don't add duplicate flags. API requests default `expand_prompt:false`; the enabled UI checks it by default. Preserve original text/style/constraints, validate expansion budgets and persist provenance. The text-only LLM subprocess exits before rendering. `vary_prompt:true` requires expansion and at least two images. Unique seeds don't guarantee visible diversity.
+
+Only Realism is an optional public adapter preset. Default setup downloads no LoRAs. Keep private catalogs, weights and preset names out of tracked files and download defaults. The loader inserts configured triggers; don't require `<lora:...>` prompt tags.
+
+## Verification and data boundaries
+
+Use `make test` for routine checks: fake downloads/inference, no model load. Run focused tests while iterating and relevant complete checks for behavior changes. Documentation-only edits need link/example/schema review rather than GPU generation. `make smoke` requires a running generator and creates a real image; report it separately from unit tests.
+
+Use benign browser fixtures and label simulated screenshots/timings. Do not change user queues, use private media, start a second GPU model or restart busy services just to test. Preserve unrelated and pre-existing user-started processes. After maintenance, stop generator/queue instances you started unless asked to leave them running; this user starts ImageGen manually.
+
+Git contains source, docs and the four approved screenshots under `docs/screenshots/`. Keep weights, runtime binaries, LoRAs, references, outputs, sidecars, indexes/tags, SQLite state, settings, symlinks, environments, caches, logs and credentials ignored. Inspect staged paths before committing. Preserve actual data on cleanup; a source-only clone starts with an empty queue.
+
+## Documentation responsibilities
+
+Update these together when their behavior changes:
+
+- `README.md`: human quick start, everyday use, visible behavior and troubleshooting.
+- `docs/setup.md` / `docs/api.md`: exact setup, storage, API and recovery contracts, aligned with implementation and both live schemas.
+- `skill/image-model-server/SKILL.md`: portable operating instructions; keep the Z-Image wrapper consistent.
+- `AGENTS.md`: contributor guidance and architectural constraints.
+
+For reusable workflow changes, update the user's installed `model-server-gen` skill while preserving other-modality guidance. Synchronize existing Codex/Claude copies and portable exports when maintaining them; repository edits alone do not update installed skills. Do not publish private data or rewrite published history without explicit authorization.
