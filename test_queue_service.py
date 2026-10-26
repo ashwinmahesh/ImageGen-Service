@@ -106,7 +106,7 @@ class QueueServiceTest(unittest.TestCase):
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],3)
 
     def test_queue_imports_do_not_load_inference_or_worker(self):
-        code="import sys,queue_api; assert not any(k in sys.modules for k in ['server','generation_worker','mlx','torch','mflux','prompt_expander','engine','chroma_engine'])"
+        code="import sys,queue_api; assert not any(k in sys.modules for k in ['server','config','lora_catalog','generation_worker','mlx','torch','mflux','prompt_expander','engine','chroma_engine'])"
         result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).parent,capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
 

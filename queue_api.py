@@ -13,6 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from job_queue import JobStore, QueueConflict, fingerprint
 from model_profiles import PROFILES, DEFAULT_MODEL
 from queue_storage import queue_database
+from adapter_catalog import model_loras
 
 PROJECT_ROOT=Path(__file__).resolve().parent
 DEFAULT_QUEUE_PORT=55302
@@ -50,12 +51,32 @@ class QueuePage(BaseModel):
     previous_offset:int|None=None
 
 
+class LoRAEntry(BaseModel):
+    model_config=ConfigDict(extra='allow')
+    id:str=Field(description='Adapter ID to pass as request.lora. Use null or omit lora for the base model.')
+    name:str
+    filename:str
+    models:list[str]
+    available:bool=Field(description='Compatible catalog entry has a local weights file and recorded checksum. Presence check only; inference verifies the checksum before use.')
+    default_strength:float|None=None
+    trigger_prompt:str=''
+    source:str|None=None
+    sha256:str|None=None
+
+
+class LoRAList(BaseModel):
+    object:Literal['list']='list'
+    model:Model
+    directory:str=Field(description='Resolved adapter directory on the server. Chroma HD and Flash share the HD folder.')
+    data:list[LoRAEntry]
+
+
 def create_app(project=PROJECT_ROOT):
     project=Path(project).resolve()
     app=FastAPI(title='ImageGen Queue API',version='3.0.0',description=(
         'Durable model-scoped queue CRUD, available without the generator or model weights. '
         'An omitted model selects z-image-turbo on every queue operation. Requests are validated by the selected '
-        'generator when consumed, not by this lightweight API. No inference or UI runs here. '
+        'generator when consumed, not by this lightweight API. Model/adapter metadata can be discovered without inference. No inference or UI runs here. '
         'All SQLite state stays under the serving project. DELETE cancels waiting entries; '
         'running work, history and media are retained. Results contain server-local paths; '
         'image download URLs and the catalog are provided by the generator.'))
@@ -96,6 +117,24 @@ def create_app(project=PROJECT_ROOT):
     @app.get('/v1/models',summary='List supported queue model IDs')
     def models():
         return {'default_model':DEFAULT_MODEL,'data':[{'id':identifier,'name':profile['name']} for identifier,profile in PROFILES.items()]}
+
+    @app.get('/v1/loras',response_model=LoRAList,response_model_exclude_none=True,
+             summary='List compatible LoRAs for a model',description=(
+                 'Defaults to z-image-turbo when model is omitted. Reads the local catalog for the selected model from its '
+                 'adapter folder (or shipped public catalog if no override exists), filters compatibility and '
+                 'reports local availability, default strength and trigger text. Use available:true entries '
+                 'for request.lora. Does not load or hash model/adapter weights, start a generator or create '
+                 'SQLite state. An unavailable configured media volume or unreadable catalog returns503; '
+                 'queue CRUD remains available. No enabled flag is reported because generator startup '
+                 'mode is independent; a base-only generator will leave adapter jobs waiting.'))
+    def loras(model:Model=DEFAULT_MODEL):
+        try:
+            directory,entries=model_loras(project,model)
+            return LoRAList(model=model,directory=str(directory),data=entries)
+        except RuntimeError as error:
+            raise HTTPException(503,str(error)) from error
+        except (OSError,ValueError,KeyError,TypeError) as error:
+            raise HTTPException(503,'Cannot read the LoRA catalog for this model; check its metadata, paths and permissions.') from error
 
     @app.post('/v1/jobs',response_model=QueueJob,status_code=202,summary='Commit a request to its model queue',description=(
         'model (default z-image-turbo) routes the entry to state/queues/<model>/jobs.sqlite3. request contains '

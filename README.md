@@ -253,6 +253,19 @@ make stop-queue
 
 `POST /v1/jobs` on the **queue port** takes an envelope: `{"model":"z-image-turbo","request":{...image settings...}}`. Model is optional and defaults to **Z-Image Turbo** (`z-image-turbo`), independent of the running generator. Other operations take an optional `?model=<id>` query with that same default. Supported IDs are `z-image-turbo`, `chroma1-hd`, `chroma1-flash`; invalid IDs are rejected. Every job response includes the resolved top-level `model`. A nested `request.model`, if supplied, must match the selected queue. `GET /v1/models` and `/health` on the queue port report `default_model`.
 
+Discover adapters on the queue port without starting the generator:
+
+```sh
+curl 'http://127.0.0.1:55302/v1/loras?model=z-image-turbo'
+curl 'http://127.0.0.1:55302/v1/loras?model=chroma1-flash'
+# Omit model to use Z-Image Turbo:
+curl 'http://127.0.0.1:55302/v1/loras'
+```
+
+`GET /v1/loras` returns `object:"list"`, resolved `model`, absolute adapter `directory` and `data[]` with IDs/names, compatible models, `available`, `default_strength`, `trigger_prompt`, source and recorded checksum. Use an entry with **`available:true`** as `request.lora`; optional `request.lora_strength` overrides its default. The selected model's local `catalog.json` takes precedence over the shipped public catalog. Compatible configured entries with missing files/checksums remain listed with `available:false`. Chroma HD and Flash use the existing shared HD adapter folder, filtered separately by model compatibility. Unregistered files are not usable adapter IDs and are not listed.
+
+Discovery reads metadata and checks file presence; it never loads weights, hashes adapter files, initializes SQLite or downloads anything. Inference verifies the checksum before use. A missing configured volume or unreadable/invalid catalog returns503 instead of pretending no adapters exist; queue CRUD stays available. Unknown models return422. Availability is independent of generator startup mode, so this endpoint has no `enabled` flag; a generator started with `NO_LORAS=1` leaves adapter-dependent queue entries waiting. Private catalogs and weights stay outside Git.
+
 The lightweight process checks the envelope, model, JSON values and strict `generate_immediately` boolean, then commits opaque image settings. **202 means persisted, not model-validated or generated.** The generator later validates image parameters, resolves the selected model's defaults/output folder, pins adapter checksums and freezes any random seed in SQLite **before** expansion/rendering. Invalid requests become failed records with errors; subsequent jobs continue. Keep referenced files accessible until consumption. Jobs needing an unavailable optional LLM/adapter mode remain waiting until that mode is enabled or they are cancelled. Other model queues wait until their generator is selected. Queue startup/restart never recovers a running job or takes accelerator/worker ownership.
 
 Use PATCH with the **complete replacement request**, not a partial merge. It is allowed only for queued jobs with `attempts=0`; running/interrupted/finished entries return409. PATCH cannot move a job to another model. The ID/order/creation time stay the same, while priority and the idempotency comparison update to the new settings. DELETE and clear cancel waiting entries and preserve history/media, including partial batch files. Retry creates a new FIFO identity. Idempotency keys are model-scoped, so the same key can be used independently for different models.

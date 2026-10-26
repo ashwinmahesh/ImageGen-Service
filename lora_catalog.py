@@ -1,8 +1,7 @@
 """Named, model-specific adapters for the local Z-Image service."""
 import hashlib
-import json
-from pathlib import Path
 import re
+from adapter_catalog import read_catalog, adapter_path as catalog_adapter_path, list_entries
 from config import API_MODEL, PROJECT_ROOT as ROOT, ROOT as DATA_ROOT, SHARED_ROOT, PROFILE
 
 LORA_DIR = (SHARED_ROOT if PROFILE["backend"] == "sd-cpp" else DATA_ROOT) / "loras"
@@ -10,32 +9,15 @@ _verified = {}
 
 
 def catalog(*, local=True):
-    path = LORA_DIR / "catalog.json" if local else ROOT / "lora-catalog.json"
-    if not path.is_file():
-        path = ROOT / "lora-catalog.json"
-    if not path.is_file():
-        return []
-    entries = json.loads(path.read_text())
-    seen = set()
-    for entry in entries:
-        identifier, filename = entry["id"], entry["filename"]
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", identifier) or identifier in seen:
-            raise ValueError("Invalid or duplicate LoRA ID in catalog.json")
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.safetensors", filename):
-            raise ValueError("LoRA filenames must be plain .safetensors filenames")
-        seen.add(identifier)
-    return [entry for entry in entries if API_MODEL in entry["models"]]
+    return read_catalog(ROOT,LORA_DIR,API_MODEL,local=local)
 
 
 def adapter_path(entry):
-    path = (LORA_DIR / entry["filename"]).resolve()
-    if path.parent != LORA_DIR.resolve():
-        raise ValueError("LoRA must be inside the configured adapter directory")
-    return path
+    return catalog_adapter_path(LORA_DIR,entry)
 
 
 def list_loras():
-    return [{**entry, "available": adapter_path(entry).is_file() and bool(entry.get("sha256"))} for entry in catalog()]
+    return list_entries(LORA_DIR,catalog())
 
 
 def resolve_lora(identifier, strength=None):
