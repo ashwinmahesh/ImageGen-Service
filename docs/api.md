@@ -13,6 +13,7 @@ This is the human-readable reference for **all HTTP endpoints in ImageGen-Servic
 - [Reference photos](#reference-photos-and-variations)
 - [Prompt expansion](#local-prompt-expansion-enabled-by-default)
 - [Gallery, tags and pagination](#searchable-gallery-tags-and-pagination)
+- [Observability](#observability)
 - [Media, webpages and API documentation](#media-webpages-and-api-documentation)
 - [Errors and safe retries](#errors-and-safe-retries)
 - [Outages](#if-the-standalone-queue-api-goes-down) and [restart recovery](#persistent-generation-queue)
@@ -44,6 +45,8 @@ Path placeholders such as `{identifier}` mean a returned job or image ID: 32 low
 | GET `/v1/loras` | Both | 200 | Discover compatible configured adapters. |
 
 ### GET /health
+
+The generator also reports an independent `observability` status when available; a metrics failure does not make generation unavailable.
 
 No body or query parameters.
 
@@ -520,6 +523,46 @@ curl --fail-with-body --request PATCH \
   -H 'Content-Type: application/json' -d '{"tags":["Winter","Campaign"]}'
 ```
 
+## Observability
+
+These read-only endpoints are on the **generator (5732)**, with a webpage at `/observability`. They read separate project-local resource history; the queue API (55302) does not expose them. Recording begins with generator startup, including model loading, and ends when it stops. Old activity cannot be backfilled.
+
+| Method / path | Parameters and behavior |
+| --- | --- |
+| GET `/v1/observability` | Sampler `recording`, startup `model`, session ID, `last_sample`, optional error, source availability, cadence/retention, model IDs/names, window IDs and measurement definitions. |
+| GET `/v1/observability/metrics` | `window`: `5m` (default), `30m`, `1h`, `6h`, `24h`, `3d`, `7d`. Optional `model=<id>` filters history; omission includes all models/sessions. Optional `end` is a finite current/past Unix timestamp (default now). `max_points`: 30–1200, default 600. |
+| GET `/v1/observability/jobs` | Paginated measured **attempts**, newest first. Optional `model`; `limit` 1–100 (default 20), `offset` >=0 (default 0). Returns `data`, `total`, `limit`, `offset`, `has_more`. Waiting/unmeasured jobs do not appear. |
+| GET `/v1/observability/jobs/{id}` | One job’s recorded attempts, plus its graph. Optional `model` disambiguates the model. `window`: `full` (default), `1m`, `5m`, `15m`; `max_points` as above. Short windows end at the latest completion, or now during execution. Only execution is sampled; waiting/restart intervals between attempts appear as gaps. |
+
+Example requests:
+
+```sh
+curl 'http://127.0.0.1:5732/v1/observability'
+curl 'http://127.0.0.1:5732/v1/observability/metrics?window=30m&model=z-image-turbo&max_points=300'
+curl 'http://127.0.0.1:5732/v1/observability/jobs?limit=20&offset=0'
+curl "http://127.0.0.1:5732/v1/observability/jobs/$JOB_ID?model=z-image-turbo&window=full"
+```
+
+Graph responses have `start`/`end` Unix seconds, `bucket_seconds`, `points[]` and `summary`. Each point contains the actual first/last sample timestamps, midpoint `timestamp`, sample `count`, recorded `models[]`, `sessions[]`, `stages[]`, `values` (bucket means) and `peaks` (sampled maxima). Missing counters are **null**, not zero; absent buckets are not fabricated. Means are sample means, not elapsed-time-weighted averages. The UI breaks lines across missing intervals and session/model changes.
+
+| Metric key | Unit and scope |
+| --- | --- |
+| `service_cpu_percent` | Generator plus its current child processes, normalized to **total logical CPU capacity**, 0–100%. Includes prompt/native inference children and baseline/API overhead; excludes the independent queue process. |
+| `system_cpu_percent` | Whole-machine CPU busy percentage, 0–100%. CPU metrics need two snapshots; the first is null. |
+| `service_rss_bytes` | Summed resident memory across that generator process tree. Shared pages can be counted more than once; not unique physical memory or a model-only allocation. |
+| `system_memory_used_bytes` | Whole-machine total RAM minus available RAM. |
+| `system_memory_total_bytes` | Machine RAM capacity. |
+| `gpu_utilization_percent` | Apple GPU driver `Device Utilization %`, **whole device**, including other apps. Not per-process GPU attribution. |
+| `gpu_memory_bytes` | Whole-device driver `In use system memory`. On Apple Silicon this shares unified RAM; **do not add it to RSS/system RAM**. |
+
+`summary` has `sample_count`, first/last sample timestamps, and one entry per metric with `mean`, `peak`, and valid-value `count`. Job detail also returns `runs[]`: `session`, `job_id`, `attempt`, actual startup `model`, `started`, `finished`, `status` (`running`, `succeeded`, `failed`, `interrupted`) and that attempt’s summary. Each recovery attempt remains identifiable. A recovered previous execution closes at its last observed sample; it is not reported as successful. In full job view, the UI can combine saved attempt summaries even when raw points have expired. Short-window summaries use only retained points in that window.
+
+Samples are taken every **1s during a job / 5s idle**, plus execution boundaries. Raw samples expire after **8 days**; finished/interrupted summaries remain in `state/observability/metrics.sqlite3`. Retention and restarts can therefore leave a job with a saved summary and no raw graph points. This database, WAL/journals and all resource history are private local state, not Git assets. No prompts, images or command lines are copied into it.
+
+GPU counters are best-effort read-only IORegistry diagnostics, verified locally without sudo. Unavailable counters remain blank and are retried with backoff. Summed RSS can double-count shared pages; CPU snapshots can miss short-lived children and 1s sampling can miss brief spikes. Per-job plots correlate measured resources with execution and are not an exclusive GPU/cost profiler. The page’s tooltips state these limitations. [psutil documentation](https://psutil.io/) describes process/system readings; the GPU [collector example](https://github.com/XReyRobert/macos-telegraf-gpumonitoring) documents the driver counter names.
+
+Bad models/windows/ranges return **422**. An unknown/unmeasured job returns **404**, including jobs still waiting or predating instrumentation. A missing sampler or unavailable telemetry store returns **503** with `detail.code: observability_unavailable` and `Retry-After: 2`. These failures are independent of queue storage and do not change generator readiness or prevent generation. `/health.observability` reports sampler/source availability when initialized, or a startup error if sampling could not start.
+
 ## Media, webpages and API documentation
 
 The URLs below are read-only. They are useful for previews/downloads and cover routes that may not appear in OpenAPI. Follow returned URLs when possible.
@@ -532,6 +575,9 @@ The URLs below are read-only. They are useful for previews/downloads and cover r
 | GET `/references/{identifier}.png` | Generator | 200 | `image/png` preview of an uploaded reference. |
 | GET `/` | Generator | 200 | Generator webpage, `text/html`. |
 | GET `/gallery` | Generator | 200 | Searchable gallery webpage, `text/html`. |
+| GET `/observability` | Generator | 200 | Resource history and measured-job webpage, `text/html`. |
+| GET `/assets/observability.css` | Generator | 200 | Resource-page stylesheet, `text/css`. |
+| GET `/assets/observability.js` | Generator | 200 | Local interactive resource graphs, `text/javascript`. |
 | GET `/assets/help.css` | Generator | 200 | Shared tooltip stylesheet, `text/css`. |
 | GET `/assets/help.js` | Generator | 200 | Shared tooltip interactions, `text/javascript`. |
 | GET `/docs` | Both | 200 | Swagger UI for that service. |

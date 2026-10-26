@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Observability · Image Studio</title>
+  <link rel="stylesheet" href="/assets/observability.css"><link rel="stylesheet" href="/assets/help.css">
+  <script src="/assets/help.js" defer></script><script src="/assets/observability.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/"><span class="mark" aria-hidden="true">I</span><span><strong>Image Studio</strong><small>Local studio</small></span></a><nav class="nav" aria-label="Main navigation"><a href="/">Generator</a><a href="/gallery">Gallery</a><a href="/observability" aria-current="page">Observability</a></nav></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">On this Mac</p><h1>See what generation takes.</h1><p>CPU, memory and GPU history, across models and individual jobs.</p></div><span class="connection" id="connection" role="status">Connecting…</span></div>
+    <div class="toolbar">
+      <div class="control"><label for="time-window">Time window</label><select id="time-window"><option value="5m">5 minutes</option><option value="30m">30 minutes</option><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="3d">3 days</option><option value="7d">7 days</option></select></div>
+      <div class="control"><label for="model-filter">Model</label><select id="model-filter"><option value="">All models</option></select></div>
+      <div class="live-control"><label for="live">Live updates</label><input class="setting-switch" role="switch" type="checkbox" id="live" checked><button class="help-button" type="button" aria-label="Help with live updates" data-help="Refreshes this page every five seconds while visible. Recording continues on the server when this switch is off or this page is closed."><span aria-hidden="true">?</span></button></div>
+      <button class="button" type="button" id="refresh">Refresh ↻</button><button class="button" type="button" id="overview" hidden>← All activity</button>
+    </div>
+    <p class="selection" id="selection">All measured activity</p><p class="notice" id="error" role="alert" hidden></p>
+    <div class="stats"><article><span>Service CPU · sample mean</span><strong id="cpu-value">—</strong><small>Percentage of total CPU capacity</small></article><article><span>Service RAM · sampled peak</span><strong id="memory-value">—</strong><small>Generator and child-process RSS</small></article><article><span>GPU busy · sampled peak</span><strong id="gpu-value">—</strong><small>Whole device, including other apps</small></article></div>
+    <section class="charts" aria-label="Resource graphs">
+      <article class="chart-card"><div class="chart-heading"><h2>CPU utilization</h2><button class="help-button" type="button" aria-label="Help with CPU utilization" data-help="Service CPU includes the generator and its children, excluding the independent queue API. It is normalized across all logical cores: 100% means the entire machine’s CPU capacity. System CPU includes other apps. The first interval has no CPU value."><span aria-hidden="true">?</span></button></div><div class="legend"><span class="service">Service</span><span class="system">Whole system</span><span class="peak">Dashed: sampled peak</span></div><div class="chart" id="cpu-chart"></div></article>
+      <article class="chart-card"><div class="chart-heading"><h2>GPU utilization <small>whole device</small></h2><button class="help-button" type="button" aria-label="Help with GPU utilization" data-help="Apple IORegistry provides whole-device GPU busy percentage, without sudo. These samples correlate with the selected job but are not exclusive per-process GPU measurements. Missing or unsupported counters stay blank."><span aria-hidden="true">?</span></button></div><div class="legend"><span class="gpu">GPU busy</span><span class="peak">Dashed: sampled peak</span></div><div class="chart" id="gpu-chart"></div></article>
+      <article class="chart-card memory"><div class="chart-heading"><h2>Memory</h2><button class="help-button" type="button" aria-label="Help with memory measurements" data-help="Service RAM is the sum of resident memory (RSS) across the generator and its children; shared pages may be counted twice. System RAM is total minus available memory. GPU driver memory shares the Mac’s unified RAM, so these lines overlap and must not be added together. Peaks are sampled estimates."><span aria-hidden="true">?</span></button></div><div class="legend"><span class="service">Service RSS</span><span class="system">System RAM used</span><span class="gpu">GPU driver memory in use</span><span class="peak">Dashed: sampled peak</span></div><div class="chart" id="memory-chart"></div></article>
+    </section>
+    <p class="footnote" id="coverage">History is recorded while the generator runs. Stopped periods are gaps.</p><p class="footnote" id="sources"></p>
+    <section class="jobs-panel"><div class="jobs-heading"><div><h2 id="jobs-title">Measured jobs</h2><p>Open a job for its full execution timeline or a shorter window. Retries appear as separate attempts.</p></div><span id="job-count"></span></div>
+      <div class="table-scroll"><table><thead><tr><th>Started</th><th>Model</th><th>Job / attempt</th><th>Status</th><th>CPU mean</th><th>RAM peak</th><th>GPU peak</th><th><span class="sr-only">Details</span></th></tr></thead><tbody id="jobs"></tbody></table></div>
+      <p class="empty" id="no-jobs" hidden>No measured jobs yet. New executions will appear here; older jobs cannot be measured retroactively.</p>
+      <nav class="pagination" aria-label="Measured job pages"><button class="button" id="previous" disabled>← Previous</button><span id="page-label"></span><button class="button" id="next" disabled>Next →</button></nav>
+    </section>
+  </main>
+  <footer>Local history · 1s during jobs / 5s idle · 8 days of raw samples · completed job summaries retained</footer>
+</body>
+</html>

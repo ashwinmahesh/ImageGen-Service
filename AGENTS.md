@@ -6,6 +6,7 @@ This file is for agents changing the repository. An agent operating the service 
 
 - `server.py`: generator FastAPI app, validation, media, gallery and direct SQLite queue endpoints.
 - `queue_api.py` / `queue_launch.py`: independent queue API and background-process launcher.
+- `resource_probe.py` / `observability.py` / `observability_api.py`: bounded resource probes, independent metric storage/sampler and read-only history routes.
 - `job_queue.py`: shared SQLite `JobStore`, ordering, mutations and durable checkpoints.
 - `generation_worker.py` / `queue_storage.py`: exclusive consumer, recovery, accelerator coordination and project-local database migration.
 - `model_profiles.py` / `model_assets.py` / `config.py` / `launch.py`: backend defaults, pinned snapshot preflight and startup.
@@ -33,9 +34,15 @@ A batch contains 1–5 sequential images. Persist effective defaults, adapter sn
 
 Keep the shared accelerator lock separate from the queue worker lease. Native children retain ownership until they exit. Preserve existing user jobs and processes when testing or switching modes.
 
+## Observability
+
+Generator-only sampling starts before model loading and stops after its worker finishes. Record model/session/stage and job ID/attempt; poll 1s during execution, 5s idle, plus boundaries, and wake idle sampling on job start. Use a separate project-local `state/observability/metrics.sqlite3` (WAL), never the queue DB or DATA_DIR. Retain raw samples eight days and finished/interrupted attempt summaries. Reconcile old running observations only after acquiring that model’s exclusive worker lease. Sampler/source/storage failures must not block generation, queue CRUD or readiness. Keep API errors distinct (`observability_unavailable`).
+
+CPU/RSS includes the generator and children, excluding queue_api.py; normalize CPU to whole-machine capacity. GPU utilization/driver memory is whole-device IORegistry data and may be unavailable. Unified RAM overlaps with GPU memory; RSS can count shared pages twice. Never present null as zero, sampled peaks as guaranteed instantaneous peaks, or job correlation as exclusive GPU attribution. Bound subprocess timeouts and query/downsampling size. Preserve gaps/model/session identity. The UI offers the seven overview windows, model filtering, paginated measured attempts and full/short job windows, with local assets and accessible switches/help. Keep telemetry, test fixtures and histories out of Git. Use fake counters/history for browser tests; distinguish a real counter check from real inference.
+
 ## Setup and startup
 
-Python setup reuses the compatible target VENV first, then installed interpreters, and obtains a missing interpreter only during setup under `.python` with a checksum-pinned official uv helper/cache under `.bootstrap`. The full 66-package ImageGen lock supports standard arm64 macOS CPython 3.12–3.14 except 3.14.1 (NetworkX exclusion); validate the complete lock and binary wheels before adding a minor. Preserve broken/incompatible/nonvirtual environments and honor explicit BOOTSTRAP_PYTHON/VENV without silent fallback. Never install into system Python, publish executables to PATH or edit shell profiles. Serving, storage configuration and asset-only downloads use the existing environment directly, without bootstrap/provisioning. Keep model menus, native Chroma requirements, SSD data and project-local SQLite unchanged.
+Python setup reuses the compatible target VENV first, then installed interpreters, and obtains a missing interpreter only during setup under `.python` with a checksum-pinned official uv helper/cache under `.bootstrap`. The full 67-package ImageGen lock supports standard arm64 macOS CPython 3.12–3.14 except 3.14.1 (NetworkX exclusion); validate the complete lock and binary wheels before adding a minor. Preserve broken/incompatible/nonvirtual environments and honor explicit BOOTSTRAP_PYTHON/VENV without silent fallback. Never install into system Python, publish executables to PATH or edit shell profiles. Serving, storage configuration and asset-only downloads use the existing environment directly, without bootstrap/provisioning. Keep model menus, native Chroma requirements, SSD data and project-local SQLite unchanged.
 
 `make setup` lists all supported models (Enter: Z-Image Turbo), marking ready model assets with `[SETUP COMPLETE]` using the shared read-only asset preflight. Keep every model selectable with unchanged numbering/default; do not trust completion markers alone or scan readiness for explicit/noninteractive setup. Then ask for storage (Enter: project-local). External choices create reusable per-model symlinks. Never silently download to a fallback when a configured volume is missing, overwrite conflicting data or recreate retired per-model source projects. Chroma Flash shares the HD encoder/VAE without downloading HD's diffusion checkpoint.
 

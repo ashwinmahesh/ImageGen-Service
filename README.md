@@ -98,6 +98,12 @@ Model downloads and generated media can live inside the project or on an externa
 
 The generator, gallery and queue screenshots use demonstration data and a simulated backend; their timings are not benchmarks. The multiple-options screenshot shows a real two-image Z-Image test.
 
+## Resource history
+
+Open **Observability** in the webpage header to see CPU, memory and GPU line graphs over **5m, 30m, 1h, 6h, 24h, 3 days or 7 days**. Filter by model or open a measured job for its full execution timeline and shorter windows. The queue’s **Metrics** links open the matching job.
+
+CPU and RAM include the generator and its child processes, including prompt expansion and native model tools. GPU readings cover the whole device, including other apps; GPU memory shares the Mac’s RAM. Sampling runs while the generator is on, with stopped periods shown as gaps. Eight days of raw history and durable job summaries live in project-local SQLite, independently of the queue. See the [API reference](docs/api.md#observability) for the exact measurement scopes.
+
 ## Quick start
 
 Requires an **Apple Silicon Mac**, Git and Make. Setup reuses compatible Python already on your Mac, or downloads it into the project when needed; you do not need to install a specific Python version first. Your system Python and shell settings stay unchanged. See the [quick-start guide](QUICKSTART.md#1-check-the-prerequisites) for prerequisites and Chroma runtime compatibility.

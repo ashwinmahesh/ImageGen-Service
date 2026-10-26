@@ -35,6 +35,8 @@ from reference_geometry import prepare_geometry, prepare_mask, read_mask, compos
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
 from generation_worker import QueueWorker
+from observability import ResourceMonitor
+from observability_api import create_router as observability_router
 from queue_storage import initialize_queue
 from queue_client import QueueClient
 from queue_api import DEFAULT_QUEUE_PORT, MoveJob
@@ -57,6 +59,8 @@ busy = threading.Lock()
 model = None
 job_store = None
 job_worker = None
+observability_monitor = None
+observability_error = None
 queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)),project=PROJECT_ROOT)
 preview_gate = threading.Lock()
 
@@ -91,8 +95,9 @@ def initialize_service():
     if app.state.llm_enabled:
         check_enhancer_assets(PROJECT_ROOT)
     job_store=JobStore(QUEUE_DATABASE)
-    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE)
+    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor)
     job_worker.acquire(prepare=lambda:initialize_queue(job_store,ROOT/'queue'/'jobs.sqlite3'))
+    if observability_monitor:observability_monitor.recover_jobs()
     try:
         # Model loading and inference cooperate with the same cross-service GPU lock.
         gpu=job_worker.acquire_accelerator()
@@ -107,13 +112,25 @@ def initialize_service():
 
 @asynccontextmanager
 async def lifespan(app):
-    await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
-    job_worker.start(executor)
+    global observability_monitor,observability_error
     try:
+        observability_monitor=ResourceMonitor(PROJECT_ROOT,API_MODEL,stage=lambda:job_worker.stage if model is not None and job_worker else 'loading_model')
+        observability_monitor.start()
+        observability_error=None
+    except Exception:
+        log.warning('Resource sampling could not start; generation remains available',exc_info=True)
+        observability_monitor=None
+        observability_error='Resource sampling could not start; check the project state directory.'
+    try:
+        await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
+        job_worker.start(executor)
         yield
     finally:
-        await asyncio.to_thread(job_worker.stop)
-        executor.shutdown(wait=True)
+        try:
+            if job_worker and job_worker.future:await asyncio.to_thread(job_worker.stop)
+            executor.shutdown(wait=True)
+        finally:
+            if observability_monitor:await asyncio.to_thread(observability_monitor.stop)
 
 
 app = FastAPI(
@@ -133,6 +150,7 @@ app = FastAPI(
 )
 app.state.loras_enabled = True
 app.state.llm_enabled = False
+app.include_router(observability_router(lambda:observability_monitor,PROJECT_ROOT))
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
 
 
@@ -521,6 +539,8 @@ def ui_help_script():
 @app.get("/health")
 def health():
     state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
+    if observability_monitor:state['observability']=observability_monitor.status()
+    elif observability_error:state['observability']={'recording':False,'error':observability_error}
     if state['busy'] and hasattr(model,'progress'):
         state['progress']=model.progress()
     if job_store:

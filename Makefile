@@ -31,6 +31,7 @@ help:
 	@echo 'make queue     Start/reuse the lightweight queue API on localhost:55302 (no model/GPU)'
 	@echo 'make stop-queue  Stop only the queue API; retain all persisted jobs'
 	@echo 'make serve     Start the generator/UI on localhost:5732; starts queue API if needed'
+	@echo 'Observability: http://localhost:5732/observability (resource graphs and job timelines)'
 	@echo 'Ctrl-C stops the generator after active work finishes; queue API stays running'
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
 	@echo 'make serve NO_LLM=1  Disable local prompt expansion explicitly'

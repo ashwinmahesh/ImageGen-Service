@@ -143,6 +143,16 @@ For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-imag
 
 In the **Queue** panel, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
 
+### Monitor resource use
+
+Choose **Observability** in the header, or open [http://localhost:5732/observability](http://localhost:5732/observability). Select 5m, 30m, 1h, 6h, 24h, 3 days or 7 days, and optionally filter by model. Hover a graph—or focus it and use the arrow keys—to inspect values and model names. Solid lines show sample means; dashed lines preserve sampled peaks in longer windows.
+
+Choose **View job** in the measured-jobs table, or **Metrics** beside an attempted queue entry. Job view offers **Entire job**, **Last minute**, **Last 5 minutes** and **Last 15 minutes**, ending at completion for finished jobs. Retries/recovery attempts are identified separately. The table has Previous/Next pagination. Live updates refresh the webpage every five seconds; switching them off does not stop server-side recording.
+
+The generator records every second during jobs and every five seconds while idle. No samples are backfilled for old jobs or periods when it was stopped. Raw samples are retained for eight days; finished attempt summaries remain afterward. History is stored at `state/observability/metrics.sqlite3` inside the project, separate from the queue and external model store.
+
+Service CPU is a percentage of the machine’s total CPU capacity. Service RAM sums resident memory (RSS) across the generator and its children; shared pages may be counted twice. GPU utilization and driver memory are **whole-device** readings, so other apps can affect them. GPU memory and process RAM overlap in unified memory and should not be added together. Missing counters stay blank; sampled peaks can miss brief spikes. No administrator password is needed.
+
 ## 5. Generate through the API
 
 Keep the generator running. You can try requests directly in **[the interactive API docs](http://localhost:5732/docs)**: expand an endpoint, click **Try it out**, edit its JSON and click **Execute**. Or use the terminal steps below.

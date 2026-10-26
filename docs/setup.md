@@ -82,7 +82,7 @@ All image backends and prompt expansion continue to share one environment. `make
 | Unvalidated builds | Python 3.15+, older minors, free-threaded Python, PyPy, x86/Rosetta and non-macOS runtimes |
 | Managed download | Python 3.14.9, only during setup and only inside this project |
 
-The full 66-package lock was checked using binary-only resolution for each supported minor on macOS 14 arm64, rather than inferring compatibility from MFLUX alone. The installed 3.14.9 stack also passes `pip check` and the regression suite. Resolution verifies package compatibility; it does not establish identical inference or performance across interpreters. Revalidate the full lock and binary availability before widening these bounds. The supplied Chroma binary still targets macOS 26.6.2 arm64 and is independent of Python selection.
+The full 67-package lock was checked using binary-only resolution for each supported minor on macOS 14 arm64, rather than inferring compatibility from MFLUX alone. The installed 3.14.9 stack also passes `pip check` and the regression suite. Resolution verifies package compatibility; it does not establish identical inference or performance across interpreters. Revalidate the full lock and binary availability before widening these bounds. The supplied Chroma binary still targets macOS 26.6.2 arm64 and is independent of Python selection.
 
 The dependency-free `bootstrap_python.sh` can run setup menus using an available native CPython 3.9+ without treating that menu interpreter as compatible with model dependencies. On a Python-free machine, it obtains the compatible project-local interpreter first. Its official [uv](https://docs.astral.sh/uv/concepts/python-versions/) helper is pinned to 0.13.5; the downloaded Apple Silicon archive is checked against the recorded SHA256 before execution. The helper and cache live under `.bootstrap`; managed interpreters live under `.python`. No system interpreter, global packages, PATH or shell profiles are changed. These folders stay separate from the model/media store, and neither is published to Git.
 
@@ -181,6 +181,16 @@ make install-lora MODEL=z-image-turbo FILE=/absolute/path/adapter.safetensors LO
 ```
 
 Public downloads use only tracked `lora-catalog.json`, never personal catalogs. Compatible personal catalogs/checkpoints may live under ignored per-model `loras` folders; HD/Flash share `chroma1-hd/loras`. `GET /v1/loras` returns only the active model's entries and availability. The loader applies an adapter directly; a configured trigger phrase is prepended once automatically. Do not add `<lora:...>` tags to prompts. `--no-loras` / `NO_LORAS=1` hides the selector, returns an empty disabled catalog and rejects adapter requests. Adapter files and personal presets are never included in Git/default setup.
+
+## Observability
+
+`make serve` starts an independent background sampling thread before loading the selected model, and serves `/observability`. It records the startup model, session, stage and executing job/attempt alongside CPU/RAM/GPU samples. The standalone queue API does not collect metrics, own this database or serve this page. No recording daemon, OS service or administrator permission is installed. Stopping the generator ends sampling; its normal shutdown still finishes active work first.
+
+History uses a separate WAL SQLite database at `<project>/state/observability/metrics.sqlite3`, with journals alongside it. This path must resolve inside the project; DATA_DIR never moves it. It is ignored by Git. Back up the state directory to preserve history. Raw samples are pruned after eight days, every five minutes during sampling; disk pages are reused rather than vacuumed during generation. Finished/interrupted job summaries remain. Queue schema and queue transactions are unchanged.
+
+Sampling is every second during execution and every five seconds while idle, with boundary samples for short jobs. An idle sampler wakes when work begins. CPU/RAM use pinned `psutil==7.2.2`; GPU uses a bounded, non-sudo IORegistry query and backs off for 30 seconds when counters are unavailable. An existing clone can install the new pinned dependency with `make setup-env`; serving never installs packages. Unsupported counters are null. A sampler/storage failure is reported by health/the page and observability APIs without disabling generation or queue operations.
+
+The graphs aggregate bounded sample means and sampled peaks; gaps/restarts remain visible. GPU counters are whole-device, and service RSS sums shared pages across child processes. Do not sum GPU driver memory with process/system RAM. Short-lived children and spikes can fall between samples; job correlation is not exclusive GPU attribution. See [Observability API](api.md#observability) for metrics, filters, pagination and examples.
 
 ## Verification and troubleshooting
 

@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-# All 66 pinned distributions resolve as binary packages on macOS 14 arm64 for
+# All 67 pinned distributions resolve as binary packages on macOS 14 arm64 for
 # 3.12, 3.13 and 3.14. NetworkX 3.7 explicitly excludes the 3.14.1 patch.
 # Validate the complete lock again before adding a new Python minor.
 PYTHON_MINORS = (12, 13, 14)

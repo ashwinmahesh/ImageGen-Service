@@ -9,7 +9,7 @@ from storage_paths import require_storage
 log=logging.getLogger('image-generator')
 
 class QueueWorker:
-    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None):
+    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None,observer=None):
         self.store,self.execute=store,execute
         self.loras_enabled=loras_enabled
         self.llm_enabled=llm_enabled
@@ -21,6 +21,12 @@ class QueueWorker:
         self.error=None
         self.gpu_lock_file=Path(gpu_lock_file) if gpu_lock_file else None
         self.stage='idle'
+        self.observer=observer
+
+    def observe(self,event,*args):
+        if self.observer is not None:
+            try:getattr(self.observer,event)(*args)
+            except Exception:log.warning('Resource observation failed; queue processing continues',exc_info=True)
 
     def acquire(self, *, prepare=None):
         self.store.path.parent.mkdir(parents=True,exist_ok=True)
@@ -70,6 +76,7 @@ class QueueWorker:
                     if gpu: gpu.close()
                     break
                 job=None
+                observed_status='interrupted'
                 try:
                     # Claim only when the GPU is available. Waiting jobs stay removable.
                     job=self.store.claim(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled())
@@ -78,6 +85,7 @@ class QueueWorker:
                         continue
                     try:
                         self.stage='generating'
+                        self.observe('start_job',job)
                         job['_inherited_fds']=tuple(handle.fileno() for handle in [self.lease,gpu] if handle)
                         with self.busy:
                             result=self.execute(job)
@@ -90,9 +98,13 @@ class QueueWorker:
                         raise
                     log.exception('Job %s failed',job['id'])
                     self.store.finish(job['id'],error=str(error)[:2000] or type(error).__name__,error_status=getattr(error,'http_status',500))
+                    observed_status='failed'
                 else:
                     # If this commit fails, leave it running for recovery from its saved artifact.
                     self.store.finish(job['id'],result=result)
+                    observed_status='succeeded'
+                finally:
+                    if job is not None:self.observe('finish_job',job,observed_status)
         except Exception:
             self.error='Queue worker stopped; inspect storage and GPU-lock configuration, then restart. Accepted jobs remain persisted.'
             log.exception('Queue worker stopped')

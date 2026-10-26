@@ -36,12 +36,13 @@
     .workflow-tabs{display:flex;gap:8px;margin:0 0 24px}.workflow-tabs button{border:1px solid var(--line);border-radius:8px;padding:11px 18px;background:transparent;color:var(--muted)}.workflow-tabs button[aria-pressed=true]{background:var(--accent);color:#1d2515;border-color:var(--accent)}
     .workflow-edit{position:relative;display:inline-flex}.workflow-edit[data-unavailable=true]{cursor:not-allowed}.workflow-edit button:disabled{pointer-events:none}.workflow-tooltip{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:10000;width:250px;max-width:calc(100vw - 60px);padding:11px 13px;border:1px solid #596452;border-radius:9px;background:#272e24;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 8px 28px #0007}.workflow-edit[data-unavailable=true]:is(:hover,:focus-within) .workflow-tooltip{display:block}
     .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{padding:18px;background:var(--panel,#20241f);border:1px solid var(--line);border-radius:12px;margin-bottom:18px}.source-editor h2{font-size:16px;margin:0 0 6px}.source-editor canvas{display:block;width:auto;max-width:100%;height:auto;max-height:560px;border-radius:8px;cursor:crosshair;touch-action:none;background:#111}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden]{display:none}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
+  .queue-metrics{display:inline-flex;align-items:center;padding:5px 9px;min-height:30px;font-size:12px;line-height:1.4;border:1px solid var(--line);border-radius:7px;color:var(--text);background:transparent;text-decoration:none}.queue-metrics:hover{border-color:var(--accent)}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
 </head>
 <body>
-  <header><div class="brand"><span class="mark" aria-hidden="true">I</span><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
+  <header><div class="brand"><span class="mark" aria-hidden="true">I</span><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a><a href="/observability">Observability</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
     <p class="hint" id="license-notice" hidden></p>
@@ -616,7 +617,7 @@
       else if (job.status==='succeeded') { action.textContent='View'; action.addEventListener('click',async() => { try { await displayJob(await requestJSON('/v1/jobs/'+job.id)); } catch(error) { showError(error.message); } }); }
       else if (['failed','cancelled'].includes(job.status)) { action.textContent='Retry'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); }
       else { action.textContent='Follow'; action.addEventListener('click',() => { followJob(job.id); refreshQueue(); }); }
-      actions.append(action); row.append(actions); return row;
+      actions.append(action); if(job.attempts>0){const metrics=document.createElement('a');metrics.className='queue-metrics';metrics.textContent='Metrics';metrics.href='/observability?'+new URLSearchParams({job:job.id,model:activeModel});metrics.title='View resource measurements for this job';actions.append(metrics);} row.append(actions); return row;
     }
     async function refreshQueue() {
       if (pollingQueue || queueDrag || queueMutating || !activeModel) return;
