@@ -60,7 +60,7 @@
       root.append(svg('text',{x:left+plotWidth/2,y:top+plotHeight/2,'text-anchor':'middle'},points.length?'Counter unavailable for this window':'No samples in this window'));
     }
     const tooltip=el('div',null,'chart-tooltip');tooltip.hidden=true;
-    const cursor=svg('line',{x1:0,x2:0,y1:top,y2:height-bottom,stroke:'#dbeafe','stroke-dasharray':'2 4',visibility:'hidden'});root.append(cursor);
+    const cursor=svg('line',{x1:0,x2:0,y1:top,y2:height-bottom,stroke:'#dddddd','stroke-dasharray':'2 4',visibility:'hidden'});root.append(cursor);
     let selected=0;
     const show=index=>{
       if(!points.length)return;selected=Math.max(0,Math.min(points.length-1,index));const point=points[selected];
@@ -83,9 +83,9 @@
   function render(data){
     lastData=data;const summary=job&&jobWindow==='full'?combined(data.runs||[]):data.summary;
     $('cpu-value').textContent=percent(summary.metrics.service_cpu_percent?.mean);$('memory-value').textContent=gib(summary.metrics.service_rss_bytes?.peak);$('gpu-value').textContent=percent(summary.metrics.gpu_utilization_percent?.peak);
-    drawChart($('cpu-chart'),data,[{key:'service_cpu_percent',label:'Service',color:'#8ebeff'},{key:'system_cpu_percent',label:'System',color:'#a2adbd'}],'percent');
+    drawChart($('cpu-chart'),data,[{key:'service_cpu_percent',label:'Service',color:'#8ebeff'},{key:'system_cpu_percent',label:'System',color:'#aaaaaa'}],'percent');
     drawChart($('gpu-chart'),data,[{key:'gpu_utilization_percent',label:'GPU busy',color:'#67d7e8'}],'percent');
-    drawChart($('memory-chart'),data,[{key:'service_rss_bytes',label:'Service RSS',color:'#8ebeff'},{key:'system_memory_used_bytes',label:'System RAM',color:'#a2adbd'},{key:'gpu_memory_bytes',label:'GPU driver',color:'#67d7e8'}],'memory');
+    drawChart($('memory-chart'),data,[{key:'service_rss_bytes',label:'Service RSS',color:'#8ebeff'},{key:'system_memory_used_bytes',label:'System RAM',color:'#aaaaaa'},{key:'gpu_memory_bytes',label:'GPU driver',color:'#67d7e8'}],'memory');
     $('coverage').textContent=`${data.summary.sample_count.toLocaleString()} retained samples · ${data.points.length} plotted buckets · ${time(data.start)} — ${time(data.end)}. ${job?'Execution samples only; gaps can include waiting between attempts.':'Stopped periods are gaps; hover or focus a graph and use ← / → for models and values.'} Raw samples expire after 8 days; completed attempt summaries remain.`;
   }
   function renderJobs(result){
