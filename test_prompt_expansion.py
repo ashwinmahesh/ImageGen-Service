@@ -125,6 +125,30 @@ class ExpansionLauncher(unittest.TestCase):
 
 
 class ExpansionContract(unittest.TestCase):
+    def test_varied_worker_reuses_one_loaded_llm_and_conditions_each_composition(self):
+        original='Two adult women seen strictly from behind, a flat cel cartoon. No text.'
+        messages=[]
+        tokenizer=types.SimpleNamespace(apply_chat_template=lambda value,**kwargs:messages.append(value) or 'formatted')
+        fake=types.ModuleType('mlx_lm');fake.load=lambda path:('model',tokenizer)
+        outputs=iter(['A wide view keeps both rear silhouettes small against the surroundings.',
+                      'A closer crop gives both rear silhouettes greater prominence without showing faces.'])
+        def generate(*args,**kwargs):
+            detail={'style_details':'Crisp ink outlines frame flat two-tone cel colors.','additional_composition':next(outputs)}
+            return iter([types.SimpleNamespace(text=json.dumps(detail),finish_reason='stop',peak_memory=1.6)])
+        fake.stream_generate=generate
+        sampling=types.ModuleType('mlx_lm.sample_utils');sampling.make_sampler=lambda **kwargs:'greedy';sampling.make_logits_processors=lambda **kwargs:[]
+        with patch.dict(sys.modules,{'mlx_lm':fake,'mlx_lm.sample_utils':sampling}),patch.object(prompt_expander,'image_token_count',return_value=40),patch.object(fake,'load',wraps=fake.load) as load:
+            data=prompt_expander.run_worker({'prompt':original,'weights':'/unused','image_model':'z-image-turbo','variation_count':2})
+        load.assert_called_once()
+        candidates=data['candidates'];self.assertEqual(len(candidates),2)
+        self.assertNotEqual(candidates[0]['expanded_prompt'],candidates[1]['expanded_prompt'])
+        self.assertTrue(all(item['expanded_prompt'].startswith(original+'\n') for item in candidates))
+        self.assertIn('wide environmental',messages[0][-1]['content'])
+        self.assertIn('subject-dominant',messages[1][-1]['content'])
+        self.assertIn(candidates[0]['details']['additional_composition'],messages[1][-1]['content'])
+        self.assertIn('explicitly stated',messages[1][0]['content'])
+        self.assertEqual([item['variation_index'] for item in candidates],[1,2])
+
     def test_worker_removes_exact_echo_and_releases_no_truncated_output(self):
         original='A fox in flat cel animation.'
         response=types.SimpleNamespace(text=json.dumps({'style_details':original+'\nBold ink contours frame broad flat color shapes.','additional_composition':''}),finish_reason='stop',peak_memory=1.6)

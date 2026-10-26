@@ -11,6 +11,11 @@ from test_queue import until
 from test_prompt_expansion import fake_expand
 
 
+def fake_variations(prompt,*,count,**kwargs):
+    return [{**fake_expand(prompt),'expanded_prompt':prompt+f'\nComposition option {index+1} with distinct framing.',
+             'variation_index':index+1,'variation_count':count,'variation_goal':f'Goal {index+1}'} for index in range(count)]
+
+
 class BatchAPI(unittest.TestCase):
     setUp=test_api.APITest.setUp
     tearDown=test_api.APITest.tearDown
@@ -129,6 +134,78 @@ class BatchAPI(unittest.TestCase):
                 self.assertEqual(self.client.delete('/v1/jobs/'+admitted['id']).status_code,409)
             finally:release.set()
             until(lambda:self.store.get(admitted['id'])['status']=='succeeded')
+
+    def test_varied_batch_plans_once_before_render_and_returns_each_applied_prompt(self):
+        original=self.fake.generate_image
+        def verify_saved(**kwargs):
+            saved=self.store.listing()[0][0]['prompt_expansion']
+            self.assertEqual(len(saved['candidates']),3)
+            return original(**kwargs)
+        with patch.object(server.app.state,'llm_enabled',True),patch.object(server.prompt_expander,'expand_batch',side_effect=fake_variations) as expand,patch.object(self.fake,'generate_image',side_effect=verify_saved):
+            response=self.post(n=3,expand_prompt=True,vary_prompt=True)
+        self.assertEqual(response.status_code,200,response.text);expand.assert_called_once()
+        expected=fake_variations(self.payload['prompt'],count=3)
+        self.assertEqual([call['prompt'] for call in self.fake.calls],[item['expanded_prompt'] for item in expected])
+        for item,expansion in zip(response.json()['data'],expected):
+            self.assertEqual(item['prompt_expansion'],expansion)
+            metadata=json.loads(Path(item['metadata_path']).read_text())
+            self.assertEqual(metadata['prompt'],self.payload['prompt'])
+            self.assertEqual(metadata['effective_prompt'],expansion['expanded_prompt'])
+        job=self.client.get('/v1/jobs/'+metadata['job_id']).json()
+        self.assertNotIn('prompt_expansion',job)
+        self.assertEqual(job['candidate_expansions'],expected)
+
+    def test_varied_batch_dependencies_and_legacy_fingerprints(self):
+        for values in ({'n':2},{'expand_prompt':True},{'n':2,'expand_prompt':True,'vary_prompt':'yes'}):
+            self.assertEqual(self.post(**{'vary_prompt':True,**values}).status_code,422)
+        self.assertEqual(self.post(n=2,vary_prompt=True,expand_prompt=True).status_code,422)  # Server LLM off.
+        self.assertEqual(self.store.listing()[1],0)
+        self.assertNotIn('vary_prompt',server.normalized_request(server.GenerateRequest(**self.payload)))
+
+    def test_varied_restart_reuses_all_planned_prompts_and_completed_images(self):
+        self.worker.stop();self.job_executor.shutdown(wait=True)
+        payload=server.GenerateRequest(**self.payload,n=3,expand_prompt=True,vary_prompt=True)
+        with patch.object(server.app.state,'llm_enabled',True),patch.object(server.prompt_expander,'expand_batch',side_effect=fake_variations) as expand:
+            admitted=server.submit_job(payload);claimed=self.store.claim();real_save=self.store.save_progress
+            def crash(identifier,result):
+                real_save(identifier,result)
+                raise KeyboardInterrupt('simulated shutdown after first saved image')
+            with patch.object(self.store,'save_progress',side_effect=crash):
+                with self.assertRaises(KeyboardInterrupt): server.execute_job(claimed)
+            self.assertEqual(len(self.fake.calls),1)
+            self.store.recover();claimed=self.store.claim()
+            result=server.execute_job(claimed);self.store.finish(claimed['id'],result=result)
+        expand.assert_called_once()
+        self.assertEqual(len(self.fake.calls),3)
+        self.assertEqual([call['prompt'] for call in self.fake.calls],[item['expanded_prompt'] for item in fake_variations(payload.prompt,count=3)])
+        self.assertEqual(self.client.get('/v1/jobs/'+admitted['id']).json()['completed_images'],3)
+
+    def test_duplicate_variation_prompts_fail_before_any_render(self):
+        def repeated(prompt,*,count,**kwargs):
+            values=fake_variations(prompt,count=count)
+            for item in values: item['expanded_prompt']=values[0]['expanded_prompt']
+            return values
+        with patch.object(server.app.state,'llm_enabled',True),patch.object(server.prompt_expander,'expand_batch',side_effect=repeated):
+            response=self.post(n=2,expand_prompt=True,vary_prompt=True)
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertEqual(self.fake.calls,[])
+
+    def test_recovery_refuses_a_saved_image_with_a_different_composition(self):
+        self.worker.stop();self.job_executor.shutdown(wait=True)
+        payload=server.GenerateRequest(**self.payload,n=2,expand_prompt=True,vary_prompt=True)
+        with patch.object(server.app.state,'llm_enabled',True),patch.object(server.prompt_expander,'expand_batch',side_effect=fake_variations):
+            admitted=server.submit_job(payload);claimed=self.store.claim();real_save=self.store.save_progress
+            def crash(identifier,result):
+                real_save(identifier,result)
+                raise KeyboardInterrupt('interrupted after publishing first option')
+            with patch.object(self.store,'save_progress',side_effect=crash):
+                with self.assertRaises(KeyboardInterrupt):server.execute_job(claimed)
+            saved=self.store.get(admitted['id'])['result']['images'][0]
+            sidecar=Path(saved['metadata_path']);data=json.loads(sidecar.read_text())
+            data['prompt_expansion']['expanded_prompt']+=' Different prompt.';sidecar.write_text(json.dumps(data))
+            self.store.recover();claimed=self.store.claim()
+            with self.assertRaisesRegex(server.LocalFileError,'planned composition'):server.execute_job(claimed)
+        self.assertEqual(len(self.fake.calls),1)
 
 
 if __name__=='__main__':unittest.main()

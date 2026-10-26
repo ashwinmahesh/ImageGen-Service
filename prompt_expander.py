@@ -9,7 +9,7 @@ from enhancer_profile import REPOSITORY, REVISION, check_assets
 
 import hashlib
 import re
-from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, guidance_for, public_guidance, style_context, style_anchor, example_for
+from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, guidance_for, public_guidance, style_context, style_anchor, example_for
 
 
 
@@ -21,14 +21,28 @@ def expansion_capability(enabled, image_model=None):
     return {'enabled': enabled, 'mode': 'expand', 'model': REPOSITORY, 'revision': REVISION,
             'license': 'Apache-2.0', 'text_only': True,
             'guidance_profile': guidance_for(image_model)['id'] if image_model else None,
-            'note': 'Keeps your description verbatim and appends visual detail. Does not inspect reference photos. Opt in with expand_prompt:true; no automatic compression.'}
+            'batch_variations': True,
+            'note': 'Keeps your description verbatim and appends visual detail. Does not inspect reference photos. Opt in with expand_prompt:true; add vary_prompt:true for distinct batch compositions. No automatic compression.'}
 
 
 def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=()):
+    return _expand(prompt,project=project,image_model=image_model,image_weights=image_weights,
+                   selection=selection,inherited_fds=inherited_fds)
+
+
+def expand_batch(prompt, *, count, project, image_model, image_weights, selection=None, inherited_fds=()):
+    return _expand(prompt,count=count,project=project,image_model=image_model,image_weights=image_weights,
+                   selection=selection,inherited_fds=inherited_fds)
+
+
+def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None):
     folder = check_assets(project)
     command = [sys.executable, str(Path(__file__).with_name('prompt_expander.py')), '--worker']
     request = {'prompt': prompt, 'weights': str(folder), 'image_model': image_model,
                'image_weights': str(image_weights), 'trigger': (selection or {}).get('trigger_prompt', '')}
+    if count is not None:
+        if type(count) is not int or not 2<=count<=5: raise ValueError('Variation count must be 2–5')
+        request['variation_count']=count
     environment = {**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
                    'TOKENIZERS_PARALLELISM': 'false'}
     started = time.monotonic()
@@ -46,9 +60,13 @@ def expand(prompt, *, project, image_model, image_weights, selection=None, inher
         raise ExpansionError(message)
     try:
         data = json.loads(result.stdout)
-        validate_expansion(prompt, data)
+        if count is None: validate_expansion(prompt, data)
+        else: validate_variations(prompt,data['candidates'],count)
     except (ValueError, KeyError, TypeError) as error:
         raise ExpansionError('Prompt expander returned an invalid response; no image was rendered.') from error
+    if count is not None:
+        return [{**item,'model':REPOSITORY,'revision':REVISION,'mode':'expand','policy_version':POLICY_VERSION}
+                for item in data['candidates']]
     return {**data, 'model': REPOSITORY, 'revision': REVISION, 'mode': 'expand',
             'policy_version': POLICY_VERSION, 'seconds': round(time.monotonic()-started, 2)}
 
@@ -59,6 +77,19 @@ def validate_expansion(original, data):
         raise ValueError('Original description must be retained verbatim')
     if not expanded[len(original):].strip() or len(expanded) > 4000 or '<lora:' in expanded.lower():
         raise ValueError('Invalid expansion')
+
+
+def validate_variations(original, candidates, count):
+    if not isinstance(candidates,list) or len(candidates)!=count:
+        raise ExpansionError('Wrong number of candidate expansions')
+    for index,item in enumerate(candidates):
+        try: validate_expansion(original,item)
+        except (ValueError,KeyError,TypeError) as error:
+            raise ExpansionError('Invalid candidate expansion; no new image was rendered.') from error
+        if item.get('variation_index')!=index+1 or item.get('variation_count')!=count:
+            raise ExpansionError('Wrong candidate expansion order')
+    if len({item['expanded_prompt'] for item in candidates})!=count:
+        raise ExpansionError('Candidate expansions repeated; no images were rendered. Try a less constrained prompt or disable composition variation.')
 
 
 def parse_details(text, original):
@@ -121,49 +152,64 @@ def run_worker(request):
     model, tokenizer = load(request['weights'])
     guidance = guidance_for(request['image_model'])
     allowance = min(guidance['soft_max_new_words'], max(12, (480-original_tokens)//2)) if original_tokens is not None else guidance['soft_max_new_words']
-    messages = [{'role': 'system', 'content': SYSTEM_PROMPT+'\n\n'+guidance['instructions']+'\n\n'+style_context(original)}]
-    # Use only an example appropriate to the requested medium, avoiding cross-style bias.
-    example = example_for(original)
-    if example:
-        messages += [{'role':'user','content':example[0]},{'role':'assistant','content':example[1]}]
-    messages.append({'role': 'user', 'content': f'Expand this image description with at most {allowance} NEW words. Return the two-field JSON with new rendering detail:\n\n{original}'})
-    formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
-    text, final = '', None
-    if SAMPLING['temperature']:
-        import mlx.core as mx
-        mx.random.seed(SAMPLING['seed'])
-    for response in stream_generate(model, tokenizer, prompt=formatted, max_tokens=320,
-          sampler=make_sampler(temp=SAMPLING['temperature'],top_p=SAMPLING['top_p'],top_k=SAMPLING['top_k']),
-          logits_processors=make_logits_processors(presence_penalty=SAMPLING['presence_penalty'],presence_context_size=512)):
-        text += response.text
-        final = response
-    if final is None or final.finish_reason == 'length':
-        raise ExpansionError('Expansion reached its output limit; retry or disable expansion. No truncated text was used.')
-    details = parse_details(text, original)
-    anchor = style_anchor(original)
-    if not anchor:
-        details['style_details'] = ''
-        if not details['additional_composition']:
-            raise ExpansionError('No additional scene detail was returned for this unspecified medium.')
-    addition = ' '.join(details[key] for key in ('style_details','additional_composition') if details[key])
-    check_added_details(original, addition)
-    data = {'original_prompt': original, 'expanded_prompt': original+'\n'+addition,
-            'original_image_tokens': original_tokens, 'image_token_limit': 512 if original_tokens is not None else None}
-    validate_expansion(original, data)
-    data['style_anchor'] = anchor
-    data['details'] = details
-    data['image_model'] = request['image_model']
-    data['guidance_profile'] = guidance['id']
-    data['guidance_version'] = guidance['version']
-    data['sampling'] = dict(SAMPLING)
-    data['policy_sha256'] = hashlib.sha256(json.dumps([SYSTEM_PROMPT, guidance, style_context(original), example],sort_keys=True).encode()).hexdigest()
-    import resource
-    data['peak_mlx_memory_gb'] = round(final.peak_memory, 3)
-    data['peak_process_rss_gb'] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1e9 if sys.platform == 'darwin' else 1e6), 3)
-    data['expanded_image_tokens'] = image_token_count(data['expanded_prompt'], request)
-    if data['expanded_image_tokens'] is not None and data['expanded_image_tokens'] > 512:
-        raise ExpansionError(f"Expanded prompt uses {data['expanded_image_tokens']}/512 image-model tokens. It was not truncated or compressed; shorten your description or disable expansion.")
-    return data
+    count=request.get('variation_count')
+    if count is not None and (type(count) is not int or not 2<=count<=5):
+        raise ExpansionError('Variation count must be 2–5')
+    candidates=[]
+    for index in range(count or 1):
+        started=time.monotonic()
+        system=VARIATION_SYSTEM_PROMPT if count else SYSTEM_PROMPT
+        messages = [{'role': 'system', 'content': system+'\n\n'+guidance['instructions']+'\n\n'+style_context(original)}]
+        example = example_for(original) if not count else None
+        if example:
+            messages += [{'role':'user','content':example[0]},{'role':'assistant','content':example[1]}]
+        direction=''
+        if count:
+            direction=f'Option {index+1} of {count}. Composition goal: {VARIATION_GOALS[index]}\n'
+            if candidates:
+                direction+='Earlier compositions to differ from: '+json.dumps([item['details']['additional_composition'] for item in candidates])+'\n'
+        messages.append({'role': 'user', 'content': direction+f'Expand this image description with at most {allowance} NEW words. Return the two-field JSON with new rendering detail:\n\n{original}'})
+        formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        text, final = '', None
+        if SAMPLING['temperature']:
+            import mlx.core as mx
+            mx.random.seed(SAMPLING['seed'])
+        for response in stream_generate(model, tokenizer, prompt=formatted, max_tokens=320,
+              sampler=make_sampler(temp=SAMPLING['temperature'],top_p=SAMPLING['top_p'],top_k=SAMPLING['top_k']),
+              logits_processors=make_logits_processors(presence_penalty=SAMPLING['presence_penalty'],presence_context_size=512)):
+            text += response.text
+            final = response
+        if final is None or final.finish_reason == 'length':
+            raise ExpansionError('Expansion reached its output limit; retry or disable expansion. No truncated text was used.')
+        details = parse_details(text, original)
+        anchor = style_anchor(original)
+        if not anchor:
+            details['style_details'] = ''
+            if not details['additional_composition']:
+                raise ExpansionError('No additional scene detail was returned for this unspecified medium.')
+        if count and not details['additional_composition']:
+            raise ExpansionError('No distinct composition was returned. Try a less constrained prompt or disable composition variation.')
+        addition = ' '.join(details[key] for key in ('style_details','additional_composition') if details[key])
+        check_added_details(original, addition)
+        data = {'original_prompt': original, 'expanded_prompt': original+'\n'+addition,
+                'original_image_tokens': original_tokens, 'image_token_limit': 512 if original_tokens is not None else None}
+        validate_expansion(original, data)
+        data.update(style_anchor=anchor,details=details,image_model=request['image_model'],
+                    guidance_profile=guidance['id'],guidance_version=guidance['version'],sampling=dict(SAMPLING))
+        data['policy_sha256'] = hashlib.sha256(json.dumps([system, guidance, style_context(original), example, direction],sort_keys=True).encode()).hexdigest()
+        import resource
+        data['peak_mlx_memory_gb'] = round(final.peak_memory, 3)
+        data['peak_process_rss_gb'] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1e9 if sys.platform == 'darwin' else 1e6), 3)
+        data['expanded_image_tokens'] = image_token_count(data['expanded_prompt'], request)
+        if data['expanded_image_tokens'] is not None and data['expanded_image_tokens'] > 512:
+            raise ExpansionError(f"Expanded prompt uses {data['expanded_image_tokens']}/512 image-model tokens. It was not truncated or compressed; shorten your description or disable expansion.")
+        if count:
+            data.update(variation_index=index+1,variation_count=count,variation_goal=VARIATION_GOALS[index],seconds=round(time.monotonic()-started,2))
+        candidates.append(data)
+    if count:
+        validate_variations(original,candidates,count)
+        return {'candidates':candidates}
+    return candidates[0]
 
 
 if __name__ == '__main__':

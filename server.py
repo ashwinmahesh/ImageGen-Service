@@ -106,7 +106,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="2.2.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="2.3.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -142,8 +142,9 @@ class GenerateRequest(BaseModel):
     size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires make serve WITH_LLM=1. Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
+    vary_prompt: bool = Field(default=False,strict=True,description="Requires expand_prompt:true and n>=2. Plan a distinct LLM expansion/composition per option, preserving explicit original constraints and style. All prompts are persisted before rendering and reused after restart. Default false shares one expansion; the UI enables this for multi-image batches with expansion. Improves creative variety but cannot guarantee visibly different results for constrained prompts or strongly preserved references.")
     generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
-    n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch, rendered sequentially with the same prompt/settings and distinct seeds. seed is the first seed; subsequent options use (seed + index) modulo 2^32. Optional prompt expansion runs once for the whole batch.")
+    n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch rendered sequentially with distinct seeds. seed is the first seed; later options increment it modulo 2^32. expand_prompt shares one expansion unless vary_prompt:true requests distinct composition expansions.")
     steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned per image. With n>1 this is the first seed; later options increment it modulo 2^32.")
     response_format: Literal["b64_json", "url"] = "b64_json"
@@ -185,6 +186,8 @@ class GenerateRequest(BaseModel):
             raise ValueError("image_strength requires reference_image")
         if self.lora is None and self.lora_strength is not None:
             raise ValueError("lora_strength requires lora")
+        if self.vary_prompt and (not self.expand_prompt or self.n<2):
+            raise ValueError('vary_prompt requires expand_prompt:true and n>=2')
         return self
 
     @field_validator("output_dir")
@@ -236,6 +239,9 @@ class PromptExpansion(BaseModel):
     details: dict[str,str] | None = None
     sampling: dict | None = None
     policy_sha256: str | None = None
+    variation_index: int | None = None
+    variation_count: int | None = None
+    variation_goal: str | None = None
     peak_mlx_memory_gb: float | None = Field(default=None,description="Peak MLX allocator memory in decimal GB in the short-lived LLM child; overlaps process RSS, do not add them.")
     peak_process_rss_gb: float | None = Field(default=None,description="Peak LLM-child resident memory in decimal GB; total service memory is higher because the image model may remain loaded.")
 
@@ -556,6 +562,8 @@ def normalized_request(payload):
     # Keep legacy request fingerprints stable for the default disabled feature.
     if not data['expand_prompt']:
         data.pop('expand_prompt')
+    if not data['vary_prompt']:
+        data.pop('vary_prompt')
     if data['reference_image'] is None:
         data.pop('image_strength',None)
     return data
@@ -626,6 +634,11 @@ def committed_candidate(payload,job,identifier,index):
         raise LocalFileError('Existing output does not match this queued job; refusing to overwrite it')
     if payload.n>1 and (metadata.get('candidate_index')!=index+1 or metadata.get('candidate_count')!=payload.n or metadata.get('seed')!=(payload.seed+index)%2**32):
         raise LocalFileError('Saved output does not match this batch option; refusing to overwrite it')
+    if payload.vary_prompt:
+        saved=job.get('prompt_expansion') or {}
+        candidates=saved.get('candidates',[])
+        if saved.get('mode')!='vary' or len(candidates)!=payload.n or metadata.get('prompt_expansion')!=candidates[index]:
+            raise LocalFileError('Saved output does not match its planned composition; it was left untouched')
     from PIL import Image
     with Image.open(path) as image:
         if image.format!='PNG' or list(image.size)!=list(map(int,metadata['size'].split('x'))):
@@ -653,19 +666,44 @@ def prepare_job_prompt(payload,job):
     return payload
 
 
+def prepare_candidate_prompts(payload,job):
+    if not payload.vary_prompt:
+        prepared=prepare_job_prompt(payload,job)
+        return [prepared]*payload.n,[job.get('prompt_expansion')]*payload.n
+    selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
+    if selection and selection['sha256']!=job.get('_adapter_sha'):
+        raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
+    if not app.state.llm_enabled:
+        raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
+    if not job.get('prompt_expansion'):
+        job_worker.stage='planning_variations'
+        candidates=prompt_expander.expand_batch(payload.prompt,count=payload.n,project=PROJECT_ROOT,
+                image_model=API_MODEL,image_weights=MODEL_DIR,selection=selection,
+                inherited_fds=job.get('_inherited_fds',()))
+        prompt_expander.validate_variations(payload.prompt,candidates,payload.n)
+        job['prompt_expansion']=job_store.save_expansion(job['id'],{'mode':'vary','candidates':candidates})
+    saved=job['prompt_expansion']
+    if saved.get('mode')!='vary':
+        raise LocalFileError('Saved expansion does not match the varied batch')
+    candidates=saved['candidates']
+    prompt_expander.validate_variations(payload.prompt,candidates,payload.n)
+    return [payload.model_copy(update={'prompt':item['expanded_prompt']}) for item in candidates],candidates
+
+
 def execute_job(job):
     payload=GenerateRequest.model_validate(job['request'])
     rendered=[]
     prepared=None
+    expansions=None
     for index in range(payload.n):
         identifier=candidate_identifier(job['id'],index,payload.n)
         metadata=committed_candidate(payload,job,identifier,index)
         if metadata is None:
             if prepared is None:
-                prepared=prepare_job_prompt(payload,job)  # One shared expansion for all options.
+                prepared,expansions=prepare_candidate_prompts(payload,job)
             job_worker.stage=f'generating_option_{index+1}_of_{payload.n}' if payload.n>1 else 'generating'
-            candidate=prepared.model_copy(update={'n':1,'seed':(payload.seed+index)%2**32})
-            child={**job,'id':identifier}
+            candidate=prepared[index].model_copy(update={'n':1,'seed':(payload.seed+index)%2**32})
+            child={**job,'id':identifier,'prompt_expansion':expansions[index]}
             if payload.n>1: child.update(_batch_id=job['id'],_candidate_index=index+1)
             _,metadata=generate(candidate,child)
         rendered.append(metadata)
@@ -702,6 +740,7 @@ class JobResponse(BaseModel):
     error: str | None=None
     retry_of: str | None=None
     prompt_expansion: PromptExpansion | None=None
+    candidate_expansions: list[PromptExpansion] | None=None
     completed_images: int = 0
     total_images: int = 1
     partial_result: GenerateResponse | None = None
@@ -721,6 +760,9 @@ class JobList(BaseModel):
 
 def job_response(job,request,*,include_result=True):
     item={**job,'model':job['request']['model']}
+    if job.get('prompt_expansion') and job['prompt_expansion'].get('mode')=='vary':
+        item['candidate_expansions']=job['prompt_expansion']['candidates']
+        item['prompt_expansion']=None
     metadata=job['result']
     item['total_images']=job['request'].get('n',1)
     item['completed_images']=len(result_images(metadata))

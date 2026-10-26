@@ -61,6 +61,7 @@
         </section>
         <div class="field"><label id="size-label" for="size">Image size</label><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <div class="field"><label for="image-count">Number of images</label><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
+        <section id="variation-controls" hidden><label class="immediate-choice"><input id="vary-prompt" type="checkbox" checked>Different compositions with LLM</label><p class="hint" id="variation-hint"></p></section>
         <details><summary>Fine-tune the settings</summary><div class="two field"><div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint" id="steps-hint">Reuse a seed to explore variations of the same idea.</p></details>
         <details><summary>Image tags</summary><div class="field"><label for="tags">Tags <span class="optional">(optional)</span></label><input id="tags" type="text" maxlength="2110" placeholder="gothic, village, campaign"><p class="hint">Separate tags with commas. Search or edit them later in the gallery.</p></div></details>
         <details><summary>Save location</summary>
@@ -133,6 +134,14 @@
     $('lora').addEventListener('change', () => updateLoRA());
     function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
     function updateButton() { $('generate').disabled = generating || previewingExpansion || !ready; if (!generating) { const count=Number($('image-count').value); $('button-text').textContent = $('generate-immediately').checked ? (count===1 ? 'Generate image' : `Generate ${count} images`) : (count===1 ? 'Add to queue' : `Queue ${count} images`); } }
+    function varyingCompositions() { return Number($('image-count').value)>1 && expansionEnabled && $('expand-prompt').checked && $('vary-prompt').checked; }
+    function updateVariationControls() {
+      const multiple=Number($('image-count').value)>1, enabled=expansionEnabled && $('expand-prompt').checked;
+      $('variation-controls').hidden=!multiple; $('vary-prompt').disabled=!enabled;
+      $('variation-hint').textContent=!expansionEnabled ? 'Start with make serve WITH_LLM=1 for distinct composition prompts. Different seeds alone may give similar pictures.' : !enabled ? 'Enable description expansion above to vary the compositions.' : 'Gives each option its own composition prompt while keeping your stated subjects, style and constraints. Adds LLM time. Strong references or precise framing can limit differences. Candidate prompts are saved with each image.';
+      $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions();
+      $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
+    }
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
@@ -211,7 +220,7 @@
           $('expansion-controls').hidden = !expansionEnabled;
           $('expand-prompt').checked = expansionEnabled;
         }
-        $('preview-expansion').disabled = !expansionEnabled || serverBusy || previewingExpansion || generating;
+        updateVariationControls();
         ready = data.status === 'ready'; serverBusy = data.busy;
         if (!generating) status(serverBusy ? 'Generating an image' : ready ? 'Ready on your Mac' : 'Loading model…', serverBusy ? 'busy' : ready ? 'ready' : 'checking');
       } catch { ready = false; if (!generating) status('Server offline', 'offline'); }
@@ -230,6 +239,8 @@
       $('reference-info').textContent = `${lastResult.size.replace('x', ' × ')} · selected for editing`;
       $('reference-card').hidden = false; $('reference-options').hidden = false; $('strength').value = '0.6';
       $('choose-photo').textContent = 'Change photo'; $('prompt').value = lastResult.prompt;
+      if (lastResult.expanded) $('expand-prompt').checked=false;
+      updateVariationControls();
       referenceDimensions = lastResult.size.split('x').map(Number);
       updateReferenceSizing(); $('reference-size').value = String(Math.max(...referenceDimensions)); updateReferenceSizing();
       $('announcement').textContent = 'Image selected for editing. Update the prompt to describe your desired result, then generate a new version.';
@@ -244,6 +255,7 @@
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
       const payload = {model: activeModel, prompt, n:Number($('image-count').value), size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
       if (expansionEnabled && $('expand-prompt').checked) payload.expand_prompt = true;
+      if (varyingCompositions()) payload.vary_prompt=true;
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
       if (lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
@@ -292,12 +304,14 @@
       expansionPreview = data;
       $('expanded-text').textContent = data.expanded_prompt;
       $('expanded-info').textContent = `${data.seconds}s for expansion` + (data.expanded_image_tokens != null ? ` · ${data.expanded_image_tokens}/${data.image_token_limit} image-model tokens` : ' · Image-model token count unavailable for this backend');
+      if (data.variation_index) $('expanded-info').textContent+=` · Composition ${data.variation_index} of ${data.variation_count}`;
       $('expanded-details').hidden = false; $('expanded-details').open = true;
     }
     $('use-expansion').addEventListener('click', () => {
       if (!expansionPreview) return;
       $('prompt').value = expansionPreview.expanded_prompt;
       $('expand-prompt').checked = false;
+      updateVariationControls();
       $('prompt').focus();
       $('announcement').textContent = 'Expanded description copied to the prompt. Automatic expansion is off to avoid expanding twice.';
     });
@@ -318,7 +332,9 @@
       finally { previewingExpansion=false; $('preview-expansion').textContent='Preview expansion'; await checkHealth(); updateButton(); }
     });
     $('generate-immediately').addEventListener('change', updateButton);
-    $('image-count').addEventListener('change',updateButton);
+    $('image-count').addEventListener('change',() => {updateButton();updateVariationControls();});
+    $('expand-prompt').addEventListener('change',updateVariationControls);
+    $('vary-prompt').addEventListener('change',updateVariationControls);
     function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching:' + activeModel, id); }
     function optionURL(item) {
       const identifier=String(item.file_path).split('/').pop().replace(/\.png$/,'');
@@ -336,7 +352,7 @@
       $('result').src=url.href; $('result').alt=payload.prompt; $('result').hidden=false; $('empty').hidden=true;
       for (const [position,card] of [...$('image-options').children].entries()) card.setAttribute('aria-pressed',String(position===index));
       lastSeed=item.seed;
-      lastResult={file_path:item.file_path,url:url.href,prompt:payload.prompt,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
+      lastResult={file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
       if (item.prompt_expansion) showExpansion(item.prompt_expansion);
       else { $('expanded-details').hidden=true; expansionPreview=null; }
       const count=batch.request.n || 1;
@@ -413,7 +429,7 @@
           const finished=['succeeded','failed','cancelled'].includes(job.status);
           $('working').hidden=finished; $('preview').setAttribute('aria-busy',String(!finished));
           const batchProgress=(job.total_images || 1)>1 ? ` · ${job.completed_images || 0}/${job.total_images} images saved` : '';
-          $('elapsed').textContent=job.status==='running' && summary.stage==='expanding_prompt' ? 'Expanding your description with the local LLM…' : job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed${batchProgress}`) : 'Saved · waiting for the next slot…';
+          $('elapsed').textContent=job.status==='running' && summary.stage==='planning_variations' ? 'Planning distinct compositions with the local LLM…' : job.status==='running' && summary.stage==='expanding_prompt' ? 'Expanding your description with the local LLM…' : job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed${batchProgress}`) : 'Saved · waiting for the next slot…';
           if (finished) {
             if (job.status==='succeeded') await displayJob(job);
             else { if (job.partial_result) await displayJob(job); showError(job.error || 'The followed job was cancelled.'); }
@@ -453,7 +469,7 @@
         const url = new URL(item.url, location.origin);
         if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
         $('prompt').value = metadata.expanded_prompt || item.prompt || '';
-        if (metadata.prompt_expansion) { showExpansion(metadata.prompt_expansion); $('expand-prompt').checked=false; } $('tags').value = (item.tags || []).join(', ');
+        if (metadata.prompt_expansion) { showExpansion(metadata.prompt_expansion); $('expand-prompt').checked=false; updateVariationControls(); } $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
         if (sameModel && Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= maxSteps) $('steps').value = item.steps;
         if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
