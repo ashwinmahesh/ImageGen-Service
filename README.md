@@ -96,7 +96,7 @@ Chroma HD and Flash share their T5 encoder and VAE in `chroma1-hd/weights`, and 
 
 `make queue` starts or reuses the lightweight queue API in the background at **http://127.0.0.1:55302**; it returns once ready. It needs the installed Python environment, but no model weights, LLM, SSD or GPU. Logs are in ignored `state/queue-api/server.log`. No login/autostart service is installed.
 
-`make serve` ensures that same queue API is running, then runs the selected **generator and UI** in the foreground; keep its terminal open. Ctrl-C finishes active generation and stops the generator. **The queue API stays running**, and other agents can keep submitting jobs. `make stop-queue` stops only the verified queue process and retains every job. The generator reads/checkpoints SQLite directly, so previously accepted jobs can finish even if the queue HTTP process stops; new CRUD requests need it running again. AI tools should retain the terminal session and use another session for checks. When an AI tool starts a temporary server for maintenance/testing, it should stop that server when checks finish unless asked to leave it running. On the original Mac the user starts ImageGen manually; leave agent-started test instances stopped. Preserve pre-existing user-started services and active generation.
+`make serve` ensures that same queue API is running, then runs the selected **generator and UI** in the foreground; keep its terminal open. Ctrl-C finishes active generation and stops the generator. **The queue API stays running**, and other agents can keep submitting jobs. `make stop-queue` stops only the verified queue process and retains every job. The generator reads/checkpoints SQLite directly, so previously accepted jobs can finish even if the queue HTTP process stops; UI requests still read/write SQLite through the generator API while the standalone queue API is down; only clients using its separate origin need it restarted. AI tools should retain the terminal session and use another session for checks. When an AI tool starts a temporary server for maintenance/testing, it should stop that server when checks finish unless asked to leave it running. On the original Mac the user starts ImageGen manually; leave agent-started test instances stopped. Preserve pre-existing user-started services and active generation.
 
 - Webpage: <http://127.0.0.1:5732/>
 - All-model image gallery: <http://127.0.0.1:5732/gallery>
@@ -221,7 +221,7 @@ The option picker below shows a real two-image Z-Image Turbo test at 512 × 512 
 
 ## Independent queue API (generator may be off)
 
-There are two processes: **queue API** (`55302`) handles only SQLite CRUD; **generator** (`5732`) owns the webpage, catalog, LLM, image generation and queue consumption. No worker registry, heartbeat, remote worker selection or per-job model switching is involved. Start the generator with the model whose queue you want to drain.
+There are two processes: **queue API** (`55302`) handles agent-facing SQLite CRUD and metadata discovery; **generator** (`5732`) owns the webpage, catalog, LLM, image generation and queue consumption. The webpage uses only the generator API, which reads/writes the same SQLite databases directly through the shared storage layer. It does not proxy its queue operations through the standalone queue API. No worker registry, heartbeat, remote worker selection or per-job model switching is involved. Start the generator with the model whose queue you want to drain.
 
 ```sh
 make queue
@@ -272,6 +272,14 @@ Use PATCH with the **complete replacement request**, not a partial merge. It is 
 
 Queue detail/list responses contain raw persisted `request`, optional `prompt_expansion`, `result` metadata (single-image paths or batch `images[]`), timestamps/attempts/error and state. A partial checkpoint may be present while running or failed: only `status:"succeeded"` means a fully completed request. Pagination returns totals and navigation, with null offsets at boundaries. The queue process does **not** provide image/base64 download routes, uploads, the catalog or a UI; those stay on the generator. `GET /` on the queue port returns404. Use the generator's job endpoint for the existing `result.data[]` download response when it is running.
 
+## If the standalone queue API goes down
+
+The browser never opens SQLite itself. It submits, lists, edits, cancels, retries and polls jobs through the **generator API**, whose handlers use the same shared `JobStore`/SQLite transactions as the standalone queue API. Those operations, synchronous generation, saved results and the gallery keep working while the generator remains up. Accepted jobs continue; no second queue, HTTP write fallback or automatic service restart is involved.
+
+Generator `GET /health` includes `queue_api.available`, `url`, `recovery_command` and an optional `error`. A bounded one-second on-demand probe handles connection refusal, timeouts, dropped/invalid responses and wrong-service/project replies. An unavailable standalone API does **not** change a healthy generator's `status:"ready"` or mark its consumer failed. The queue panel displays an informational recovery notice while its controls remain usable. Restore agent access with `make queue` (with the same `QUEUE_PORT` override, if used); health/UI checks recognize recovery without restarting the generator.
+
+A local SQLite failure is different: affected generator endpoints return HTTP503 with `code:"queue_storage_unavailable"`, a useful `detail` and `Retry-After:2`. Check project-state storage and permissions. A lost submission response is not proof that no row was committed: retry the same request with its original `Idempotency-Key`, as the UI already does. Existing jobs/history/media remain intact. Queue HTTP restart never recovers or reclaims the generator's active work.
+
 ## Persistent generation queue
 
 Each startup model has its own SQLite database at **`<project>/state/queues/<model-id>/jobs.sqlite3`**. On the original Mac, Z-Image uses `~/Documents/models/ImageGen-Service/state/queues/z-image-turbo/jobs.sqlite3`. SQLite databases, journals, backups and worker leases stay in the serving project, even when model weights and media use an external SSD. `DATA_DIR` does not relocate SQLite. The same queue is read automatically whenever that model starts. Changing the startup model leaves the other model's waiting jobs persisted until it is served again; models are not hot-swapped per job.
@@ -298,7 +306,7 @@ curl --request PATCH 'http://127.0.0.1:5732/v1/queue' \
   -H 'Content-Type: application/json' -d '{"paused":true}'
 ```
 
-These compatibility routes on the **generator port (5732)** forward CRUD to the independent queue API and operate on the startup-selected model. They keep the existing flat image request and image-specific response format; they do not use the queue-port envelope:
+These routes on the **generator port (5732)** read/write the shared SQLite database directly and operate on the startup-selected model, even while the standalone queue API is down. They keep the existing flat image request and image-specific response format; they do not use the queue-port envelope:
 
 | Method / path | Use |
 | --- | --- |

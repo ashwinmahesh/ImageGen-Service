@@ -1,36 +1,38 @@
-"""Small localhost HTTP client for generator-facing queue CRUD."""
+"""On-demand queue API health. Generator operations access shared SQLite directly."""
+import http.client
 import json
+from pathlib import Path
 import urllib.error
-import urllib.parse
 import urllib.request
-from fastapi import HTTPException
 from queue_api import DEFAULT_QUEUE_PORT
 
 
 class QueueClient:
-    def __init__(self,port=DEFAULT_QUEUE_PORT,*,transport=None):
+    def __init__(self,port=DEFAULT_QUEUE_PORT,*,transport=None,project=None):
         self.url=f'http://127.0.0.1:{port}'
         self.transport=transport
+        self.project=str(Path(project).resolve()) if project is not None else None
+        self.recovery_command='make queue'+(f' QUEUE_PORT={port}' if port!=DEFAULT_QUEUE_PORT else '')
 
-    def call(self,method,path,*,model=None,payload=None,key=None,query=None):
-        params={**(query or {}),**({'model':model} if model else {})}
-        if params:
-            path+='?'+urllib.parse.urlencode({k:v for k,v in params.items() if v is not None})
-        headers={'Content-Type':'application/json'}
-        if key: headers['Idempotency-Key']=key
-        if self.transport is not None:  # In-process HTTP transport for integration tests.
-            response=self.transport.request(method,path,json=payload,headers=headers)
-            if response.status_code>=400:
-                raise HTTPException(response.status_code,response.json().get('detail','Queue request failed'))
-            return response.json()
-        request=urllib.request.Request(self.url+path,method=method,headers=headers,
-                                      data=json.dumps(payload,allow_nan=False).encode() if payload is not None else None)
+    def status(self):
+        """Bounded availability check; never restarts services or gates local work."""
+        state={'url':self.url,'available':False,'recovery_command':self.recovery_command,
+               'error':f'Standalone queue API unavailable. Run {self.recovery_command} for agent requests. This page and already accepted jobs can continue.'}
         try:
-            with urllib.request.urlopen(request,timeout=15) as response:
-                return json.load(response)
+            if self.transport is not None:  # In-process HTTP transport for tests.
+                response=self.transport.get('/health')
+                status,raw=response.status_code,response.content
+            else:
+                with urllib.request.urlopen(self.url+'/health',timeout=1) as response:
+                    status,raw=response.status,response.read(65536)
+            health=json.loads(raw)
+            if status!=200 or not isinstance(health,dict) or health.get('service')!='imagegen-queue' or health.get('status')!='ready':
+                return state
+            if self.project is not None and health.get('project_dir')!=self.project:
+                return state
         except urllib.error.HTTPError as error:
-            try: detail=json.load(error).get('detail','Queue request failed')
-            except (ValueError,OSError): detail='Queue request failed'
-            raise HTTPException(error.code,detail) from error
-        except (OSError,ValueError) as error:
-            raise HTTPException(503,'Queue API is unavailable. Run make queue or restart with make serve; accepted jobs remain in SQLite.') from error
+            error.close()
+            return state
+        except (OSError,http.client.HTTPException,ValueError,TypeError):
+            return state
+        return {**state,'available':True,'error':None}

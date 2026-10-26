@@ -413,7 +413,7 @@
         $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · FIFO paused' : ''}`;
         $('pause-queue').textContent=queuePaused ? 'Resume FIFO queue' : 'Pause FIFO queue';
         $('clear-queue').disabled=!summary.queued;
-        $('queue-notice').textContent=summary.error || summary.blocked_reason || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
+        $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
         $('queue-notice').hidden=!$('queue-notice').textContent;
         if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
         const version=JSON.stringify(list.data);

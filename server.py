@@ -56,7 +56,7 @@ busy = threading.Lock()
 model = None
 job_store = None
 job_worker = None
-queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)))
+queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)),project=PROJECT_ROOT)
 preview_gate = threading.Lock()
 
 
@@ -119,8 +119,8 @@ app = FastAPI(
         "Use `reference_image` for one local reference photo (image-to-image); `image_strength` "
         "controls how strongly the starting image is preserved. The webpage can also upload a photo "
         "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`. "
-        f"Queue CRUD is forwarded to the independent queue API at `{queue_client.url}`; "
-        "that API accepts requests for other model queues while this generator is stopped. "
+        "The generator API reads/writes project-local SQLite directly. "
+        f"The independent queue API at `{queue_client.url}` accepts agent requests while the generator is stopped. "
         "This generator serves only its startup model."
     ),
 )
@@ -129,9 +129,14 @@ app.state.llm_enabled = False
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "[::1]"])
 
 
+@app.exception_handler(QueueConflict)
+async def queue_conflict(request,error):
+    return JSONResponse({'detail':str(error)},status_code=409)
+
+
 @app.exception_handler(sqlite3.Error)
 async def queue_storage_error(request,error):
-    return JSONResponse({'detail':'Project-local queue storage is unavailable; check its path and permissions, then retry.'},status_code=503)
+    return JSONResponse({'detail':'Project-local queue storage is unavailable; check its path and permissions, then retry with the same Idempotency-Key for unconfirmed submissions.','code':'queue_storage_unavailable'},status_code=503,headers={'Retry-After':'2'})
 
 
 class GenerateRequest(BaseModel):
@@ -475,6 +480,7 @@ def health():
             if state['queue']['error']: state['status']='error'
         except (OSError,RuntimeError,sqlite3.Error):
             state.update(status='error',queue={'error':'Queue storage unavailable'})
+    state['queue_api']=queue_client.status()
     return state
 
 
@@ -583,7 +589,7 @@ def queue_ready(require_worker=True):
         raise HTTPException(503,'Queue worker is not ready; check health and server logs')
 
 
-def submit_job(payload,key=None):
+def submit_job(payload,key=None,retry_of=None):
     queue_ready()
     data=normalized_request(payload)
     request_hash=fingerprint(data)
@@ -606,15 +612,15 @@ def submit_job(payload,key=None):
             except (OSError,ValueError,Image.DecompressionBombError) as error:
                 raise ReferenceError(f'Cannot read reference_image: {error}') from error
         selection=resolve_lora(payload.lora,payload.lora_strength)
-        record=queue_client.call('POST','/v1/jobs',payload={'model':API_MODEL,'request':data,
-            'adapter_sha256':selection['sha256'] if selection else None},key=key)
+        record=job_store.enqueue(data,request_hash,key=key,
+            adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
         job_worker.wake.set()
         return record
     except QueueConflict as error:
         raise HTTPException(409,str(error)) from None
     except (ReferenceError,ValueError) as error:
         raise HTTPException(400,str(error)) from None
-    except (OSError,RuntimeError,sqlite3.Error) as error:
+    except (OSError,RuntimeError) as error:
         raise HTTPException(503,'Cannot persist the job. Check storage before retrying.') from error
 
 
@@ -790,7 +796,7 @@ def job_response(job,request,*,include_result=True):
 
 
 @app.post('/v1/jobs',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
-          summary='Persist an image job',description='Default generate_immediately=false adds FIFO work. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Only the startup model is accepted.')
+          summary='Persist an image job',description='Default generate_immediately=false adds FIFO work. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
 def enqueue_job(payload:GenerateRequest,request:Request,
                 idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     return job_response(submit_job(payload,idempotency_key),request)
@@ -801,15 +807,18 @@ def enqueue_job(payload:GenerateRequest,request:Request,
 def list_jobs(request:Request,limit:int=Query(24,ge=1,le=100),offset:int=Query(0,ge=0),
               status:Literal['pending','queued','running','succeeded','failed','cancelled']|None=None):
     queue_ready(require_worker=False)
-    page=queue_client.call('GET','/v1/jobs',model=API_MODEL,query={'limit':limit,'offset':offset,'status':status})
-    return {**page,'data':[job_response(job,request,include_result=False) for job in page['data']]}
+    records,total=job_store.listing(limit,offset,status)
+    following=offset+len(records)
+    return {'data':[job_response(job,request,include_result=False) for job in records],'total':total,'limit':limit,'offset':offset,
+            'has_more':following<total,'next_offset':following if following<total else None,
+            'has_previous':offset>0,'previous_offset':max(0,offset-limit) if offset else None}
 
 
 def find_job(identifier):
     queue_ready(require_worker=False)
     if not image_catalog.valid_identifier(identifier): raise HTTPException(404,'Unknown job ID')
     try:
-        return queue_client.call('GET','/v1/jobs/'+identifier,model=API_MODEL)
+        return job_store.get(identifier)
     except FileNotFoundError:
         raise HTTPException(404,'Unknown job ID') from None
 
@@ -823,7 +832,7 @@ def get_job(identifier:str,request:Request):
            summary='Replace settings of a never-started waiting job')
 def update_job(identifier:str,payload:GenerateRequest,request:Request):
     find_job(identifier)
-    item=queue_client.call('PATCH','/v1/jobs/'+identifier,model=API_MODEL,payload={'request':normalized_request(payload)})
+    item=job_store.update(identifier,normalized_request(payload))
     job_worker.wake.set()
     return job_response(item,request)
 
@@ -833,7 +842,7 @@ def update_job(identifier:str,payload:GenerateRequest,request:Request):
 def cancel_job(identifier:str,request:Request):
     find_job(identifier)
     try:
-        item=queue_client.call('DELETE','/v1/jobs/'+identifier,model=API_MODEL)
+        item=job_store.cancel(identifier)
     except QueueConflict as error:
         raise HTTPException(409,str(error)) from None
     job_worker.wake.set()
@@ -843,8 +852,8 @@ def cancel_job(identifier:str,request:Request):
 @app.delete('/v1/jobs',summary='Clear waiting jobs',description='Cancels all waiting jobs for the active model. Running work and completed records/files are preserved.')
 def clear_jobs():
     queue_ready(require_worker=False)
-    result=queue_client.call('DELETE','/v1/jobs',model=API_MODEL); job_worker.wake.set()
-    return result
+    count=job_store.clear(); job_worker.wake.set()
+    return {'cancelled':count}
 
 
 @app.post('/v1/jobs/{identifier}/retry',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
@@ -854,14 +863,12 @@ def retry_job(identifier:str,request:Request):
     if item['status'] not in ['failed','cancelled']: raise HTTPException(409,'Only failed or cancelled jobs can be retried')
     # A deferred queue request may contain invalid generation fields.
     try:
-        payload=GenerateRequest.model_validate(item['request'])
+        payload=GenerateRequest.model_validate({**item['request'],'generate_immediately':False})
     except ValidationError as error:
         raise HTTPException(422,str(error)) from error
     if payload.reference_image and not Path(payload.reference_image).is_file():
         raise HTTPException(400,'Cannot read reference_image; restore it before retrying')
-    result=queue_client.call('POST',f'/v1/jobs/{identifier}/retry',model=API_MODEL)
-    job_worker.wake.set()
-    return job_response(result,request)
+    return job_response(submit_job(payload,retry_of=identifier),request)
 
 
 class QueueSettings(BaseModel):
@@ -872,7 +879,7 @@ class QueueSettings(BaseModel):
 @app.patch('/v1/queue',summary='Pause or resume ordinary FIFO work',description='Persisted across restarts. An active image finishes. Explicit immediate requests may still run while FIFO work is paused.')
 def queue_settings(payload:QueueSettings):
     queue_ready(require_worker=False)
-    state=queue_client.call('PATCH','/v1/queue',model=API_MODEL,payload={'paused':payload.paused}); job_worker.wake.set()
+    state=job_store.pause(payload.paused); job_worker.wake.set()
     return state
 
 

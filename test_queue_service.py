@@ -142,15 +142,15 @@ class DeferredGeneratorTest(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         self.assertTrue(Path(response.json()['result']['data'][0]['file_path']).is_file())
 
-    def test_generator_crud_proxies_and_queue_failure_retains_accepted_jobs(self):
+    def test_generator_crud_uses_shared_sqlite_while_queue_api_is_down(self):
         self.store.pause(True)
         accepted=self.client.post('/v1/jobs',json=self.payload).json()
         changed=self.client.patch('/v1/jobs/'+accepted['id'],json={**self.payload,'prompt':'A raven'})
         self.assertEqual(changed.status_code,200,changed.text)
         self.assertEqual(self.store.get(accepted['id'])['request']['prompt'],'A raven')
-        with patch.object(server.queue_client,'call',side_effect=server.HTTPException(503,'Queue unavailable')):
-            self.assertEqual(self.client.post('/v1/jobs',json=self.payload).status_code,503)
-        self.assertEqual(self.store.summary()['queued'],1)
+        with patch.object(server.queue_client,'status',return_value={'available':False,'error':'Queue unavailable'}):
+            self.assertEqual(self.client.post('/v1/jobs',json=self.payload).status_code,202)
+        self.assertEqual(self.store.summary()['queued'],2)
 
 
 class QueueStartupTest(unittest.TestCase):
