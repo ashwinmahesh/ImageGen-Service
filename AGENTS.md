@@ -40,6 +40,8 @@ LLM capability defaults on, with an interactive `[Y/n]` choice. `NO_LLM=1` is th
 
 Only Realism is an optional public adapter preset. Default setup downloads no LoRAs. Keep private catalogs, weights and preset names out of tracked files and download defaults. The loader inserts configured triggers; don't require `<lora:...>` prompt tags.
 
+Use accessible switches for boolean UI settings, labeled **Prompt expansion** for the local LLM control. Keep all help icons as grey circled question marks, and inset select chevrons from the right border. Preserve native input checked/disabled semantics and keyboard control.
+
 ## Verification and data boundaries
 
 From the project root, use `make test` for routine checks: fake downloads/inference, no model load. Tests form a package; run a focused module with `.venv/bin/python -m unittest tests.test_queue -v`. Keep cross-test imports under `tests` and resolve source/assets relative to the project root, one directory above the test files. Run focused tests while iterating and relevant complete checks for behavior changes. Documentation-only edits need link/example/schema review rather than GPU generation. `make smoke` requires a running generator and creates a real image; report it separately from unit tests.

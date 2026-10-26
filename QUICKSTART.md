@@ -86,8 +86,8 @@ To add another model later, stop the generator, run `make setup MODEL=chroma1-fl
 1. Open **[http://localhost:5732](http://localhost:5732/)**. Grey question-mark icons beside settings explain them on hover, keyboard focus or tap; press Escape or click elsewhere to dismiss the help.
 2. Enter a prompt, such as **A watercolor fox in a snowy forest, soft morning light**.
 3. For a first image, choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the default steps alone.
-4. Keep **Expand description with local LLM** checked if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice.
-5. Click **Generate image**. **Generate immediately** is checked by default: your request gets the next free slot ahead of ordinary queued work, after the active batch finishes.
+4. Keep **Prompt expansion** switched on if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice.
+5. Click **Generate image**. **Generate immediately** is switched on by default: your request gets the next free slot ahead of ordinary queued work, after the active batch finishes.
 6. View or download the result. With multiple options, select a thumbnail to choose the image you want.
 
 For a photo variation, click **Choose photo** or expand **Or use a file path**. **Keep the original** defaults to 0.6; lower values allow larger changes. The output follows the photo's aspect ratio. This creates variations, with no guarantee of precise edits or exact identity preservation.
@@ -103,7 +103,7 @@ The API names below map to the webpage controls.
 | Description | `prompt` | Required. Describe subject, medium/style, setting and light. Maximum 4000 characters; Z-Image processes 512 tokens including formatting, so put essential details first. |
 | Resolution | `size` | Default `1024x1024`. API dimensions must be multiples of 64 from 256–2048. With a reference, the larger dimension sets the long edge and the photo sets the ratio. |
 | Number of options | `n` | 1–5, default 1. Options render in turn with different seeds. More options take longer. |
-| Expand description | `expand_prompt` | Uses the text LLM when enabled at startup. Checked by default in the UI; API default is false. It does not inspect reference photos. |
+| Prompt expansion | `expand_prompt` | Uses the text LLM when enabled at startup. Switched on by default in the UI; API default is false. It does not inspect reference photos. |
 | Different compositions | `vary_prompt` | Requires `expand_prompt:true` and `n>=2`. Gives each option its own expanded composition. The UI enables it for eligible batches; API default is false. |
 | Steps | `steps` | Defaults: Z-Image 9, Chroma HD 40, Flash 8. More steps cost time and do not always improve results. Keep the default to start. |
 | Seed | `seed` | Leave blank/omit for random. Reuse a returned seed to compare setting changes; a seed alone does not guarantee the same image across models/settings. |
