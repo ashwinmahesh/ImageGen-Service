@@ -52,6 +52,7 @@ Git contains source, docs and the four approved screenshots under `docs/screensh
 Update these together when their behavior changes:
 
 - `README.md`: human quick start, everyday use, visible behavior and troubleshooting.
+- `QUICKSTART.md`: step-by-step human setup, webpage/API walkthroughs and concise setting explanations; keep examples and defaults current.
 - `docs/setup.md` / `docs/api.md`: exact setup, storage, API and recovery contracts, aligned with implementation and both live schemas.
 - `skill/image-model-server/SKILL.md`: portable operating instructions; keep the Z-Image wrapper consistent.
 - `AGENTS.md`: contributor guidance and architectural constraints.

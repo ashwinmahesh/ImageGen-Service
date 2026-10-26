@@ -8,6 +8,8 @@ The app supports **Z-Image Turbo**, **Chroma1-HD**, and **Chroma1-Flash**. They 
 
 ## Quick start
 
+For a step-by-step walkthrough of setup, the webpage, API requests and configurable settings, follow **[QUICKSTART.md](QUICKSTART.md)**.
+
 You need an **Apple Silicon Mac**, Git, Make, and **Python 3.14**. If you use Homebrew, install Python with `brew install python@3.14`. Z-Image uses Apple's Metal GPU through MLX. The bundled Chroma runtime targets macOS 26.6.2 on Apple Silicon; other macOS versions may need a compatible build. Windows and NVIDIA/CUDA are not supported by this setup. If Git or Make is missing, install Apple's command line tools with `xcode-select --install`.
 
 Open Terminal and run:
