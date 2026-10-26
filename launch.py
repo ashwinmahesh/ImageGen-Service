@@ -54,9 +54,7 @@ def available_models():
     return ready
 
 
-def select_llm_mode(explicit,*,interactive=None,prompt=input):
-    if explicit is not None:
-        return explicit
+def select_llm_mode(*,interactive=None,prompt=input):
     if interactive is None:
         interactive=sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('NONINTERACTIVE')!='1'
     if not interactive:
@@ -65,7 +63,7 @@ def select_llm_mode(explicit,*,interactive=None,prompt=input):
         try:
             answer=prompt('Enable local LLM prompt expansion? [Y/n]: ').strip().lower()
         except EOFError:
-            raise SystemExit('Startup cancelled. Use NO_LLM=1 to disable or WITH_LLM=1 to enable without asking.') from None
+            raise SystemExit('Startup cancelled. Use NONINTERACTIVE=1 to accept defaults, or NO_LLM=1 to disable the LLM.') from None
         if answer in ('','y','yes'):
             return True
         if answer in ('n','no'):
@@ -77,10 +75,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=5732)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
-    llm=parser.add_mutually_exclusive_group()
-    llm.add_argument('--with-llm',dest='with_llm',action='store_true',help='Enable local prompt expansion without asking (default on)')
-    llm.add_argument('--no-llm',dest='with_llm',action='store_false',help='Disable local prompt expansion')
-    parser.set_defaults(with_llm=None)
+    parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')
     parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
     args=parser.parse_args()
     try:
@@ -89,8 +84,8 @@ def main():
     except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)
-    args.with_llm=select_llm_mode(args.with_llm)
-    if args.with_llm:
+    llm_enabled=not args.no_llm and select_llm_mode()
+    if llm_enabled:
         try:
             check_enhancer_assets(ROOT)
         except (RuntimeError, OSError, ValueError) as error:
@@ -116,7 +111,7 @@ def main():
         command_line=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True)
         if 'server.py' not in command_line or 'python' not in command_line.lower():
             raise SystemExit('The existing listener is not a managed Python image server; leaving it running.')
-        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == args.with_llm:
+        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == llm_enabled:
             print(f'{selected} is already serving at http://127.0.0.1:{args.port}/')
             return
         if state.get('busy'):
@@ -134,7 +129,8 @@ def main():
     command=[sys.executable,str(ROOT/'server.py'),'--model',selected,'--port',str(args.port)]
     if args.no_loras:
         command.append('--no-loras')
-    command.append('--with-llm' if args.with_llm else '--no-llm')
+    if not llm_enabled:
+        command.append('--no-llm')
     os.execv(sys.executable,command)
 
 

@@ -463,7 +463,7 @@ def health():
             state['queue']['stage']=job_worker.stage if job_worker else 'idle'
             state['queue']['blocked_reason']='Next job requires LoRAs; restart with adapters enabled or cancel it.' if state['queue']['next_requires_lora'] and not app.state.loras_enabled else None
             if state['queue'].get('next_requires_llm') and not app.state.llm_enabled:
-                state['queue']['blocked_reason']='Next job requires prompt expansion; restart with make serve WITH_LLM=1 or cancel it.'
+                state['queue']['blocked_reason']='Next job requires prompt expansion; restart with make serve and choose Yes for LLM expansion or cancel it.'
             state['queue']['error']=job_worker.error if job_worker else None
             if state['queue']['error']: state['status']='error'
         except (OSError,RuntimeError,sqlite3.Error):
@@ -517,7 +517,7 @@ class ExpandPromptRequest(BaseModel):
           description='Requires LLM-enabled serving (the default). Text only; does not inspect a reference image or create an image job. Keeps original description verbatim. Returns 409 if inference/the shared accelerator is occupied; preview is not queued. Expansion failures return 422 and never silently fall back. Long image prompts are not compressed.')
 def expand_prompt(payload:ExpandPromptRequest):
     if not app.state.llm_enabled:
-        raise HTTPException(422,'Prompt expansion is disabled; restart with make serve WITH_LLM=1.')
+        raise HTTPException(422,'Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion.')
     queue_ready()
     if not preview_gate.acquire(blocking=False):
         raise HTTPException(409,'Another prompt preview is running; retry after it completes.')
@@ -586,7 +586,7 @@ def submit_job(payload,key=None,retry_of=None):
         if payload.lora is not None and not app.state.loras_enabled:
             raise HTTPException(422,'LoRAs are disabled for this server; restart without --no-loras to enable them.')
         if payload.expand_prompt and not app.state.llm_enabled:
-            raise HTTPException(422,'Prompt expansion is disabled; restart with make serve WITH_LLM=1 or set expand_prompt:false.')
+            raise HTTPException(422,'Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion or set expand_prompt:false.')
         require_storage(ROOT); require_storage(payload.output_dir)
         # Check input headers without resizing/re-encoding every waiting request.
         if payload.reference_image:
@@ -655,7 +655,7 @@ def prepare_job_prompt(payload,job):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if payload.expand_prompt:
         if not app.state.llm_enabled:
-            raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
+            raise LocalFileError('Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion')
         if not job.get('prompt_expansion'):
             job_worker.stage='expanding_prompt'
             expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
@@ -674,7 +674,7 @@ def prepare_candidate_prompts(payload,job):
     if selection and selection['sha256']!=job.get('_adapter_sha'):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if not app.state.llm_enabled:
-        raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
+        raise LocalFileError('Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion')
     if not job.get('prompt_expansion'):
         job_worker.stage='planning_variations'
         candidates=prompt_expander.expand_batch(payload.prompt,count=payload.n,project=PROJECT_ROOT,
@@ -1036,10 +1036,7 @@ def parse_server_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=5732)
     parser.add_argument("--no-loras", action="store_true", help="Serve only the base model; disable the LoRA UI and API")
-    llm=parser.add_mutually_exclusive_group()
-    llm.add_argument('--with-llm',dest='with_llm',action='store_true',help='Enable local prompt expansion (default)')
-    llm.add_argument('--no-llm',dest='with_llm',action='store_false',help='Disable local prompt expansion')
-    parser.set_defaults(with_llm=True)
+    parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')
     parser.add_argument("--model", choices=PROFILES, default=API_MODEL)
     return parser.parse_args(argv)
 
@@ -1047,8 +1044,8 @@ def parse_server_args(argv=None):
 if __name__ == "__main__":
     import uvicorn
     args=parse_server_args()
-    app.state.llm_enabled = args.with_llm
-    log.warning("Local prompt expansion: %s", "enabled (Qwen3.5-2B 4-bit, text only)" if args.with_llm else "disabled explicitly; use WITH_LLM=1 to enable")
+    app.state.llm_enabled = not args.no_llm
+    log.warning("Local prompt expansion: %s", "enabled (Qwen3.5-2B 4-bit, text only)" if app.state.llm_enabled else "disabled explicitly; restart with make serve to enable")
     app.state.loras_enabled = not args.no_loras
     if args.no_loras:
         app.description += " This server is running in base-only mode: LoRAs are disabled."

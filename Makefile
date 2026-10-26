@@ -13,23 +13,11 @@ export DATA_DIR
 endif
 NO_LORAS ?= 0
 WITH_REALISM ?= 0
-WITH_LLM ?=
 NO_LLM ?= 0
-ifneq ($(filter-out 0 1,$(strip $(WITH_LLM) $(NO_LLM))),)
-$(error WITH_LLM and NO_LLM accept only 0 or 1; leave WITH_LLM empty for the startup prompt)
+ifneq ($(filter-out 0 1,$(strip $(NO_LLM))),)
+$(error NO_LLM accepts only 0 or 1)
 endif
-LLM_FLAG :=
-ifeq ($(NO_LLM),1)
-ifeq ($(WITH_LLM),1)
-$(error NO_LLM=1 conflicts with WITH_LLM=1)
-endif
-LLM_FLAG := --no-llm
-else ifeq ($(WITH_LLM),0)
-LLM_FLAG := --no-llm
-else ifeq ($(WITH_LLM),1)
-LLM_FLAG := --with-llm
-endif
-SERVER_FLAGS := $(if $(filter 1,$(NO_LORAS)),--no-loras,) $(LLM_FLAG)
+SERVER_FLAGS := $(if $(filter 1,$(NO_LORAS)),--no-loras,) $(if $(filter 1,$(NO_LLM)),--no-llm,)
 LORA_ID ?= realism
 
 .PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism download-llm
@@ -38,7 +26,6 @@ help:
 	@echo 'make serve     Choose a model and start http://127.0.0.1:5732 (Ctrl-C stops it)'
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
 	@echo 'make serve NO_LLM=1  Disable local prompt expansion explicitly'
-	@echo 'make serve WITH_LLM=1  Enable it without asking (WITH_LLM=0 disables it)'
 	@echo 'make download-llm  Download/resume the shared 2B prompt LLM'
 	@echo 'make health    Check readiness'
 	@echo 'make smoke     Generate and validate a 512px test image'

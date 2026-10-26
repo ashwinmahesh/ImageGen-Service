@@ -111,17 +111,17 @@ class ExpansionLauncher(unittest.TestCase):
 
     def test_flag_assets_mode_and_busy_reuse(self):
         with patch.object(launch,'check_enhancer_assets') as check:
-            execute,_=self.run_launcher(['--with-llm'],stub_enhancer=False)
+            execute,_=self.run_launcher([],stub_enhancer=False)
             check.assert_called_once()
-            self.assertIn('--with-llm',execute.call_args.args[1])
+            self.assertNotIn('--no-llm',execute.call_args.args[1])
             state={'model':launch.API_MODEL,'busy':True,'loras_enabled':True,'prompt_expansion':{'enabled':True}}
-            execute,kill=self.run_launcher(['--with-llm'],state,stub_enhancer=False)
+            execute,kill=self.run_launcher([],state,stub_enhancer=False)
             execute.assert_not_called();kill.assert_not_called()
             with self.assertRaisesRegex(SystemExit,'generating'):
                 self.run_launcher(['--no-llm'],state,stub_enhancer=False)
         with patch.object(launch,'check_enhancer_assets',side_effect=RuntimeError('make download-llm')):
             with self.assertRaisesRegex(SystemExit,'make download-llm'):
-                self.run_launcher(['--with-llm'],stub_enhancer=False)
+                self.run_launcher([],stub_enhancer=False)
 
 
 class ExpansionContract(unittest.TestCase):

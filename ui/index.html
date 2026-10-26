@@ -138,7 +138,7 @@
     function updateVariationControls() {
       const multiple=Number($('image-count').value)>1, enabled=expansionEnabled && $('expand-prompt').checked;
       $('variation-controls').hidden=!multiple; $('vary-prompt').disabled=!enabled;
-      $('variation-hint').textContent=!expansionEnabled ? 'Start with make serve WITH_LLM=1 for distinct composition prompts. Different seeds alone may give similar pictures.' : !enabled ? 'Enable description expansion above to vary the compositions.' : 'Gives each option its own composition prompt while keeping your stated subjects, style and constraints. Adds LLM time. Strong references or precise framing can limit differences. Candidate prompts are saved with each image.';
+      $('variation-hint').textContent=!expansionEnabled ? 'Restart with make serve and keep the LLM enabled for distinct composition prompts. Different seeds alone may give similar pictures.' : !enabled ? 'Enable description expansion above to vary the compositions.' : 'Gives each option its own composition prompt while keeping your stated subjects, style and constraints. Adds LLM time. Strong references or precise framing can limit differences. Candidate prompts are saved with each image.';
       $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions();
       $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
     }
