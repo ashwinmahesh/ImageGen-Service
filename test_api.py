@@ -137,7 +137,7 @@ class APITest(unittest.TestCase):
         for change in [{'output_dir': 'relative'}, {'reference_image': 'relative.png'},
                        {'image_strength': 0.6}, {'reference_image': '/tmp/x', 'image_strength': 1},
                        {'reference_image': '/tmp/x', 'steps': 1}, {'size': '1000x1000'}, {'size': '2112x1024'},
-                       {'prompt': ' '}, {'prompt': 'x' * 4001}, {'n': 2}]:
+                       {'prompt': ' '}, {'prompt': 'x' * 4001}, {'n': 6}]:
             with self.subTest(change=list(change)):
                 self.assertEqual(self.post(**change).status_code, 422)
 

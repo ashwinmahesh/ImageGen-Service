@@ -166,9 +166,16 @@ class JobStore:
                 raise QueueConflict('Cannot replace a saved expansion or change an inactive job')
         return self.get(identifier)['prompt_expansion']
 
+    def save_progress(self,identifier,result):
+        # Only fully published PNGs/sidecars enter this checkpoint; no GPU work in SQL.
+        with self.connection(write=True) as db:
+            if db.execute("UPDATE jobs SET result=? WHERE id=? AND status='running'",
+                          (json.dumps(result,allow_nan=False),identifier)).rowcount != 1:
+                raise QueueConflict('Cannot update progress for an inactive job')
+
     def finish(self,identifier,*,result=None,error=None,error_status=None):
         with self.connection(write=True) as db:
-            db.execute("UPDATE jobs SET status=?,result=?,error=?,error_status=?,finished=? WHERE id=? AND status='running'",
+            db.execute("UPDATE jobs SET status=?,result=COALESCE(?,result),error=?,error_status=?,finished=? WHERE id=? AND status='running'",
                 ('failed' if error else 'succeeded',json.dumps(result,allow_nan=False) if result else None,error,error_status,time.time(),identifier))
 
     def cancel(self,identifier):

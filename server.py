@@ -143,9 +143,9 @@ class GenerateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires make serve WITH_LLM=1. Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
-    n: Literal[1] = 1
+    n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch, rendered sequentially with the same prompt/settings and distinct seeds. seed is the first seed; subsequent options use (seed + index) modulo 2^32. Optional prompt expansion runs once for the whole batch.")
     steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
-    seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned.")
+    seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned per image. With n>1 this is the first seed; later options increment it modulo 2^32.")
     response_format: Literal["b64_json", "url"] = "b64_json"
     lora: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Optional installed adapter ID from GET /v1/loras. Requires /health loras_enabled=true; base-only servers reject non-null adapters. Omit or use null for no LoRA. One adapter per request; model families are not interchangeable.", examples=["realism"])
     lora_strength: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False, description="Adapter influence, 0–2. Requires lora. Omit/null to use the catalog default (Realism: 0.8). This is separate from reference-photo preservation strength.")
@@ -241,6 +241,8 @@ class PromptExpansion(BaseModel):
 
 
 class ImageResult(BaseModel):
+    candidate_index: int = Field(default=1,description="One-based option position in the batch.")
+    candidate_count: int = Field(default=1,description="Requested image count for this batch.")
     prompt_expansion: PromptExpansion | None = None
     tags: list[str] = Field(default_factory=list)
     seed: int
@@ -353,6 +355,8 @@ def generate_with_geometry(payload, geometry, job=None):
         if payload.lora is not None and not app.state.loras_enabled:
             raise ValueError("LoRAs are disabled for this server; restart without --no-loras to enable them")
         selection = resolve_lora(payload.lora, payload.lora_strength) if app.state.loras_enabled else None
+        if job and selection and selection["sha256"]!=job.get("_adapter_sha"):
+            raise ValueError("The queued adapter changed; re-submit with the intended adapter")
     except (ValueError, OSError) as exc:
         raise LocalFileError(str(exc)) from exc
     seed = payload.seed if payload.seed is not None else secrets.randbelow(2**32)
@@ -409,7 +413,9 @@ def generate_with_geometry(payload, geometry, job=None):
             "loras_enabled": app.state.loras_enabled,
         }
         if job:
-            metadata.update(job_id=identifier,request_fingerprint=fingerprint(job['request']))
+            metadata.update(job_id=job.get('_batch_id',identifier),request_fingerprint=fingerprint(job['request']))
+            if job.get('_batch_id'):
+                metadata.update(batch_id=job['_batch_id'],candidate_index=job['_candidate_index'],candidate_count=job['request']['n'])
             if job.get('prompt_expansion'):
                 metadata.update(prompt_expansion=job['prompt_expansion'],expanded_prompt=payload.prompt)
                 metadata[API_MODEL]={'prompt_expansion_guidance':public_guidance(API_MODEL)}
@@ -465,7 +471,7 @@ def capabilities():
             API_MODEL:{'prompt_expansion_guidance':public_guidance(API_MODEL)},
             'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
             'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
-            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'persistent_queue':True,'immediate_generation':True}
+            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
 
 
 @app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
@@ -598,52 +604,89 @@ def submit_job(payload,key=None,retry_of=None):
         raise HTTPException(503,'Cannot persist the job. Check storage before retrying.') from error
 
 
-def execute_job(job):
-    payload=GenerateRequest.model_validate(job['request'])
-    path=Path(payload.output_dir)/(job['id']+'.png')
+def result_images(metadata):
+    return metadata.get('images',[metadata]) if metadata else []
+
+
+def batch_result(images):
+    return {'images':list(images),'created':images[0]['created'],
+            'seconds':round(sum(image['seconds'] for image in images),2)}
+
+
+def candidate_identifier(identifier,index,count):
+    return identifier if count==1 else uuid.uuid5(uuid.UUID(identifier),f'image-{index+1}').hex
+
+
+def committed_candidate(payload,job,identifier,index):
+    path=Path(payload.output_dir)/(identifier+'.png')
     metadata=image_catalog.read_metadata(path.with_suffix('.json'))
-    if path.is_file() and metadata:
-        # A committed PNG/sidecar may predate the SQL success commit after a crash.
-        if metadata.get('job_id')!=job['id'] or metadata.get('request_fingerprint')!=fingerprint(job['request']):
-            raise LocalFileError('Existing output does not match this queued job; refusing to overwrite it')
-        from PIL import Image
-        with Image.open(path) as image:
-            if image.format!='PNG' or list(image.size)!=list(map(int,metadata['size'].split('x'))):
-                raise LocalFileError('Saved output is invalid; it was left untouched')
-            image.verify()
-        index=ROOT/'image-index'/(job['id']+'.json')
-        if not index.is_file(): image_catalog.write_index(ROOT,job['id'],path,metadata['tags'])
-    else:
-        selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
-        if selection and selection['sha256']!=job.get('_adapter_sha'):
-            raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
-        if payload.expand_prompt:
-            if not app.state.llm_enabled:
-                raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
-            if not job.get('prompt_expansion'):
-                job_worker.stage='expanding_prompt'
-                expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
-                      image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
-                job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
-            prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
-            # The immutable request/fingerprint remains original; rendering uses the saved expansion.
-            payload=payload.model_copy(update={'prompt':job['prompt_expansion']['expanded_prompt']})
-            job_worker.stage='generating'
-        path,metadata=generate(payload,job)
+    if not (path.is_file() and metadata):
+        return None
+    if metadata.get('job_id')!=job['id'] or metadata.get('request_fingerprint')!=fingerprint(job['request']):
+        raise LocalFileError('Existing output does not match this queued job; refusing to overwrite it')
+    if payload.n>1 and (metadata.get('candidate_index')!=index+1 or metadata.get('candidate_count')!=payload.n or metadata.get('seed')!=(payload.seed+index)%2**32):
+        raise LocalFileError('Saved output does not match this batch option; refusing to overwrite it')
+    from PIL import Image
+    with Image.open(path) as image:
+        if image.format!='PNG' or list(image.size)!=list(map(int,metadata['size'].split('x'))):
+            raise LocalFileError('Saved output is invalid; it was left untouched')
+        image.verify()
+    if not (ROOT/'image-index'/(identifier+'.json')).is_file():
+        image_catalog.write_index(ROOT,identifier,path,metadata['tags'])
     return metadata
 
 
+def prepare_job_prompt(payload,job):
+    selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
+    if selection and selection['sha256']!=job.get('_adapter_sha'):
+        raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
+    if payload.expand_prompt:
+        if not app.state.llm_enabled:
+            raise LocalFileError('Prompt expansion is disabled; restart with make serve WITH_LLM=1')
+        if not job.get('prompt_expansion'):
+            job_worker.stage='expanding_prompt'
+            expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
+                  image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
+            job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
+        prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
+        payload=payload.model_copy(update={'prompt':job['prompt_expansion']['expanded_prompt']})
+    return payload
+
+
+def execute_job(job):
+    payload=GenerateRequest.model_validate(job['request'])
+    rendered=[]
+    prepared=None
+    for index in range(payload.n):
+        identifier=candidate_identifier(job['id'],index,payload.n)
+        metadata=committed_candidate(payload,job,identifier,index)
+        if metadata is None:
+            if prepared is None:
+                prepared=prepare_job_prompt(payload,job)  # One shared expansion for all options.
+            job_worker.stage=f'generating_option_{index+1}_of_{payload.n}' if payload.n>1 else 'generating'
+            candidate=prepared.model_copy(update={'n':1,'seed':(payload.seed+index)%2**32})
+            child={**job,'id':identifier}
+            if payload.n>1: child.update(_batch_id=job['id'],_candidate_index=index+1)
+            _,metadata=generate(candidate,child)
+        rendered.append(metadata)
+        if payload.n>1:
+            job_store.save_progress(job['id'],batch_result(rendered))
+    return rendered[0] if payload.n==1 else batch_result(rendered)
+
+
 def generation_response(path,metadata,request,response_format='url'):
-    width,height=map(int,metadata['size'].split('x'))
-    item={'tags':metadata['tags'],'seed':metadata['seed'],'file_path':str(path),'metadata_path':str(path.with_suffix('.json')),
-          'size':metadata['size'],'width':width,'height':height,'generation_size':metadata['generation_size']}
-    if metadata.get('prompt_expansion'):
-        item['prompt_expansion']=metadata['prompt_expansion']
-    if response_format=='b64_json':
-        item['b64_json']=base64.b64encode(path.read_bytes()).decode('ascii')
-    else:
-        item['url']=str(request.url_for('image',identifier=path.stem))
-    return {'created':metadata['created'],'data':[item],'generation_seconds':metadata['seconds']}
+    items=[]
+    for saved in result_images(metadata):
+        image_path=Path(saved['file_path'])
+        width,height=map(int,saved['size'].split('x'))
+        item={'tags':saved['tags'],'seed':saved['seed'],'file_path':str(image_path),'metadata_path':str(image_path.with_suffix('.json')),
+              'size':saved['size'],'width':width,'height':height,'generation_size':saved['generation_size'],
+              'candidate_index':saved.get('candidate_index',1),'candidate_count':saved.get('candidate_count',1)}
+        if saved.get('prompt_expansion'): item['prompt_expansion']=saved['prompt_expansion']
+        if response_format=='b64_json': item['b64_json']=base64.b64encode(image_path.read_bytes()).decode('ascii')
+        else: item['url']=str(request.url_for('image',identifier=image_path.stem))
+        items.append(item)
+    return {'created':metadata['created'],'data':items,'generation_seconds':metadata['seconds']}
 
 
 class JobResponse(BaseModel):
@@ -659,6 +702,9 @@ class JobResponse(BaseModel):
     error: str | None=None
     retry_of: str | None=None
     prompt_expansion: PromptExpansion | None=None
+    completed_images: int = 0
+    total_images: int = 1
+    partial_result: GenerateResponse | None = None
     result: GenerateResponse | None=None
 
 
@@ -676,7 +722,11 @@ class JobList(BaseModel):
 def job_response(job,request,*,include_result=True):
     item={**job,'model':job['request']['model']}
     metadata=job['result']
-    item['result']=generation_response(Path(metadata['file_path']),metadata,request,job['request']['response_format']) if metadata and include_result else None
+    item['total_images']=job['request'].get('n',1)
+    item['completed_images']=len(result_images(metadata))
+    response=generation_response(None,metadata,request,job['request']['response_format']) if metadata and include_result else None
+    item['result']=response if job['status']=='succeeded' else None
+    item['partial_result']=response if job['status']!='succeeded' else None
     return item
 
 
@@ -765,7 +815,7 @@ async def generations(payload:SyncGenerateRequest,request:Request,
     if record['status']!='succeeded':
         raise HTTPException(400 if record['status']=='cancelled' else (record.get('error_status') or 500),record['error'] or 'Job was cancelled')
     metadata=record['result']
-    return generation_response(Path(metadata['file_path']),metadata,request,payload.response_format)
+    return generation_response(None,metadata,request,payload.response_format)
 
 
 def catalog_roots():

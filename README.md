@@ -12,7 +12,7 @@ Inspect, pause, remove or clear waiting jobs without interrupting the active ima
 
 ![Persistent generation queue and controls](docs/screenshots/queue.png)
 
-Search saved images by prompt or tags, browse pages, and open an image to reuse its settings or edit its tags. Screenshots use demonstration data and a simulated backend; displayed timings are not performance benchmarks.
+Search saved images by prompt or tags, browse pages, and open an image to reuse its settings or edit its tags. The three previews above and below use demonstration data and a simulated backend; displayed timings are not performance benchmarks.
 
 ![Searchable tagged image gallery](docs/screenshots/gallery.png)
 
@@ -169,7 +169,7 @@ curl --fail-with-body http://127.0.0.1:5732/v1/images/generations \
   -d '{"model":"z-image-turbo","prompt":"A fox in a snowy forest, soft morning light","size":"1024x1024","seed":42,"tags":["Wildlife","Winter"],"response_format":"url"}'
 ```
 
-`model` and `steps` may be omitted to use the active model/default. Response fields include `created`, `generation_seconds`, and `data[0]` containing `seed`, `tags`, `size`, `width`, `height`, `generation_size`, **absolute `file_path` and `metadata_path`**, plus `url` or `b64_json`. These paths refer to the server's filesystem. PNG and JSON metadata are always saved, including for base64 responses. URLs remain resolvable after restarts/model switches while files and indexes remain available.
+`model` and `steps` may be omitted to use the active model/default. Response fields include `created`, `generation_seconds`, and `data[]` items containing `seed`, `tags`, `size`, `width`, `height`, `generation_size`, **absolute `file_path` and `metadata_path`**, plus `url` or `b64_json`. These paths refer to the server's filesystem. PNG and JSON metadata are always saved, including for base64 responses. URLs remain resolvable after restarts/model switches while files and indexes remain available.
 
 | Request field | Default / constraints |
 | --- | --- |
@@ -177,7 +177,7 @@ curl --fail-with-body http://127.0.0.1:5732/v1/images/generations \
 | `size` | `1024x1024`; each dimension a multiple of 64, 256–2048. Large images need more time/memory. VAE tiling is used above 1024 for Z-Image and always for Chroma. |
 | `steps` | Active model's default and range above; references require at least 2. |
 | `seed` | Omit/null for random; integer 0–4294967295. Returned and saved. |
-| `n` | Only 1. |
+| `n` | Integer 1–5, default 1. Sequential image options for the same prompt; each gets a distinct seed. |
 | `generate_immediately` | UI defaults true. true runs next, ahead of ordinary FIFO jobs; equal-priority jobs remain FIFO. Never preempts the active image. POST `/v1/jobs` defaults false; the synchronous compatibility endpoint defaults true. |
 | `response_format` | `b64_json` or `url`; default `b64_json`. |
 | `output_dir` | Default `<store>/<active-model>/images`; optional absolute folder or `~/...`. Created if writable; unique filenames never overwrite originals. |
@@ -191,11 +191,29 @@ Unknown fields and invalid combinations return 422. Invalid input/adapter select
 
 Generation metadata records requested/effective dimensions, prompt, effective trigger prompt, active model/revision/backend, sampler settings, seed, steps, timing, reference path, adapter, initial tags, and output paths. The original file and generation record remain unchanged when tags are edited later.
 
+## Generate several image options
+
+Choose **Number of images** in the webpage: 1–5, default 1. The images share the prompt, model, size, reference, adapter and other settings. They render sequentially; optional LLM expansion runs once and is shared. Each option has its own PNG, sidecar and gallery entry. Select an option's thumbnail to preview it, download it, reuse its seed or make a variation.
+
+```sh
+curl -sS http://127.0.0.1:5732/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"A watercolor fox beneath an oak tree","n":3,"seed":42,"response_format":"url"}'
+```
+
+`n` is a strict integer, 1–5, on both generation routes. `seed` sets the first option; later options use `(seed + zero_based_index) % 4294967296`, so this example uses 42, 43, 44. Omitting seed picks and persists a random first seed. The synchronous endpoint waits for the whole batch and returns all images in `data[]`; an asynchronous job returns them in `result.data[]` once succeeded. Each item includes `candidate_index` (one-based), `candidate_count`, seed, actual paths and URL/base64. `generation_seconds` is the sum of rendering times for all options, excluding the shared LLM time. More options take proportionally more rendering time without requiring concurrent model instances.
+
+One request is one durable queue job. `completed_images` and `total_images` report progress; detail responses may include `partial_result.data[]` containing only fully saved options while running or after failure. `result` is reserved for a fully successful batch. List responses omit image result blobs. A mid-batch failure preserves completed files/catalog entries; inspect the job or gallery. An explicit retry creates a new full batch with a new identity. Restart recovery of an interrupted job reuses its completed options, seeds and saved expansion and renders only missing options. IDs remain stable across recovery. A running batch finishes before the next job; priority/pause/clear never interrupt it. All options remain ordinary gallery images with searchable prompts/tags. The queue history's **View** action reopens the whole completed batch.
+
+The option picker below shows a real two-image Z-Image Turbo test at 512 × 512 with distinct seeds. Select a thumbnail to change the preview and its actions.
+
+![Two generated options with distinct seeds and selectable previews](docs/screenshots/image-options.png)
+
 ## Persistent generation queue
 
 Each startup model has its own SQLite database at **`<project>/state/queues/<model-id>/jobs.sqlite3`**. On the original Mac, Z-Image uses `~/Documents/models/ImageGen-Service/state/queues/z-image-turbo/jobs.sqlite3`. SQLite databases, journals, backups and worker leases stay in the serving project, even when model weights and media use an external SSD. `DATA_DIR` does not relocate SQLite. The same queue is read automatically whenever that model starts. Changing the startup model leaves the other model's waiting jobs persisted until it is served again; models are not hot-swapped per job.
 
-The worker executes one image at a time. Ordinary jobs are FIFO. **`generate_immediately:true` means the next free slot ahead of ordinary jobs**, with FIFO order among immediate jobs. It never interrupts the current image. The webpage checks “Generate immediately” by default; uncheck it to add ordinary FIFO work. You can keep submitting while an image runs. The queue panel lists jobs, removes waiting entries, clears waiting work, retries failed/cancelled jobs, and provides pagination and a persistent pause toggle. Pause stops ordinary jobs only; the active image finishes and explicitly immediate jobs may still run.
+The worker executes one image at a time. Ordinary jobs are FIFO. **`generate_immediately:true` means the next free slot ahead of ordinary jobs**, with FIFO order among immediate jobs. It never interrupts the active image/batch. The webpage checks “Generate immediately” by default; uncheck it to add ordinary FIFO work. You can keep submitting while an image runs. The queue panel lists jobs, removes waiting entries, clears waiting work, retries failed/cancelled jobs, and provides pagination and a persistent pause toggle. Pause stops ordinary jobs only; the active batch finishes and explicitly immediate jobs may still run.
 
 ```sh
 # Persist an ordinary FIFO job and promptly receive its ID (HTTP 202).
@@ -229,7 +247,7 @@ The queue APIs operate on the startup-selected model only:
 | POST `/v1/jobs/{id}/retry` | New ordinary FIFO job for a failed/cancelled entry |
 | PATCH `/v1/queue` | Persist `{"paused":true}` or `{"paused":false}` for ordinary FIFO work |
 
-A job response includes `id`, `model`, `status`, normalized `request`, `generate_immediately`, timestamps, `attempts`, optional `error`, and `result` when complete. Statuses are `queued`, `running`, `succeeded`, `failed`, `cancelled`. A 202 acknowledges the database commit, not image completion. Poll GET `/v1/jobs/{id}`; a successful `result` has the usual generation response with actual image/metadata paths and URL/base64 according to `response_format`. List responses omit result blobs and include `data`, `total`, `limit`, `offset`, `has_more` and `has_previous`. `next_offset` / `previous_offset` are present only when that direction exists; optional null fields are omitted. `status=pending` selects waiting/running jobs; other statuses select that exact state. Omit status for history. Limit is 1–100 (default24); offset is nonnegative. Running comes first, waiting work follows execution order, then finished history newest first. An initial 202 or a queued/running status does **not** contain finished image paths. Once `status` is `succeeded`, read **`result.data[0].file_path`**, `result.data[0].metadata_path`, and `result.data[0].url` for `response_format:"url"`. Prefer URL responses for polling; base64 detail responses reread/embed the PNG and can be large. An accepted job may still fail during inference or output writing; inspect its terminal status/error.
+A job response includes `id`, `model`, `status`, normalized `request`, `generate_immediately`, timestamps, `attempts`, optional `error`, and `result` when complete. Statuses are `queued`, `running`, `succeeded`, `failed`, `cancelled`. A 202 acknowledges the database commit, not image completion. Poll GET `/v1/jobs/{id}`; a successful `result` has the usual generation response with actual image/metadata paths and URL/base64 according to `response_format`. List responses omit result blobs and include `data`, `total`, `limit`, `offset`, `has_more` and `has_previous`. `next_offset` / `previous_offset` are present only when that direction exists; optional null fields are omitted. `status=pending` selects waiting/running jobs; other statuses select that exact state. Omit status for history. Limit is 1–100 (default24); offset is nonnegative. Running comes first, waiting work follows execution order, then finished history newest first. An initial 202 or a queued/running status does **not** contain finished image paths. Once `status` is `succeeded`, iterate **`result.data[]`** for each `file_path`, `metadata_path`, and `url` for `response_format:"url"`. Prefer URL responses for polling; base64 detail responses reread/embed the PNG and can be large. An accepted job may still fail during inference or output writing; inspect its terminal status/error.
 
 DELETE of one entry cancels **waiting work only**; deleting a running/finished job returns409. Clearing returns `{"cancelled": count}`, cancels all waiting work for the active model and preserves the running image, completed files and job history. This removes entries from the active queue, not from the audit history. Failed/cancelled jobs can be explicitly retried as new ordinary FIFO jobs with the saved seed/settings and a new ID; restore missing references/adapters first. Failed jobs do not block later jobs or retry forever. A base-only server preserves a queued adapter job at the head until adapters are enabled or that waiting entry is removed.
 
@@ -293,6 +311,6 @@ If a download is interrupted, rerun `make setup MODEL=<id>` or `make download MO
 
 For another AI tool:
 
-> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. SQLite queues stay in project-local state/queues/<model-id>/jobs.sqlite3 independently of DATA_DIR. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report http://127.0.0.1:5732/ (or the explicit PORT override). Prefer POST /v1/jobs, reuse Idempotency-Key plus the same request after an uncertain submission, poll GET /v1/jobs/{id}, and read result.data[0] only after succeeded. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings, SQLite state and storage symlinks outside Git.
+> Read README.md and skill/image-model-server/SKILL.md in this checkout. Run make setup for the desired model (default Z-Image Turbo), choosing the requested model store or Enter for local storage. Run make test. SQLite queues stay in project-local state/queues/<model-id>/jobs.sqlite3 independently of DATA_DIR. Start make serve MODEL=<id> in a retained session, wait for /health ready and verify the active model and serving mode. Report http://127.0.0.1:5732/ (or the explicit PORT override). Prefer POST /v1/jobs, reuse Idempotency-Key plus the same request after an uncertain submission, poll GET /v1/jobs/{id}, and iterate result.data[] only after succeeded. Preserve existing jobs and data; keep all model weights, media, tags, personal adapters, settings, SQLite state and storage symlinks outside Git.
 
-No Codex plugin, original paths, shell aliases, or chat history is required. The service accepts local file paths and is intended for trusted local clients; it binds to `127.0.0.1` with host checks and no permissive CORS. Do not expose it to a network without an access-control design. The source-only repository ignores model folders, environments, runtime binaries, output/reference images, indexes, logs, credentials and local settings. The only tracked image files are the three approved README screenshots under docs/screenshots/. Cleanup should preserve actual data unless explicitly requested.
+No Codex plugin, original paths, shell aliases, or chat history is required. The service accepts local file paths and is intended for trusted local clients; it binds to `127.0.0.1` with host checks and no permissive CORS. Do not expose it to a network without an access-control design. The source-only repository ignores model folders, environments, runtime binaries, output/reference images, indexes, logs, credentials and local settings. The only tracked image files are the four approved README screenshots under docs/screenshots/. Cleanup should preserve actual data unless explicitly requested.

@@ -108,3 +108,4 @@ storage.json
 
 # Shared local prompt-expansion LLM (directory or external symlink)
 /prompt-enhancer
+!/docs/screenshots/image-options.png
