@@ -13,12 +13,14 @@ import queue_launch
 import launch
 import server
 from tests import test_api
+from tests.model_fixtures import setup_model
 
 
 class QueueServiceTest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.root=Path(self.temp.name).resolve()
+        for identifier in ('z-image-turbo','chroma1-flash'):setup_model(self.root,identifier)
         self.app=queue_api.create_app(self.root)
         self.client=TestClient(self.app)
 
@@ -36,13 +38,13 @@ class QueueServiceTest(unittest.TestCase):
         for model,expected in [('z-image-turbo',z['id']),('chroma1-flash',flash['id'])]:
             page=self.client.get('/v1/jobs',params={'model':model,'limit':1}).json()
             self.assertEqual(page['total'],1);self.assertEqual(page['data'][0]['id'],expected)
-            self.assertTrue((self.root/'state'/'queues'/model/'jobs.sqlite3').is_file())
+            self.assertTrue((self.root/'state'/'queue'/'jobs.sqlite3').is_file())
         detail=f"/v1/jobs/{z['id']}?model=z-image-turbo"
         updated=self.client.patch(detail,json={'request':{'prompt':'A forest','generate_immediately':True}})
         self.assertEqual(updated.status_code,200,updated.text)
         self.assertTrue(updated.json()['generate_immediately'])
         self.assertEqual(updated.json()['request']['model'],'z-image-turbo')
-        self.assertEqual(self.client.get(f"/v1/jobs/{z['id']}?model=chroma1-flash").status_code,404)
+        self.assertEqual(self.client.get(f"/v1/jobs/{z['id']}").json()['model'],'z-image-turbo')
         self.assertEqual(self.client.delete(detail).json()['status'],'cancelled')
         retried=self.client.post(f"/v1/jobs/{z['id']}/retry?model=z-image-turbo").json()
         self.assertNotEqual(retried['id'],z['id']);self.assertEqual(retried['retry_of'],z['id'])
@@ -69,7 +71,7 @@ class QueueServiceTest(unittest.TestCase):
         self.assertEqual(self.client.post('/v1/jobs',json=body,headers=headers).status_code,409)
         body['request']['prompt']='Owl'
         self.assertEqual(self.client.post('/v1/jobs',json=body,headers=headers).json()['id'],first['id'])
-        store=self.app.state.store('z-image-turbo');store.claim()
+        store=self.app.state.store();store.claim()
         self.assertEqual(self.client.patch(path,json={'request':{'prompt':'Other'}}).status_code,409)
         self.assertEqual(self.client.delete(path).status_code,409)
         self.add()
@@ -155,7 +157,7 @@ class DeferredGeneratorTest(unittest.TestCase):
 
 class QueueStartupTest(unittest.TestCase):
     def test_existing_correct_queue_is_reused_and_unrelated_listener_is_preserved(self):
-        with patch.object(queue_launch,'start_lock',return_value=contextlib.nullcontext(Path('/tmp'))),patch.object(queue_launch,'state',return_value={'status':'ready'}),patch.object(queue_launch.subprocess,'Popen') as start:
+        with patch.object(queue_launch,'start_lock',return_value=contextlib.nullcontext(Path('/tmp'))),patch.object(queue_launch,'state',return_value={'status':'ready','version':'4.0.0','queue_scope':'shared'}),patch.object(queue_launch.subprocess,'Popen') as start:
             queue_launch.ensure_queue();start.assert_not_called()
         with patch.object(queue_launch,'start_lock',return_value=contextlib.nullcontext(Path('/tmp'))),patch.object(queue_launch,'state',return_value=None),patch.object(queue_launch,'port_free',return_value=False),patch.object(queue_launch.subprocess,'Popen') as start:
             with self.assertRaisesRegex(SystemExit,'another service'):queue_launch.ensure_queue()

@@ -19,7 +19,7 @@ class ServingModeTest(unittest.TestCase):
     def test_base_only_generation_and_hidden_catalog(self):
         with patch.object(server.app.state, 'loras_enabled', False), patch.object(server, 'list_loras', side_effect=AssertionError('Catalog must not be read')):
             self.assertFalse(self.client.get('/health').json()['loras_enabled'])
-            self.assertEqual(self.client.get('/v1/loras').json(), {'object':'list','enabled':False,'data':[]})
+            self.assertEqual(self.client.get('/v1/loras').json(), {'object':'list','model':server.API_MODEL,'enabled':False,'data':[]})
             response=self.post()
             self.assertEqual(response.status_code, 200, response.text)
             self.assertIsNone(self.fake.calls[-1]['lora'])
@@ -47,6 +47,9 @@ class LauncherModeTest(unittest.TestCase):
     def run_launcher(self, args, state=None, *, stub_enhancer=True):
         patches=[patch.object(sys,'argv',['launch.py',*args]), patch.object(launch.os,'chdir'),
                  patch.object(launch.os,'execv'),patch.object(launch.os,'kill'),patch.object(launch,'check_assets'),patch.object(launch,'ensure_queue')]
+        if state is not None:
+            state={'service':'imagegen-generator','runtime_model_switching':True,'project_dir':str(launch.ROOT),**state}
+            patches.append(patch.object(launch,'initialize_shared_queue'))
         if state is None:
             patches.append(patch.object(launch,'port_free',return_value=True))
         else:
@@ -85,7 +88,7 @@ class LauncherModeTest(unittest.TestCase):
             self.assertIn('/tmp/custom-checkout-name/server.py',execute.call_args.args[1])
 
     def test_busy_mode_switch_is_refused_and_same_mode_reused(self):
-        with self.assertRaisesRegex(SystemExit,'generating'):
+        with self.assertRaisesRegex(SystemExit,'processing'):
             self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':True,'loras_enabled':True})
         execute,kill=self.run_launcher(['--no-loras'], {'model':launch.API_MODEL,'busy':True,'loras_enabled':False,'prompt_expansion':{'enabled':True}})
         execute.assert_not_called()

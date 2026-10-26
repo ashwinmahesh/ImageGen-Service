@@ -30,7 +30,7 @@ help:
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
 	@echo 'make queue     Start/reuse the lightweight queue API on localhost:55302 (no model/GPU)'
 	@echo 'make stop-queue  Stop only the queue API; retain all persisted jobs'
-	@echo 'make serve     Start the generator/UI on localhost:5732; starts queue API if needed'
+	@echo 'make serve     Start one generator/UI for all setup models on localhost:5732; ensure the shared queue API'
 	@echo 'Observability: http://localhost:5732/observability (resource graphs and job timelines)'
 	@echo 'Ctrl-C stops the generator after active work finishes; queue API stays running'
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
@@ -42,7 +42,7 @@ help:
 	@echo 'make setup     Choose a model, install dependencies and download image + prompt models (safe to rerun)'
 	@echo 'Setup: q cancels at the model menu; Ctrl-C cancels at any time and keeps existing downloads'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
-	@echo 'Choose explicitly: make serve MODEL=chroma1-flash PORT=5733'
+	@echo 'Choose a default: make serve MODEL=chroma1-flash (all setup models remain available)'
 	@echo 'Photo editing models: flux2-klein-4b, flux2-klein-9b, qwen-image-2.1-turbo'
 
 download-realism:

@@ -117,7 +117,7 @@ class ExpansionLauncher(unittest.TestCase):
             state={'model':launch.API_MODEL,'busy':True,'loras_enabled':True,'prompt_expansion':{'enabled':True}}
             execute,kill=self.run_launcher([],state,stub_enhancer=False)
             execute.assert_not_called();kill.assert_not_called()
-            with self.assertRaisesRegex(SystemExit,'generating'):
+            with self.assertRaisesRegex(SystemExit,'processing'):
                 self.run_launcher(['--no-llm'],state,stub_enhancer=False)
         with patch.object(launch,'check_enhancer_assets',side_effect=RuntimeError('make download-llm')):
             with self.assertRaisesRegex(SystemExit,'make download-llm'):

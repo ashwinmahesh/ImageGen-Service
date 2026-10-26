@@ -126,8 +126,10 @@ class QueueOrderTest(unittest.TestCase):
 
 
 class QueueSchedulingAPITest(unittest.TestCase):
-    def test_model_scoped_queue_api_scheduling_and_validation(self):
+    def test_shared_queue_api_scheduling_and_validation(self):
         with tempfile.TemporaryDirectory() as folder:
+            from tests.model_fixtures import setup_model
+            for identifier in ('z-image-turbo','chroma1-flash'):setup_model(Path(folder),identifier)
             app=queue_api.create_app(folder)
             with TestClient(app) as client:
                 def add(model='z-image-turbo'):
@@ -139,12 +141,12 @@ class QueueSchedulingAPITest(unittest.TestCase):
                 for body in [{'position':0},{'position':True},{'position':'1'},{'position':1,'unexpected':1},{}]:
                     self.assertEqual(client.post(path+'/move',json=body).status_code,422)
                 self.assertEqual(client.post(path+'/move',json={'position':9}).status_code,409)
-                self.assertEqual(client.post(path+'/run-now?model=chroma1-flash').status_code,404)
-                app.state.store('z-image-turbo').pause(True)
+                self.assertEqual(client.post(path+'/run-now').status_code,200)
+                app.state.store().pause(True)
                 run=client.post(f"/v1/jobs/{first['id']}/run-now")
                 self.assertEqual(run.status_code,200,run.text); self.assertTrue(run.json()['generate_immediately'])
                 self.assertEqual(run.json()['request'],first['request'])
-                app.state.store('z-image-turbo').claim()
+                app.state.store().claim()
                 self.assertEqual(client.post(f"/v1/jobs/{first['id']}/run-now").status_code,409)
                 self.assertEqual(client.post(f"/v1/jobs/{first['id']}/move",json={'position':1}).status_code,409)
                 self.assertEqual(client.get('/v1/jobs?model=chroma1-flash').json()['data'][0]['id'],flash['id'])

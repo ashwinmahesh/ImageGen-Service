@@ -34,7 +34,7 @@ def available_models(project):
     for identifier in PROFILES:
         try:
             check_model_assets(project,identifier)
-        except SystemExit:
+        except (SystemExit,RuntimeError,OSError,ValueError):
             continue
         ready.append(identifier)
     return ready

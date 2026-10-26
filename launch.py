@@ -1,4 +1,4 @@
-"""Switch between the managed localhost image services, only while idle."""
+"""Start one cross-model generator; choose its default from setup models."""
 import argparse
 import json
 import os
@@ -13,6 +13,8 @@ from model_profiles import PROFILES, DEFAULT_MODEL, select_model
 from queue_launch import ensure_queue, DEFAULT_QUEUE_PORT
 from enhancer_profile import check_assets as check_enhancer_assets
 from model_assets import check_model_assets
+from model_catalog import default_model
+from queue_storage import initialize_shared_queue
 ROOT=Path(__file__).resolve().parent
 API_MODEL=DEFAULT_MODEL
 
@@ -66,11 +68,12 @@ def main():
     parser.add_argument('--queue-port',type=int,default=DEFAULT_QUEUE_PORT)
     parser.add_argument('--no-loras',action='store_true',help='Disable LoRAs for this server')
     parser.add_argument('--no-llm',action='store_true',help='Disable local prompt expansion (default on)')
-    parser.add_argument('--model', choices=PROFILES, help='Choose a set up backend; omitted in a terminal lists locally set up models')
+    parser.add_argument('--model', choices=PROFILES, help='Choose the default model; the generator processes jobs for all setup models')
     args=parser.parse_args()
     try:
         explicit=args.model or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
-        selected=select_model(explicit,choices=None if explicit else available_models())
+        ready=None if explicit else available_models()
+        selected=select_model(explicit,choices=ready,preferred=default_model(ROOT,ready) if ready is not None else None)
     except (ValueError,RuntimeError) as error:
         parser.error(str(error))
     check_assets(selected)
@@ -90,8 +93,7 @@ def main():
                 state=json.load(response)
         except Exception:
             raise SystemExit(f'Port {args.port} is in use by another service. Choose PORT=5733 or stop it first.')
-        allowed=set(PROFILES)
-        if state.get('model') not in allowed:
+        if state.get('service')!='imagegen-generator' or state.get('runtime_model_switching') is not True or state.get('project_dir')!=str(ROOT):
             raise SystemExit(f'Port {args.port} belongs to another service; leaving it running.')
         found=subprocess.check_output(['/usr/sbin/lsof','-nP','-t',f'-iTCP:{args.port}','-sTCP:LISTEN'],text=True).split()
         if len(found) != 1:
@@ -105,13 +107,14 @@ def main():
         command_line=subprocess.check_output(['/bin/ps','-p',str(pid),'-o','command='],text=True)
         if 'server.py' not in command_line or 'python' not in command_line.lower():
             raise SystemExit('The existing listener is not a managed Python image server; leaving it running.')
-        if directories == {str(ROOT)} and state.get('model') == selected and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == llm_enabled and state.get('capabilities',{}).get('queue_api_url',f'http://127.0.0.1:{DEFAULT_QUEUE_PORT}') == f'http://127.0.0.1:{args.queue_port}':
-            print(f'{selected} is already serving at http://127.0.0.1:{args.port}/')
+        if directories == {str(ROOT)} and state.get('loras_enabled',True) == (not args.no_loras) and state.get('prompt_expansion',{}).get('enabled',False) == llm_enabled and state.get('capabilities',{}).get('queue_api_url',f'http://127.0.0.1:{DEFAULT_QUEUE_PORT}') == f'http://127.0.0.1:{args.queue_port}':
+            initialize_shared_queue(ROOT).set_setting('default_model',selected)
+            print(f'All setup models are already serving at http://127.0.0.1:{args.port}/; default {selected}')
             return
         if state.get('busy'):
-            raise SystemExit(f"{state['model']} is generating. Wait for it to finish, then run this command again.")
+            raise SystemExit(f"The generator is processing a batch. Wait for it to finish, then run this command again.")
         mode = "base model only" if args.no_loras else "LoRAs enabled"
-        print(f"Switching idle service from {state['model']} to {selected} ({mode})...",flush=True)
+        print(f"Restarting idle generator with default {selected} ({mode})...",flush=True)
         os.kill(pid,signal.SIGTERM)
         for _ in range(150):
             if port_free(args.port):
@@ -119,6 +122,7 @@ def main():
             time.sleep(0.2)
         else:
             raise SystemExit('The previous server has not stopped yet. Try again shortly.')
+    print(f'All setup models are eligible; default model: {PROFILES[selected]["name"]}. Models load on demand.',flush=True)
     os.chdir(ROOT)
     command=[sys.executable,str(ROOT/'server.py'),'--model',selected,'--port',str(args.port)]
     if args.no_loras:

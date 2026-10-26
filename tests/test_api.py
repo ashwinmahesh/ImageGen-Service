@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import base64
 import json
+import os
 import io
 from pathlib import Path
 import sys
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 import server
 import queue_api
 from queue_client import QueueClient
+from tests.model_fixtures import setup_model
 
 
 class FakeModel:
@@ -43,8 +45,11 @@ class APITest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
+        self.storage_patch=patch.dict(os.environ,{'DATA_DIR':str(self.root)});self.storage_patch.start()
+        setup_model(self.root,server.API_MODEL)
         self.fake = FakeModel()
         self.patches = [
+            patch.object(server, 'PROJECT_ROOT', self.root),
             patch.object(server, 'ROOT', self.root),
             patch.object(server, 'IMAGE_DIR', self.root / 'images'),
             patch.object(server, 'model', self.fake),
@@ -62,7 +67,7 @@ class APITest(unittest.TestCase):
         queue_app=queue_api.create_app(self.root)
         self.queue_http=TestClient(queue_app)
         # Routes call their cached store closure, so point it at the fixture's database.
-        patcher=patch.object(queue_api,'queue_database',return_value=self.store.path)
+        patcher=patch.object(queue_api,'initialize_shared_queue',return_value=self.store)
         patcher.start(); self.patches.append(patcher)
         patcher=patch.object(server,'queue_client',QueueClient(transport=self.queue_http))
         patcher.start(); self.patches.append(patcher)
@@ -78,6 +83,7 @@ class APITest(unittest.TestCase):
         self.worker.stop(); self.job_executor.shutdown(wait=True)
         for p in reversed(self.patches):
             p.stop()
+        self.storage_patch.stop()
         self.temp.cleanup()
 
     def post(self, **changes):

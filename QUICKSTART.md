@@ -54,7 +54,7 @@ From the project folder, run:
 make serve
 ```
 
-1. Select an installed model. Klein names show `(edits enabled)`; Qwen shows `(edit selected area enabled)`. Enter prefers Z-Image Turbo when it is ready; models you haven't set up appear separately with installation commands.
+1. Choose a **default model** from the installed models. The generator can process requests for every setup model; the default applies when a request omits its model. Klein names show `(edits enabled)`; Qwen shows `(edit selected area enabled)`. Enter reuses a ready saved default, then prefers Z-Image Turbo or the first ready model; models you haven't set up appear separately with installation commands.
 2. At **Enable local LLM prompt expansion? [Y/n]**, press Enter to keep expansion available. A small AI text model on your Mac can add visual detail to your image descriptions before generation; you can turn this off for each image.
 3. Wait for startup to finish. Keep this terminal open while using the generator.
 
@@ -62,10 +62,10 @@ You now have two local services:
 
 | Address | Purpose |
 | --- | --- |
-| [localhost:5732](http://localhost:5732/) | Generator, webpage, gallery and image API. Uses the selected model. |
+| [localhost:5732](http://localhost:5732/) | Generator, webpage, gallery and image API. Processes all setup models, one at a time. |
 | [localhost:55302/docs](http://localhost:55302/docs) | Lightweight queue API. Keeps accepting jobs when the generator is off. |
 
-`make serve` starts the queue service automatically if needed. To check generator readiness from another terminal in the project folder, run `make health`; look for `"status":"ready"`. The browser/API may be unreachable while the model is initially loading.
+`make serve` starts the queue service automatically if needed. To check generator readiness from another terminal in the project folder, run `make health`; look for `"status":"ready"`. Model loading happens when a job starts; the browser/API stays available during loading and switching.
 
 ### Startup choices
 
@@ -73,7 +73,7 @@ These settings are chosen before the generator starts:
 
 | Choice | Example | What it does |
 | --- | --- | --- |
-| Model | `make serve MODEL=z-image-turbo` | Skips the model menu. Other IDs: `chroma1-hd`, `chroma1-flash`, `flux2-klein-4b`, `flux2-klein-9b`, `qwen-image-2.1-turbo`. |
+| Model | `make serve MODEL=z-image-turbo` | Sets the saved default and skips the model menu. Other IDs: `chroma1-hd`, `chroma1-flash`, `flux2-klein-4b`, `flux2-klein-9b`, `qwen-image-2.1-turbo`. |
 | Prompt expansion | `make serve NO_LLM=1` | Disables the text LLM for this run. Otherwise it defaults on. |
 | LoRAs | `make serve NO_LORAS=1` | Disables optional style adapters and their UI selector. |
 | Generator port | `make serve PORT=5733` | Changes the webpage/API address to `localhost:5733`. |
@@ -81,7 +81,7 @@ These settings are chosen before the generator starts:
 
 Options can be combined, for example `make serve MODEL=z-image-turbo NO_LLM=1 NO_LORAS=1`. The examples below use the default ports.
 
-To add an editing model later, run one of these setup commands, then select it at startup:
+To add an editing model later, run one of these setup commands, then select it in the webpage or request:
 
 ```sh
 make setup MODEL=flux2-klein-4b
@@ -90,7 +90,7 @@ make setup MODEL=qwen-image-2.1-turbo
 make serve MODEL=flux2-klein-9b
 ```
 
-Each setup downloads only its selected pre-quantized checkpoint and the shared prompt LLM. All three support text-only generation and single-photo instruction editing. Klein defaults to 4 steps; Qwen Turbo to 8. Each model keeps its own waiting jobs; one model runs at a time. Commercial model use of Klein 9B and Qwen Turbo requires a separate license; see the [model notes](docs/setup.md#models-and-effective-settings).
+Each setup downloads only its selected pre-quantized checkpoint and the shared prompt LLM. All three support text-only generation and single-photo instruction editing. Klein defaults to 4 steps; Qwen Turbo to 8. All models share one waiting queue; one model runs at a time. Commercial model use of Klein 9B and Qwen Turbo requires a separate license; see the [model notes](docs/setup.md#models-and-effective-settings).
 
 ## 4. Generate from the webpage
 
@@ -130,8 +130,8 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 
 ### Edit an existing photo
 
-1. Start an editing model, for example `make serve MODEL=qwen-image-2.1-turbo`.
-2. Choose an editing-capable model, then select **Edit photo**. The button is disabled for unsupported models; hovering or focusing it explains how to unlock editing and lists the models that support it, including those that still need setup. The edit model selector offers FLUX.2 Klein 4B/9B and Qwen Turbo. Inactive models show their setup/start commands; the server still runs one model at startup.
+1. Set up an editing model, for example `make setup MODEL=qwen-image-2.1-turbo`, then run `make serve`.
+2. Select **Edit photo**, then choose an editing model. The tab is available whenever at least one setup model supports editing, even if the Generate tab currently uses Z-Image or Chroma. It opens with an empty model selector; choose a setup Klein or Qwen model before submitting. If none are setup, the tab stays disabled and its hover/focus tooltip names suitable models to set up.
 3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
 4. For Qwen, choose **Selected area**, then drag a rectangle over the source preview. **Whole photo** remains available; Klein supports whole-photo editing only.
 5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
@@ -176,7 +176,7 @@ curl --fail-with-body http://localhost:5732/v1/jobs \
   }'
 ```
 
-The response returns a job `id` with status `queued` or `running`. **HTTP 202 means saved, not finished.** Leaving out `model` uses the generator's startup-selected model; specifying a different model is rejected. If you started with `NO_LLM=1`, set `expand_prompt` to false.
+The response returns a job `id` with status `queued` or `running`. **HTTP 202 means saved, not finished.** Leaving out `model` uses the shared saved default; specifying another setup model loads it automatically when scheduled. If you started with `NO_LLM=1`, set `expand_prompt` to false.
 
 The idempotency key prevents duplicate work if you retry this same request after losing its response. Use a **new key for each intentional new request**; reusing a key with different settings returns 409.
 
@@ -201,7 +201,7 @@ curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JO
 curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
 ```
 
-Run Now marks that same job immediate and moves it first; it doesn't interrupt active work. These controls also exist on port 55302 with optional `?model=<id>`, even when the generator is off. Running/finished jobs return 409. If another client changes the queue, refresh positions before trying again.
+Run Now marks that same job immediate and moves it first; it doesn't interrupt active work. These controls also exist on port 55302, using the job ID without a model query, even when the generator is off. Running/finished jobs return 409. If another client changes the queue, refresh positions before trying again.
 
 ### Discover models, adapters and saved images
 
@@ -246,7 +246,7 @@ List or inspect queued work with:
 ```sh
 curl --fail-with-body 'http://localhost:55302/v1/jobs?model=z-image-turbo&status=pending&limit=24&offset=0'
 IMAGEGEN_JOB_ID="paste-the-queue-job-id-here"
-curl --fail-with-body "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID?model=z-image-turbo"
+curl --fail-with-body "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID"
 ```
 
 When you're ready to generate, run `make serve MODEL=z-image-turbo`. It picks up that model's saved jobs. The queue API returns raw saved metadata and local paths, with batch files under `result.images[]`; it doesn't serve image download URLs. Use the generator's job endpoint for `result.data[]` with URLs, or browse the gallery.

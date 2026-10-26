@@ -1,5 +1,6 @@
 """Discover per-model adapters with no generator, weights load or SQLite work."""
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -7,16 +8,19 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 import adapter_catalog
 import queue_api
+from tests.model_fixtures import setup_model
 
 
 class LoRADiscoveryTest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.project=Path(self.temp.name).resolve()
+        self.environment=patch.dict(os.environ,{'DATA_DIR':str(self.project)});self.environment.start()
+        for identifier in ('z-image-turbo','chroma1-flash','chroma1-hd'):setup_model(self.project,identifier)
         self.client=TestClient(queue_api.create_app(self.project))
 
     def tearDown(self):
-        self.client.close();self.temp.cleanup()
+        self.client.close();self.environment.stop();self.temp.cleanup()
 
     def entry(self,identifier,models,**settings):
         return {'id':identifier,'name':identifier.title(),'filename':identifier+'.safetensors',
@@ -54,6 +58,10 @@ class LoRADiscoveryTest(unittest.TestCase):
     def test_chroma_uses_shared_directory_filters_each_model_and_reuses_external_store(self):
         with tempfile.TemporaryDirectory() as external:
             store=Path(external).resolve()
+            self.environment.stop()
+            for identifier in ('chroma1-hd','chroma1-flash'):setup_model(store,identifier)
+            (self.project/'runtime').mkdir(exist_ok=True)
+            for name in ('sd-cli','libstable-diffusion.dylib'):(self.project/'runtime'/name).write_bytes(b'fixture')
             (self.project/'storage.json').write_text(json.dumps({'data_dir':str(store)}))
             folder=store/'chroma1-hd'/'loras'
             self.catalog(folder,[self.entry('flash',['chroma1-flash']),self.entry('hd',['chroma1-hd']),
@@ -76,7 +84,7 @@ class LoRADiscoveryTest(unittest.TestCase):
         self.assertEqual(self.client.get('/v1/loras').json()['data'][0]['id'],'local')
         schema=self.client.get('/openapi.json').json()
         model=next(item for item in schema['paths']['/v1/loras']['get']['parameters'] if item['name']=='model')
-        self.assertEqual(model['schema']['default'],'z-image-turbo')
+        self.assertNotIn('default',model['schema'])
 
     def test_missing_volume_corrupt_catalog_and_escape_are_clear_errors(self):
         folder=self.project/'z-image-turbo'/'loras'

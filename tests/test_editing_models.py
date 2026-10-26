@@ -138,6 +138,8 @@ class EditingAdapterTest(unittest.TestCase):
 class EditingContractTest(unittest.TestCase):
     def test_offline_queue_discovers_and_routes_all_editing_models(self):
         with tempfile.TemporaryDirectory() as temporary,TestClient(queue_api.create_app(Path(temporary))) as client:
+            from tests.model_fixtures import setup_model
+            for identifier in EDITORS:setup_model(Path(temporary),identifier)
             discovered={item['id']:item for item in client.get('/v1/models').json()['data']}
             for identifier in EDITORS:
                 self.assertEqual(discovered[identifier]['reference_mode'],'edit')

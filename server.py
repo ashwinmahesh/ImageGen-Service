@@ -1,4 +1,4 @@
-"""Single-model, single-worker localhost image API for Apple Silicon."""
+"""One cross-model durable queue, one managed runtime, and a responsive local UI."""
 import argparse
 import asyncio
 import base64
@@ -37,7 +37,11 @@ from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
 from generation_worker import QueueWorker
 from observability import ResourceMonitor
 from observability_api import create_router as observability_router
-from queue_storage import initialize_queue
+from queue_storage import initialize_shared_queue,queue_key
+from model_assets import available_models,check_model_assets
+from model_catalog import default_model,require_ready,configure_schema
+from model_process import ModelProcess
+from adapter_catalog import model_loras
 from queue_client import QueueClient
 from queue_api import DEFAULT_QUEUE_PORT, MoveJob
 import prompt_expander
@@ -90,31 +94,50 @@ def load_model():
     log.info("Model ready")
 
 
+def ready_models():
+    return available_models(PROJECT_ROOT)
+
+
+def model_root(identifier):
+    return ROOT if identifier==API_MODEL else MODEL_ROOTS[identifier]
+
+
+def selected_default():
+    return default_model(PROJECT_ROOT) or API_MODEL
+
+
+def ready_or_error(identifier):
+    try:require_ready(PROJECT_ROOT,identifier)
+    except ValueError as error:raise HTTPException(422,str(error)) from None
+
+
+def resolve_for_model(payload):
+    return resolve_lora(payload.lora,payload.lora_strength,**({'model':payload.model} if payload.model!=API_MODEL else {}))
+
+
 def initialize_service():
-    global job_store,job_worker
-    if app.state.llm_enabled:
-        check_enhancer_assets(PROJECT_ROOT)
+    global job_store,job_worker,model
+    if app.state.llm_enabled:check_enhancer_assets(PROJECT_ROOT)
+    check_model_assets(PROJECT_ROOT,API_MODEL)
     job_store=JobStore(QUEUE_DATABASE)
-    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor)
-    job_worker.acquire(prepare=lambda:initialize_queue(job_store,ROOT/'queue'/'jobs.sqlite3'))
+    model=ModelProcess(PROJECT_ROOT,loras_enabled=app.state.loras_enabled,llm_enabled=app.state.llm_enabled,
+                       stage=lambda value:setattr(job_worker,'stage',value))
+    job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,
+        busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor,eligible_models=ready_models)
+    job_worker.acquire(prepare=lambda:initialize_shared_queue(PROJECT_ROOT))
+    job_store.set_setting('default_model',API_MODEL)
     if observability_monitor:observability_monitor.recover_jobs()
-    try:
-        # Model loading and inference cooperate with the same cross-service GPU lock.
-        gpu=job_worker.acquire_accelerator()
-        try:
-            load_model()
-        finally:
-            if gpu: gpu.close()
-    except BaseException:
-        job_worker.release()
-        raise
+    for identifier in ready_models():
+        license=PROFILES[identifier].get('license',{})
+        if license.get('notice'):log.warning('%s: %s %s',PROFILES[identifier]['name'],license['notice'],license['url'])
+    log.info('Generator ready for all setup models; default %s. Models load on demand.',API_MODEL)
 
 
 @asynccontextmanager
 async def lifespan(app):
     global observability_monitor,observability_error
     try:
-        observability_monitor=ResourceMonitor(PROJECT_ROOT,API_MODEL,stage=lambda:job_worker.stage if model is not None and job_worker else 'loading_model')
+        observability_monitor=ResourceMonitor(PROJECT_ROOT,API_MODEL,stage=lambda:job_worker.stage if job_worker else 'starting')
         observability_monitor.start()
         observability_error=None
     except Exception:
@@ -127,14 +150,14 @@ async def lifespan(app):
         yield
     finally:
         try:
-            if job_worker and job_worker.future:await asyncio.to_thread(job_worker.stop)
+            if job_worker:await asyncio.to_thread(job_worker.stop)
             executor.shutdown(wait=True)
         finally:
             if observability_monitor:await asyncio.to_thread(observability_monitor.stop)
 
 
 app = FastAPI(
-    title=f"Image Model Server — {PROFILE['name']}", version="3.0.0", lifespan=lifespan,
+    title=f"Image Model Server — {PROFILE['name']}", version="4.0.0", lifespan=lifespan,
     description=(
         "Local image generation on Apple Silicon. Images and JSON metadata are saved to "
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
@@ -145,7 +168,7 @@ app = FastAPI(
         "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`. "
         "The generator API reads/writes project-local SQLite directly. "
         f"The independent queue API at `{queue_client.url}` accepts agent requests while the generator is stopped. "
-        "This generator serves only its startup model."
+        "This generator processes one shared queue across setup models, switching runtimes between batches."
     ),
 )
 app.state.loras_enabled = True
@@ -167,15 +190,18 @@ async def queue_storage_error(request,error):
 class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: Literal[tuple(PROFILES)] = API_MODEL
-    task: Literal['generate','edit'] = Field(default='generate',description='generate retains the existing generation/reference workflow. edit requires a source photo and an editing-capable startup model; prompt is an edit instruction, with preservation-focused expansion and no composition variation.')
+    task: Literal['generate','edit'] = Field(default='generate',description='generate retains the existing generation/reference workflow. edit requires a source photo and a setup editing-capable model; prompt is an edit instruction, with preservation-focused expansion and no composition variation.')
     preserve: str | None = Field(default=None,max_length=1000,description='Edit task only: optional explicit requirements for what must stay unchanged, such as face, pose or background. These are prompt constraints, not a pixel mask or a guarantee.')
     mask_image: str | None = Field(default=None,max_length=4096,description='Qwen photo edits only: absolute local path to a mask matching the oriented source photo. White pixels are edited, black pixels preserve the resized source. Upload mask PNG bytes through /v1/reference-images if needed.')
 
-    @field_validator('model')
+    @model_validator(mode='before')
     @classmethod
-    def validate_model(cls,value):
-        if value != API_MODEL:
-            raise ValueError(f'This server runs {API_MODEL}; restart with make serve MODEL={value} to switch')
+    def model_defaults(cls,value):
+        if not isinstance(value,dict):return value
+        value=dict(value);selected=value.setdefault('model',selected_default())
+        if selected in PROFILES:
+            value.setdefault('steps',PROFILES[selected]['steps'])
+            value.setdefault('output_dir',str(model_root(selected)/'images'))
         return value
 
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
@@ -183,9 +209,9 @@ class GenerateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires LLM-enabled serving (default; NO_LLM=1 disables it). Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     vary_prompt: bool = Field(default=False,strict=True,description="Requires expand_prompt:true and n>=2. Plan a distinct LLM expansion/composition per option, preserving explicit original constraints and style. All prompts are persisted before rendering and reused after restart. Default false shares one expansion; the UI enables this for multi-image batches with expansion. Improves creative variety but cannot guarantee visibly different results for constrained prompts or strongly preserved references.")
-    generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable FIFO job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
+    generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable shared-queue job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
     n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch rendered sequentially with distinct seeds. seed is the first seed; later options increment it modulo 2^32. expand_prompt shares one expansion unless vary_prompt:true requests distinct composition expansions.")
-    steps: int = Field(default=PROFILE["steps"], ge=1, le=PROFILE["max_steps"], strict=True, description=f"Sampling steps for {PROFILE['name']}; recommended {PROFILE['steps']} (range 1–{PROFILE['max_steps']}).")
+    steps: int = Field(default=PROFILE["steps"], ge=1, le=max(item["max_steps"] for item in PROFILES.values()), strict=True, description="Sampling steps; omitted uses the requested model default. GET /v1/models provides each model’s default_steps and max_steps; values beyond that model’s limit are rejected.")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned per image. With n>1 this is the first seed; later options increment it modulo 2^32.")
     response_format: Literal["b64_json", "url"] = "b64_json"
     lora: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Optional installed adapter ID from GET /v1/loras. Requires /health loras_enabled=true; base-only servers reject non-null adapters. Omit or use null for no LoRA. One adapter per request; model families are not interchangeable.", examples=["realism"])
@@ -225,9 +251,11 @@ class GenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_reference_settings(self):
+        profile=PROFILES[self.model]
+        if self.steps>profile['max_steps']:raise ValueError(f"steps must be at most {profile['max_steps']} for {profile['name']}")
         if self.task=='edit':
-            if 'edit' not in supported_tasks(PROFILE):
-                raise ValueError('Photo editing requires FLUX.2 Klein or Qwen-Image 2.1 Turbo; start an editing model with make serve MODEL=<id>')
+            if 'edit' not in supported_tasks(profile):
+                raise ValueError('Photo editing requires FLUX.2 Klein or Qwen-Image 2.1 Turbo; choose a setup editing model in the request')
             if self.reference_image is None:
                 raise ValueError('Edit photo requires reference_image')
             if self.vary_prompt:
@@ -236,9 +264,9 @@ class GenerateRequest(BaseModel):
                 raise ValueError('Edit instruction and preservation requirements must fit within 4000 characters including editing guidance')
         elif self.preserve is not None:
             raise ValueError('preserve requires task:edit')
-        if self.mask_image is not None and (self.task!='edit' or not PROFILE.get('mask_editing')):
+        if self.mask_image is not None and (self.task!='edit' or not profile.get('mask_editing')):
             raise ValueError('mask_image requires task:edit with Qwen-Image 2.1 Turbo')
-        if PROFILE.get('reference_mode')=='edit' and 'image_strength' in self.model_fields_set:
+        if profile.get('reference_mode')=='edit' and 'image_strength' in self.model_fields_set:
             raise ValueError('image_strength is unsupported for instruction editing; omit it and describe the desired change in prompt')
         if self.reference_image is not None and self.steps < 2:
             raise ValueError("Reference-image generation requires at least 2 steps")
@@ -308,6 +336,7 @@ class PromptExpansion(BaseModel):
 
 
 class ImageResult(BaseModel):
+    model: str
     task: Literal['generate','edit'] = 'generate'
     candidate_index: int = Field(default=1,description="One-based option position in the batch.")
     candidate_count: int = Field(default=1,description="Requested image count for this batch.")
@@ -406,6 +435,7 @@ def reference_photo(identifier: str):
 
 
 def generate(payload, job=None):
+    if model is None:load_model()
     try:
         require_storage(ROOT)
         require_storage(payload.output_dir)
@@ -538,7 +568,7 @@ def ui_help_script():
 
 @app.get("/health")
 def health():
-    state = {"status": "ready" if model is not None else "loading", "model": API_MODEL, "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL), "project_dir": str(PROJECT_ROOT), "data_dir": str(ROOT), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
+    state = {"status": "ready" if model is not None else "loading", 'service':'imagegen-generator','version':'4.0.0','runtime_model_switching':True,'queue_scope':'shared','default_model':default_model(PROJECT_ROOT),'active_model':model.active_model if isinstance(model,ModelProcess) else API_MODEL if model else None,'model_loaded':model.loaded if isinstance(model,ModelProcess) else model is not None,  "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,selected_default()), "project_dir": str(PROJECT_ROOT), "data_dir": str(model_root(selected_default())), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
     if observability_monitor:state['observability']=observability_monitor.status()
     elif observability_error:state['observability']={'recording':False,'error':observability_error}
     if state['busy'] and hasattr(model,'progress'):
@@ -551,6 +581,8 @@ def health():
             state['queue']['blocked_reason']='Next job requires LoRAs; restart with adapters enabled or cancel it.' if state['queue']['next_requires_lora'] and not app.state.loras_enabled else None
             if state['queue'].get('next_requires_llm') and not app.state.llm_enabled:
                 state['queue']['blocked_reason']='Next job requires prompt expansion; restart with make serve and choose Yes for LLM expansion or cancel it.'
+            if state['queue'].get('next_model') not in ready_models() and state['queue'].get('next_model'):
+                state['queue']['blocked_reason']='A waiting model is not set up or its storage is unavailable; other eligible jobs can continue.'
             state['queue']['error']=job_worker.error if job_worker else None
             if state['queue']['error']: state['status']='error'
         except (OSError,RuntimeError,sqlite3.Error):
@@ -559,43 +591,41 @@ def health():
     return state
 
 
-def capabilities():
-    return {'model':API_MODEL,'name':PROFILE['name'],'backend':PROFILE['backend'],
-            'default_steps':PROFILE['steps'],'max_steps':PROFILE['max_steps'],
-            API_MODEL:{**model_details(API_MODEL),'prompt_expansion_guidance':public_guidance(API_MODEL)},
-            'reference_mode':PROFILE.get('reference_mode','variation'),
-            'image_strength_supported':PROFILE.get('reference_mode')!='edit',
-            'tasks':supported_tasks(PROFILE),
-            'photo_editing':{'supported':'edit' in supported_tasks(PROFILE),
-                'models':[identifier for identifier,profile in PROFILES.items() if 'edit' in supported_tasks(profile)],
-                'requires_reference':True,'default_long_edge':1024,'composition_variation':False,
-                'mask_supported':bool(PROFILE.get('mask_editing')),
-                'prompt_expansion_guidance':public_edit_guidance(API_MODEL) if 'edit' in supported_tasks(PROFILE) else None,
-                'expansion':'preserve the source and refine only the requested edit; text-only'},
-            'default_size':'1024x1024','prompt_note':PROFILE['prompt_note'],
-            'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
-            'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,API_MODEL),'queue_api_url':queue_client.url,'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
+def capabilities(identifier=None,*,ready=None):
+    identifier=identifier or selected_default();profile=PROFILES[identifier]
+    ready=ready_models() if ready is None else ready
+    return {'model':identifier,'name':profile['name'],'backend':profile['backend'],
+        'default_steps':profile['steps'],'max_steps':profile['max_steps'],
+        identifier:{**model_details(identifier),'prompt_expansion_guidance':public_guidance(identifier)},
+        'reference_mode':profile.get('reference_mode','variation'),'image_strength_supported':profile.get('reference_mode')!='edit',
+        'tasks':supported_tasks(profile),'mask_editing':bool(profile.get('mask_editing')),
+        'photo_editing':{'supported':'edit' in supported_tasks(profile),'models':[key for key in ready if 'edit' in supported_tasks(PROFILES[key])],
+            'setup_hint':'Set up '+', '.join(profile['name'] for profile in PROFILES.values() if 'edit' in supported_tasks(profile))+'. Use make setup to add one.',
+            'requires_reference':True,'default_long_edge':1024,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
+            'prompt_expansion_guidance':public_edit_guidance(identifier) if 'edit' in supported_tasks(profile) else None},
+        'default_size':'1024x1024','prompt_note':profile['prompt_note'],'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
+        'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,identifier),
+        'queue_api_url':queue_client.url,'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
 
 
-@app.get("/v1/loras", summary="List compatible local LoRAs", description="The UI uses this catalog. enabled=false and an empty data list indicate a base-only server started with --no-loras. Only available=true entries can generate. IDs are specific to the active model; null disables LoRA. Entries include trigger text, default strength, source, and installed checksum.")
-def loras():
-    return {"object": "list", "enabled": app.state.loras_enabled,
-            "data": list_loras() if app.state.loras_enabled else []}
+@app.get('/v1/loras',summary='List compatible local LoRAs for a setup model')
+def loras(model:Literal[tuple(PROFILES)]|None=None):
+    identifier=model or selected_default();ready_or_error(identifier)
+    entries=(list_loras() if identifier==API_MODEL else model_loras(PROJECT_ROOT,identifier)[1]) if app.state.loras_enabled else []
+    return {'object':'list','model':identifier,'enabled':app.state.loras_enabled,'data':entries if app.state.loras_enabled else []}
 
 
-@app.get("/v1/models")
+@app.get('/v1/models',summary='List setup models available for runtime selection')
 def models():
-    return {'object':'list','active_model':API_MODEL,'data':[
-        {'id':identifier,'object':'model','owned_by':'local','name':profile['name'],
-         'active':identifier==API_MODEL,'downloaded':(MODEL_ROOTS[identifier]/'weights'/'download.json').is_file(),
-         'default_steps':profile['steps'],'max_steps':profile['max_steps'],
-         'reference_mode':profile.get('reference_mode','variation'),'tasks':supported_tasks(profile),
-         'mask_editing':bool(profile.get('mask_editing')),identifier:model_details(identifier)}
-        for identifier,profile in PROFILES.items()]}
+    ready=ready_models()
+    return {'object':'list','default_model':default_model(PROJECT_ROOT,ready),'active_model':model.active_model if isinstance(model,ModelProcess) else API_MODEL if model else None,'model_loaded':model.loaded if isinstance(model,ModelProcess) else model is not None,
+        'data':[{'id':identifier,'object':'model','owned_by':'local','active':isinstance(model,ModelProcess) and model.active_model==identifier,
+                 'downloaded':True,'output_dir':str(model_root(identifier)/'images'),**capabilities(identifier,ready=ready)} for identifier in ready]}
 
 
 class ExpandPromptRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    model:Literal[tuple(PROFILES)]=Field(default_factory=selected_default)
     prompt: str = Field(min_length=1,max_length=4000)
     lora: str | None = None
     lora_strength: float | None = Field(default=None,ge=0,le=2,allow_inf_nan=False)
@@ -611,7 +641,7 @@ class ExpandPromptRequest(BaseModel):
     def strength_requires_adapter(self):
         if self.lora is None and self.lora_strength is not None:
             raise ValueError('lora_strength requires lora')
-        if self.task=='edit' and 'edit' not in supported_tasks(PROFILE):
+        if self.task=='edit' and 'edit' not in supported_tasks(PROFILES[self.model]):
             raise ValueError('Photo-edit instruction refinement requires an editing model')
         if self.task!='edit' and self.preserve is not None:
             raise ValueError('preserve requires task:edit')
@@ -626,6 +656,7 @@ def expand_prompt(payload:ExpandPromptRequest):
     if not app.state.llm_enabled:
         raise HTTPException(422,'Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion.')
     queue_ready()
+    ready_or_error(payload.model)
     if not preview_gate.acquire(blocking=False):
         raise HTTPException(409,'Another prompt preview is running; retry after it completes.')
     gpu=None
@@ -633,7 +664,7 @@ def expand_prompt(payload:ExpandPromptRequest):
     try:
         if payload.lora and not app.state.loras_enabled:
             raise HTTPException(422,'LoRAs are disabled for this server.')
-        selection=resolve_lora(payload.lora,payload.lora_strength)
+        selection=resolve_for_model(payload)
         # Same order as the image worker: accelerator, then inference lock.
         require_storage(GPU_LOCK_FILE)
         GPU_LOCK_FILE.parent.mkdir(parents=True,exist_ok=True)
@@ -645,8 +676,9 @@ def expand_prompt(payload:ExpandPromptRequest):
         inference_owned=busy.acquire(blocking=False)
         if not inference_owned:
             raise HTTPException(409,'Image inference is busy; preview again after it finishes.')
-        return prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
-               image_weights=MODEL_DIR,selection=selection,
+        if isinstance(model,ModelProcess):model.close()
+        return prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=payload.model,
+               image_weights=model_root(payload.model)/'weights',selection=selection,
                **({'task':'edit','preserve':payload.preserve} if payload.task=='edit' else {}),
                inherited_fds=tuple(handle.fileno() for handle in [job_worker.lease,gpu] if handle))
     except prompt_expander.ExpansionError as error:
@@ -662,7 +694,7 @@ def expand_prompt(payload:ExpandPromptRequest):
 
 
 class SyncGenerateRequest(GenerateRequest):
-    generate_immediately: bool=Field(default=True,strict=True,description='Synchronous route defaults to immediate priority (next free slot); false waits in ordinary FIFO order.')
+    generate_immediately: bool=Field(default=True,strict=True,description='Synchronous route defaults to immediate priority (next free slot); false waits in ordinary queue order.')
 
 
 class EditRequest(SyncGenerateRequest):
@@ -683,7 +715,7 @@ def normalized_request(payload):
         data.pop('expand_prompt')
     if not data['vary_prompt']:
         data.pop('vary_prompt')
-    if data['reference_image'] is None or PROFILE.get('reference_mode')=='edit':
+    if data['reference_image'] is None or PROFILES[payload.model].get('reference_mode')=='edit':
         data.pop('image_strength',None)
     return data
 
@@ -699,6 +731,7 @@ def submit_job(payload,key=None,retry_of=None):
     queue_ready()
     data=normalized_request(payload)
     request_hash=fingerprint(data)
+    key=queue_key(payload.model,key)
     try:
         existing=job_store.existing(key,request_hash)
         if existing: return existing
@@ -706,7 +739,8 @@ def submit_job(payload,key=None,retry_of=None):
             raise HTTPException(422,'LoRAs are disabled for this server; restart without --no-loras to enable them.')
         if payload.expand_prompt and not app.state.llm_enabled:
             raise HTTPException(422,'Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion or set expand_prompt:false.')
-        require_storage(ROOT); require_storage(payload.output_dir)
+        ready_or_error(payload.model)
+        require_storage(model_root(payload.model)); require_storage(payload.output_dir)
         # Check input headers without resizing/re-encoding every waiting request.
         if payload.reference_image:
             from PIL import Image
@@ -721,7 +755,7 @@ def submit_job(payload,key=None,retry_of=None):
             from PIL import ImageOps
             with Image.open(payload.reference_image) as photo:
                 read_mask(payload.mask_image,ImageOps.exif_transpose(photo).size)
-        selection=resolve_lora(payload.lora,payload.lora_strength)
+        selection=resolve_for_model(payload)
         record=job_store.enqueue(data,request_hash,key=key,
             adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
         job_worker.wake.set()
@@ -772,7 +806,7 @@ def committed_candidate(payload,job,identifier,index):
 
 
 def prepare_job_prompt(payload,job):
-    selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
+    selection=resolve_for_model(payload) if payload.lora else None
     if selection and selection['sha256']!=job.get('_adapter_sha'):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if payload.expand_prompt:
@@ -793,7 +827,7 @@ def prepare_candidate_prompts(payload,job):
     if not payload.vary_prompt:
         prepared=prepare_job_prompt(payload,job)
         return [prepared]*payload.n,[job.get('prompt_expansion')]*payload.n
-    selection=resolve_lora(payload.lora,payload.lora_strength) if payload.lora else None
+    selection=resolve_for_model(payload) if payload.lora else None
     if selection and selection['sha256']!=job.get('_adapter_sha'):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if not app.state.llm_enabled:
@@ -814,11 +848,12 @@ def prepare_candidate_prompts(payload,job):
 
 
 def execute_job(job):
+    if isinstance(model,ModelProcess):return model.execute(job)
     payload=GenerateRequest.model_validate(job['request'])
     if not job.get('_prepared'):
         data=normalized_request(payload)
         data['seed']=payload.seed if payload.seed is not None else secrets.randbelow(2**32)
-        selection=resolve_lora(payload.lora,payload.lora_strength)
+        selection=resolve_for_model(payload)
         if selection and job.get('_adapter_sha') and selection['sha256']!=job['_adapter_sha']:
             raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
         if selection: data['lora_strength']=selection['strength']
@@ -850,7 +885,7 @@ def generation_response(path,metadata,request,response_format='url'):
     for saved in result_images(metadata):
         image_path=Path(saved['file_path'])
         width,height=map(int,saved['size'].split('x'))
-        item={'tags':saved['tags'],'seed':saved['seed'],'file_path':str(image_path),'metadata_path':str(image_path.with_suffix('.json')),
+        item={'model':saved['model'],'tags':saved['tags'],'seed':saved['seed'],'file_path':str(image_path),'metadata_path':str(image_path.with_suffix('.json')),
               'task':saved.get('task','generate'),
               'size':saved['size'],'width':width,'height':height,'generation_size':saved['generation_size'],
               'candidate_index':saved.get('candidate_index',1),'candidate_count':saved.get('candidate_count',1)}
@@ -878,6 +913,7 @@ class JobResponse(BaseModel):
     candidate_expansions: list[PromptExpansion] | None=None
     completed_images: int = 0
     total_images: int = 1
+    blocked_reason: str | None=None
     partial_result: GenerateResponse | None = None
     result: GenerateResponse | None=None
 
@@ -893,8 +929,12 @@ class JobList(BaseModel):
     previous_offset: int | None=None
 
 
-def job_response(job,request,*,include_result=True):
+def job_response(job,request,*,include_result=True,ready=None):
     item={**job,'model':job['request']['model']}
+    if job['status']=='queued':
+        if item['model'] not in (ready_models() if ready is None else ready):item['blocked_reason']='Model not set up or storage unavailable; run make setup MODEL='+item['model']
+        elif job['request'].get('expand_prompt') and not app.state.llm_enabled:item['blocked_reason']='Prompt expansion is disabled for this run'
+        elif job['request'].get('lora') and not app.state.loras_enabled:item['blocked_reason']='LoRAs are disabled for this run'
     if job.get('prompt_expansion') and job['prompt_expansion'].get('mode')=='vary':
         item['candidate_expansions']=job['prompt_expansion']['candidates']
         item['prompt_expansion']=None
@@ -909,20 +949,21 @@ def job_response(job,request,*,include_result=True):
 
 
 @app.post('/v1/jobs',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
-          summary='Persist an image job',description='Accepts generation or task:"edit" with reference_image and optional preserve. Qwen selected-area edits also accept mask_image: white edits, black preserves at output resolution. Default generate_immediately=false joins the end of the queue. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
+          summary='Persist an image job',description='Accepts generation or task:"edit" with reference_image and optional preserve. Qwen selected-area edits also accept mask_image: white edits, black preserves at output resolution. Default generate_immediately=false joins the end of the queue. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Any setup model is accepted; omitted model uses the shared default.')
 def enqueue_job(payload:GenerateRequest,request:Request,
                 idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     return job_response(submit_job(payload,idempotency_key),request)
 
 
 @app.get('/v1/jobs',response_model=JobList,response_model_exclude_none=True,summary='List persisted jobs',
-         description='Current model queue. Running first, then waiting jobs in execution order, then recent finished jobs. Full results are returned by the detail endpoint. Pagination uses limit/offset.')
+         description='Shared cross-model queue. Running first, then waiting jobs in execution order, then recent finished jobs. Full results are returned by the detail endpoint. Pagination uses limit/offset.')
 def list_jobs(request:Request,limit:int=Query(24,ge=1,le=100),offset:int=Query(0,ge=0),
-              status:Literal['pending','queued','running','succeeded','failed','cancelled']|None=None):
+              status:Literal['pending','queued','running','succeeded','failed','cancelled']|None=None,model:Literal[tuple(PROFILES)]|None=None):
     queue_ready(require_worker=False)
-    records,total=job_store.listing(limit,offset,status)
+    records,total=job_store.listing(limit,offset,status,model=model)
+    ready=ready_models()
     following=offset+len(records)
-    return {'data':[job_response(job,request,include_result=False) for job in records],'total':total,'limit':limit,'offset':offset,
+    return {'data':[job_response(job,request,include_result=False,ready=ready) for job in records],'total':total,'limit':limit,'offset':offset,
             'has_more':following<total,'next_offset':following if following<total else None,
             'has_previous':offset>0,'previous_offset':max(0,offset-limit) if offset else None}
 
@@ -944,7 +985,9 @@ def get_job(identifier:str,request:Request):
 @app.patch('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,
            summary='Replace settings of a never-started waiting job')
 def update_job(identifier:str,payload:GenerateRequest,request:Request):
-    find_job(identifier)
+    previous=find_job(identifier)
+    if previous['request']['model']!=payload.model:raise HTTPException(422,'A queued job model cannot be changed; submit a new job')
+    ready_or_error(payload.model)
     item=job_store.update(identifier,normalized_request(payload))
     job_worker.wake.set()
     return job_response(item,request)
@@ -980,10 +1023,10 @@ def cancel_job(identifier:str,request:Request):
     return job_response(item,request)
 
 
-@app.delete('/v1/jobs',summary='Clear waiting jobs',description='Cancels all waiting jobs for the active model. Running work and completed records/files are preserved.')
-def clear_jobs():
+@app.delete('/v1/jobs',summary='Clear waiting jobs',description='Cancels all waiting jobs across models, or just an explicit model filter. Running work and completed records/files are preserved.')
+def clear_jobs(model:Literal[tuple(PROFILES)]|None=None):
     queue_ready(require_worker=False)
-    count=job_store.clear(); job_worker.wake.set()
+    count=job_store.clear(model=model); job_worker.wake.set()
     return {'cancelled':count}
 
 
@@ -1031,7 +1074,7 @@ async def generations(payload:SyncGenerateRequest,request:Request,
 
 @app.post('/v1/images/edits',response_model=GenerateResponse,response_model_exclude_none=True,
           summary='Edit an existing photo and wait for the result',
-          description='JSON request, not multipart. Requires reference_image and an editing-capable startup model. Uses the same durable worker as generation. For asynchronous editing, POST /v1/jobs with task:"edit". Qwen supports optional mask_image: white edits, black preserves the resized source. Klein supports whole-photo instruction editing. Unmasked edits preserve unrequested content through prompt guidance rather than a pixel guarantee.')
+          description='JSON request, not multipart. Requires reference_image and a setup editing-capable model. Uses the same durable worker as generation. For asynchronous editing, POST /v1/jobs with task:"edit". Qwen supports optional mask_image: white edits, black preserves the resized source. Klein supports whole-photo instruction editing. Unmasked edits preserve unrequested content through prompt guidance rather than a pixel guarantee.')
 async def photo_edits(payload:EditRequest,request:Request,
                       idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     return await generations(payload,request,idempotency_key)
@@ -1208,6 +1251,8 @@ def image_metadata(identifier: str):
         raise HTTPException(404, "Saved metadata is unavailable") from None
     return FileResponse(path, media_type="application/json", filename=path.name)
 
+
+configure_schema(app,PROJECT_ROOT,['GenerateRequest','SyncGenerateRequest','EditRequest','ExpandPromptRequest'],selected_default)
 
 def parse_server_args(argv=None):
     parser = argparse.ArgumentParser()

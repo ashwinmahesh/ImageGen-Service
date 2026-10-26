@@ -123,7 +123,7 @@ print(json.dumps({'project':str(config.PROJECT_ROOT),'data':str(config.ROOT),
         self.assertEqual(paths['images'],str(data/'z-image-turbo/images'))
         self.assertEqual(paths['cache'],str(data/'z-image-turbo/cache/huggingface'))
         self.assertFalse(data.exists())
-        self.assertEqual(paths['queue'],str(Path(paths['project'])/'state/queues/z-image-turbo/jobs.sqlite3'))
+        self.assertEqual(paths['queue'],str(Path(paths['project'])/'state/queue/jobs.sqlite3'))
         if paths['runtime']:
             self.assertFalse(Path(paths['runtime']).is_relative_to(data))
 

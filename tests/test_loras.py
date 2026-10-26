@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import tempfile
@@ -16,13 +17,16 @@ import server
 import queue_api
 from queue_client import QueueClient
 from tests.test_api import FakeModel
+from tests.model_fixtures import setup_model
 
 
 class LoRATest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
-        self.folder = self.root / "loras"
+        self.storage_patch=patch.dict(os.environ,{'DATA_DIR':str(self.root)});self.storage_patch.start()
+        setup_model(self.root,server.API_MODEL)
+        self.folder = self.root / 'loras'
         self.folder.mkdir()
         self.file = self.folder / "style.safetensors"
         header = json.dumps({"__metadata__": {"ss_base_model_version": "zimage"},
@@ -37,7 +41,7 @@ class LoRATest(unittest.TestCase):
         self.patches = [patch.dict(sys.modules, {"mlx": types.ModuleType("mlx"), "mlx.core": types.SimpleNamespace(clear_cache=lambda: None)}),
             patch.object(lora_catalog, "LORA_DIR", self.folder),
             patch.object(install_lora, "LORA_DIR", self.folder),
-            patch.object(server, "ROOT", self.root), patch.object(server, "model", self.fake)]
+            patch.object(server, "PROJECT_ROOT", self.root), patch.object(server, "ROOT", self.root), patch.object(server, "model", self.fake)]
         for item in self.patches:
             item.start()
         self.store=server.JobStore(self.root/'queue/jobs.sqlite3'); self.store.initialize()
@@ -47,7 +51,7 @@ class LoRATest(unittest.TestCase):
             item.start(); self.patches.append(item)
         queue_app=queue_api.create_app(self.root)
         self.queue_http=TestClient(queue_app)
-        for item in [patch.object(queue_api,'queue_database',return_value=self.store.path),
+        for item in [patch.object(queue_api,'initialize_shared_queue',return_value=self.store),
                      patch.object(server,'queue_client',QueueClient(transport=self.queue_http))]:
             item.start(); self.patches.append(item)
         self.worker.start(self.job_executor)
@@ -62,6 +66,7 @@ class LoRATest(unittest.TestCase):
         self.worker.stop(); self.job_executor.shutdown(wait=True)
         for item in reversed(self.patches):
             item.stop()
+        self.storage_patch.stop()
         self.temp.cleanup()
 
     def post(self, **settings):

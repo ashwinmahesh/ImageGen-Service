@@ -194,11 +194,15 @@ class ResourceMonitor:
     def recover_jobs(self):
         # Called only after this model's exclusive worker lease was acquired.
         with self.lock:
-            try:self.ensure_store();self.store.recover(self.model)
+            try:
+                from model_profiles import PROFILES
+                self.ensure_store()
+                for identifier in PROFILES:self.store.recover(identifier)
             except Exception:self.last_error='Could not reconcile old resource attempts; inference continues.'
 
     def start_job(self,job):
         with self.lock:
+            self.model=job.get('request',{}).get('model',self.model)
             self.active={'id':job['id'],'attempts':job['attempts']}
             try:self.ensure_store();self.store.begin(self.session,self.model,job,self.clock())
             except Exception:self.last_error='Could not record job resource history; inference continues.'

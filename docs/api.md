@@ -31,8 +31,9 @@ Unless stated otherwise, send JSON with `Content-Type: application/json`; respon
 
 Supported model IDs are `z-image-turbo`, `chroma1-hd`, `chroma1-flash`, `flux2-klein-4b`, `flux2-klein-9b` and `qwen-image-2.1-turbo`:
 
-- **Generator:** omitted `model` means its startup-selected model. An explicit different model returns **422**; switch models at startup.
-- **Queue:** omitted `model` always means **`z-image-turbo`**, independent of the running generator. Submission selects it in the JSON envelope; other operations select it with `?model=<id>`.
+Both services use **one shared queue** at `state/queue/jobs.sqlite3`. Every job stores a resolved model. Omitted submission `model` uses the saved default selected with `make serve MODEL=<id>`; a fresh installation prefers setup Z-Image Turbo, otherwise the first setup model. The default does not change when the active backend switches. Discovery and new submissions support **setup models only**, using the same required-assets/runtime preflight. Unready models return422 with setup guidance. Setup itself still offers the complete registry.
+
+GET list and DELETE clear accept an optional `model` filter; omission spans every model. Detail and mutation routes address unique job IDs directly. Pause, queue positions, moves and Run Now are global. A model that becomes unavailable after admission stays queued with a blocked reason while other eligible jobs proceed.
 
 Path placeholders such as `{identifier}` mean a returned job or image ID: 32 lowercase hexadecimal characters. Job and image IDs can differ in a batch; use returned URLs and gallery IDs. Timestamps are Unix seconds; job timestamps may include fractions. Optional response fields may be null or omitted depending on the route. Examples show representative values and may omit optional fields.
 
@@ -54,12 +55,15 @@ No body or query parameters.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `status` | string | `loading`, `ready` or `error`. Check this value as well as HTTP status. Initial model loading may happen before the listener is available. |
-| `model`, `project_dir`, `data_dir` | strings | Active model, checkout and active model's data folder. |
+| `status` | string | `loading`, `ready` or `error`. Check this value as well as HTTP status. Model loading is deferred to jobs; the listener remains available during loading and switching. |
+| `service`, `version`, `queue_scope` | strings | `imagegen-generator`, `4.0.0`, `shared`. |
+| `runtime_model_switching` | boolean | Always true for this generator contract. |
+| `default_model`, `active_model`, `model_loaded` | nullable string, nullable string, boolean | Saved submission default; selected/initializing backend or null; whether its adapter is initialized. Native per-image runtimes release their weights after each image. |
+| `project_dir`, `data_dir` | strings | Checkout and default model’s data folder. Each image response has its actual file path/model. |
 | `busy` | boolean | Image inference, prompt preview or a running queue job is active. |
 | `loras_enabled` | boolean | Whether this generator accepts adapters. |
 | `prompt_expansion` | object | Availability, mode, LLM `model`/`revision`/`license`, `text_only`, `guidance_profile`, `batch_variations` and usage `note`. |
-| `capabilities` | object | Backend/name, default/max steps, default size, dimension/prompt/count limits, adapter/LLM mode, queue URL and persistent/immediate support. The active model-ID key contains `prompt_expansion_guidance`. |
+| `capabilities` | object | Backend/name, default/max steps, default size, dimension/prompt/count limits, adapter/LLM mode, queue URL and persistent/immediate support. The default model-ID key contains `prompt_expansion_guidance`. |
 | `queue` | object, when initialized | Counts/pause state below, plus `stage`, optional `blocked_reason` and consumer `error`. |
 | `queue_api` | object | Standalone queue availability: `available`, `url`, `recovery_command`, optional `error`. Its outage alone does not make the generator unready. |
 | `progress` | object, when supported | Backend-specific inference progress while busy. Its fields depend on the backend. |
@@ -68,34 +72,33 @@ The generator's `capabilities` object exposes these named controls:
 
 | Keys | Types | Meaning |
 | --- | --- | --- |
-| `model`, `name`, `backend` | strings | Selected backend identity. |
-| `default_steps`, `max_steps`, `default_size` | integers, string | Defaults and step ceiling for the active model. |
+| `model`, `name`, `backend` | strings | Default model identity; active backend is reported separately as `active_model`. |
+| `default_steps`, `max_steps`, `default_size` | integers, string | Defaults and step ceiling for the requested model. |
 | `prompt_note`, `max_prompt_characters`, `min_dimension`, `max_dimension` | string, integers | Prompt behavior and canvas limits. |
 | `default_image_count`, `max_image_count` | integers | Batch default and ceiling. |
 | `loras_enabled`, `persistent_queue`, `immediate_generation` | booleans | Available modes. |
-| `tasks`, `photo_editing` | array, object | Supported tasks and edit capabilities: eligible model IDs, required source, default long edge, mask support, no composition variation, and text-only edit refinement. |
+| `tasks`, `photo_editing` | array, object | Supported tasks and edit capabilities: eligible model IDs, required source, default long edge, mask support, no composition variation, text-only edit refinement and human setup guidance. The guidance can name installable editors; discovery entries and accepted requests still include setup models only. |
 | `reference_mode`, `image_strength_supported` | string, boolean | `variation` with preservation strength for Z-Image/Chroma; `edit` without that control for Klein/Qwen. |
 | `prompt_expansion`, `queue_api_url` | object, string | LLM capability metadata and standalone queue origin. |
-| `<active-model-id>` | object | For Klein/Qwen, also `quantization` and `license:{id,url,notice}`. `prompt_expansion_guidance` with profile `id`, `version`, `soft_max_new_words`, nullable `image_token_limit`, `verified_token_count` and `sources[]`. |
+| `<model-id>` | object | For Klein/Qwen, also `quantization` and `license:{id,url,notice}`. `prompt_expansion_guidance` with profile `id`, `version`, `soft_max_new_words`, nullable `image_token_limit`, `verified_token_count` and `sources[]`. |
 
-**Queue response:** `status`, `service:"imagegen-queue"`, `project_dir`, `default_model:"z-image-turbo"` and `version`. This checks the queue HTTP process; it does not load a model or guarantee that a later storage write will succeed.
+**Queue response:** `status`, `service:"imagegen-queue"`, `project_dir`, nullable `default_model`, `queue_scope:"shared"` and `version:"4.0.0"`. This checks the queue HTTP process; it does not load a model or guarantee that a later storage write will succeed.
 
-Queue counts/state contain integer `queued`, `running`, `succeeded`, `failed`, `cancelled`; boolean `paused`; string `database_path`; nullable `next_job_id` (next eligible waiting job, null while paused without immediate work); and boolean `next_requires_llm` / `next_requires_lora`. Generator stages are `idle`, `waiting_for_accelerator` and `generating`.
+Queue counts/state contain integer `queued`, `running`, `succeeded`, `failed`, `cancelled`; boolean `paused`; string `database_path`; nullable `next_job_id` (head waiting job before setup/capability checks, null while paused without immediate work); and boolean `next_requires_llm` / `next_requires_lora`. Generator stages include `idle`, `waiting_for_accelerator`, `loading_model`, `expanding_prompt`, `planning_variations`, `generating` and per-option generation. `next_model` labels the next waiting request.
 
 ### GET /v1/models
 
 No body or query parameters.
 
-- **Generator:** `{object:"list", active_model, data:[...]}`. Each entry has `id`, `object:"model"`, `owned_by:"local"`, `name`, `active`, `downloaded`, `default_steps`, `max_steps`, `reference_mode`, `tasks` and `mask_editing`. Model-specific `quantization` and `license:{id,url,notice}` are under the exact model-ID key when present. `downloaded` checks the completion marker; it is not a full startup integrity check.
-- **Queue:** `{default_model, data:[{id,name,reference_mode,tasks,mask_editing,"<model-id>":{...}}, ...]}`. Lists every supported model even before setup, so tools can route future work.
+Both responses list **only models whose required local assets and runtime files pass preflight**, without loading GPU weights or hashing them. Generator: `{object:"list",default_model,active_model,data:[...]}`; queue: `{default_model,data:[...]}`. Generator entries include `id`, `name`, `downloaded:true`, `output_dir`, per-model default/max steps, task/reference/mask capabilities, LLM guidance and license metadata under the exact model ID. Queue entries include ID/name/tasks/reference/mask/license metadata. `active_model` may be null before the first job. A preflight pass is not an inference benchmark or full checksum verification.
 
 ### GET /v1/loras
 
-The **queue** accepts optional query `model` with default `z-image-turbo`. The **generator** uses its active model, with no model selector.
+Both accept optional query `model`; omission uses the shared saved default. An unready model returns422.
 
 | Response | Shape |
 | --- | --- |
-| Generator | `{object:"list", enabled:boolean, data:[...]}`. `NO_LORAS=1` returns `enabled:false` and an empty list. |
+| Generator | `{object:"list", model, enabled:boolean, data:[...]}`. `NO_LORAS=1` returns `enabled:false` and an empty list. |
 | Queue | `{object:"list", model, directory, data:[...]}`. `directory` is the absolute adapter folder. No `enabled` flag: generator mode is independent. |
 
 Each entry describes `id`, `name`, `filename`, compatible `models[]`, `available`, optional `default_strength`, `trigger_prompt`, `source` and `sha256`; creator metadata may add fields. Select an entry with **`available:true`** and send its `id` as `lora`. Null/omitted `lora` uses the base model.
@@ -110,10 +113,10 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 
 | Field | Type | Default and rules |
 | --- | --- | --- |
-| `task` | string | `"generate"` by default. `"edit"` requires an editing-capable startup model and a source photo. Composition variation is rejected for edits. |
+| `task` | string | `"generate"` by default. `"edit"` requires a setup editing-capable model and a source photo. Composition variation is rejected for edits. |
 | `preserve` | string or null | Edit only: explicit preservation requirements, max 1000 characters. Instruction plus constraints must fit the final 4000-character prompt budget. |
 | `mask_image` | string or null | Qwen edit only: absolute/`~/...` mask path, max 4096 characters. Must match the oriented source dimensions; white edits and black preserves the resized source. |
-| `model` | string | Generator's active model. Must match it. On queue submissions use the outer `model`; a nested value, if present, must match. |
+| `model` | string | Any setup model; omitted uses the shared saved default. On queue submissions use the outer `model`; a nested value, if present, must match. |
 | `prompt` | string | Required, nonblank, 1–4000 characters. `<lora:...>` tags are rejected; use adapter fields. Z-Image processes the first 512 tokens including formatting/trigger, so put essentials first. |
 | `size` | string | `"1024x1024"`. Format `WIDTHxHEIGHT`; each dimension a multiple of 64 from 256–2048. With a reference, the larger dimension sets its long edge and the source sets the aspect ratio. |
 | `n` | integer | 1–5, default 1. Sequential options in one job. |
@@ -123,7 +126,7 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `vary_prompt` | boolean | false. Requires `expand_prompt:true` and `n>=2`; creates a distinct expansion for each option. |
 | `generate_immediately` | boolean | false for async jobs, true for synchronous generation. True gets the next free slot before ordinary waiting work; never interrupts active work. |
 | `response_format` | string | `"b64_json"` or `"url"`; default `"b64_json"`. URL format is convenient for polling and downloads. Both save files. |
-| `output_dir` | string | `<store>/<active-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
+| `output_dir` | string | `<store>/<requested-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
 | `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. |
 | `image_strength` | number | Z-Image/Chroma variations only: default 0.6, [0,1), higher preserves more. Only send with a reference. Klein/Qwen reject this field even if set to 0.6; omit it for instruction edits. |
 | `lora` | string or null | Omitted/null for none. Compatible installed catalog ID; lowercase letters, digits and hyphens, starting alphanumeric, max 80 characters. One adapter. |
@@ -166,7 +169,7 @@ A completed generator job returns images in **`result.data[]`**. An accepted or 
 | POST `/v1/images/generations` | Generator | 200 | Persist the same job, wait for completion and return an image response directly. |
 | POST `/v1/images/edits` | Generator | 200 | Require an editing model and source photo; wait for the durable edit and return an image response. |
 
-Accepts the full image-settings object and optional `Idempotency-Key` header. The only default difference is `generate_immediately:true`. Response is `{created, generation_seconds, data:[...]}`, without the job wrapper. The active model is used if omitted.
+Accepts the full image-settings object and optional `Idempotency-Key` header. The only default difference is `generate_immediately:true`. Response is `{created, generation_seconds, data:[...]}`, without the job wrapper. The shared saved default is used if omitted.
 
 ```sh
 curl --fail-with-body --max-time 1800 http://localhost:5732/v1/images/generations \
@@ -179,7 +182,7 @@ Use a long client timeout; disconnecting does not cancel the persisted job. Fail
 
 ## Edit an existing photo
 
-**POST `/v1/images/edits`** is a JSON, synchronous endpoint using the same durable worker and `GenerateResponse` as generation. It defaults to `task:"edit"` and immediate priority. It requires `reference_image` and a Klein/Qwen startup model; missing photos, unsupported models, or composition variation return **422**. For a promptly returned job ID, use **POST `/v1/jobs`** with `task:"edit"`. The standalone queue accepts the same settings inside `request`; model-specific validation happens when consumed.
+**POST `/v1/images/edits`** is a JSON, synchronous endpoint using the same durable worker and `GenerateResponse` as generation. It defaults to `task:"edit"` and immediate priority. It requires `reference_image` and a setup Klein/Qwen model; missing photos, unsupported models, or composition variation return **422**. For a promptly returned job ID, use **POST `/v1/jobs`** with `task:"edit"`. The standalone queue accepts the same settings inside `request`; model-specific validation happens when consumed.
 
 ```json
 {
@@ -193,13 +196,13 @@ Use a long client timeout; disconnecting does not cancel the persisted job. Fail
 }
 ```
 
-All three editing entries still support text-to-image generation through `/v1/images/generations` and `/v1/jobs` with the default task. Edit settings do not change that workflow. Per-request model IDs still must match the startup model.
+All three editing entries still support text-to-image generation through `/v1/images/generations` and `/v1/jobs` with the default task. Edit settings do not change that workflow. The requested setup model determines validation and runtime selection.
 
 ### Selected-area Qwen edits
 
 Add `"mask_image":"/absolute/path/mask.png"` to the edit request. The mask must match the **oriented original source dimensions**, not the resized output canvas. White (255) repaints, black (0) preserves; intermediate grayscale values blend. An entirely black mask or mismatched dimensions returns **400** at generator admission; invalid opaque queue requests fail when consumed. Upload a mask PNG through the existing raw-byte **POST `/v1/reference-images`** and pass its returned local path if needed.
 
-Selected areas are supported by **both API servers**. The generator accepts a flat request on port 5732; its startup model must be Qwen:
+Selected areas are supported by **both API servers**. The generator accepts a flat request on port 5732; request model must be Qwen (set it up first):
 
 ```sh
 curl --fail-with-body http://localhost:5732/v1/jobs \
@@ -215,7 +218,7 @@ curl --fail-with-body http://localhost:55302/v1/jobs \
   -d '{"model":"qwen-image-2.1-turbo","request":{"task":"edit","prompt":"Change the jacket to green.","reference_image":"/absolute/path/photo.png","mask_image":"/absolute/path/mask.png","preserve":"Face, pose and background","size":"1024x1024"}}'
 ```
 
-Both return **202** and a job ID. Poll the generator's `/v1/jobs/{id}`, or the queue's `/v1/jobs/{id}?model=qwen-image-2.1-turbo`. Start `make serve MODEL=qwen-image-2.1-turbo` to consume queued edits. For a synchronous result, send the flat masked request to generator **POST `/v1/images/edits`** instead. Keep photo and mask files accessible on the generator's Mac through completion and any restart recovery; the independent queue does not upload, copy or serve media. Use a new idempotency key when changing the mask path or settings, and avoid modifying the referenced files while jobs wait.
+Both return **202** and a job ID. Poll the generator's `/v1/jobs/{id}`, or the queue's `/v1/jobs/{id}`. Run `make serve` to consume queued edits with automatic model switching. For a synchronous result, send the flat masked request to generator **POST `/v1/images/edits`** instead. Keep photo and mask files accessible on the generator's Mac through completion and any restart recovery; the independent queue does not upload, copy or serve media. Use a new idempotency key when changing the mask path or settings, and avoid modifying the referenced files while jobs wait.
 
 Mask and photo are aligned, resized to the requested long edge and padded together. Qwen receives the mask during inference. The service then composites unselected source pixels back before trimming padding, preserving them exactly **at the normalized output resolution**. Original source files are unchanged. Klein models do not receive mask inputs; unsupported mask/model/task combinations return **422**. The UI provides a rectangle selection for uploaded/gallery photos; API clients may supply arbitrary masks. A path-only reference can still be edited, but must have a browser preview before drawing an area selection.
 
@@ -227,7 +230,7 @@ Edit requests append deterministic scope/preservation guidance even with expansi
 
 ## Job and queue endpoints
 
-In this table **Both** means the endpoint exists on each port. The generator operates only on its active model. Queue-port operations accept optional `?model=<id>` with default `z-image-turbo`.
+In this table **Both** means the endpoint exists on each port. Both services manage the shared cross-model queue. Optional model filters apply to list and clear; job-ID routes need no model query.
 
 | Endpoint | Service | Success | Body and behavior |
 | --- | --- | --- | --- |
@@ -238,10 +241,10 @@ In this table **Both** means the endpoint exists on each port. The generator ope
 | POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
 | POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |
 | DELETE `/v1/jobs/{identifier}` | Both | 200 | Cancel a waiting job; returns its cancelled record. No request body. |
-| DELETE `/v1/jobs` | Both | 200 | Cancel all waiting jobs for that model; returns `{cancelled:integer}`. No body. |
+| DELETE `/v1/jobs` | Both | 200 | Cancel all waiting jobs across the shared queue; returns `{cancelled:integer}`. No body. |
 | POST `/v1/jobs/{identifier}/retry` | Both | 202 | Retry a failed/cancelled job as a new ordinary job. No body. Returns the new record, with `retry_of`. |
-| GET `/v1/queue` | Queue | 200 | Read that model's counts/pause state. On the generator, read `queue` in GET `/health`. |
-| PATCH `/v1/queue` | Both | 200 | Body `{"paused":true}` or `{"paused":false}`. Returns counts/state. Queue response also includes `model`. |
+| GET `/v1/queue` | Queue | 200 | Read global counts/pause state. On the generator, read `queue` in GET `/health`. |
+| PATCH `/v1/queue` | Both | 200 | Body `{"paused":true}` or `{"paused":false}`. Returns counts/state. Queue response also includes `queue_scope:"shared"`. |
 
 ### Listing and pagination
 
@@ -250,9 +253,9 @@ In this table **Both** means the endpoint exists on each port. The generator ope
 | `status` | omitted | `queued`, `running`, `succeeded`, `failed`, `cancelled`, or `pending` for queued + running. Omit for all history. |
 | `limit` | 24 | Integer 1–100. |
 | `offset` | 0 | Nonnegative integer. |
-| `model` | `z-image-turbo` | Queue port only; selects a supported model's database. |
+| `model` | omitted | Both ports: filter jobs by model; positions remain global. |
 
-Order is running first, then waiting work in its saved execution order, then finished history newest first. Each waiting job exposes `queue_position`, starting at 1 across the entire waiting queue, independent of page size, offset and status filters. Position is absent/null for active and finished work. A page contains `data[]`, matching `total`, `limit`, `offset`, `has_more`, `has_previous`, and boundary offsets `next_offset` / `previous_offset`. Generator pages omit unavailable offsets; queue pages return them as null and include top-level `model`.
+Order is running first, then waiting work in its saved execution order, then finished history newest first. Each waiting job exposes `queue_position`, starting at 1 across the entire waiting queue, independent of page size, offset and status filters. Position is absent/null for active and finished work. A page contains `data[]`, matching `total`, `limit`, `offset`, `has_more`, `has_previous`, and boundary offsets `next_offset` / `previous_offset`. Generator pages omit unavailable offsets; queue pages return them as null and echo the optional `model` filter.
 
 Generator job lists omit full/partial image result bodies; fetch a job's detail for those. Queue lists return raw job records, including saved metadata when present.
 
@@ -279,8 +282,8 @@ IMAGEGEN_JOB_ID="paste-the-job-id-here"
 curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/move" \
   -H 'Content-Type: application/json' -d '{"position":1}'
 curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
-# The queue service uses the same operations plus optional model selection.
-curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID/move?model=z-image-turbo" \
+# Job IDs address the same shared queue on either service.
+curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID/move" \
   -H 'Content-Type: application/json' -d '{"position":2}'
 ```
 
@@ -288,7 +291,7 @@ curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_J
 
 PATCH is a **complete replacement**, not a partial merge. It is allowed only when `status:"queued"` and `attempts:0`. Omitted settings use defaults when validated; include all settings you want to retain. ID and creation time stay the same. The model cannot change; priority and the idempotency comparison follow the new settings. Position stays the same unless `generate_immediately` changes: switching it on inserts before the first ordinary waiting job, switching it off appends to the queue. Running, previously attempted/interrupted and finished jobs return **409**.
 
-DELETE cancels waiting work only. Deleting a running/finished job returns **409**; an unknown ID returns **404**. Clear cancels all waiting work in that model's queue, preserving active work, history and saved media. There is no permanent job-history or image-deletion API.
+DELETE cancels waiting work only. Deleting a running/finished job returns **409**; an unknown ID returns **404**. Clear cancels all waiting work across all models (or an explicit clear filter), preserving active work, history and saved media. There is no permanent job-history or image-deletion API.
 
 Retry is allowed only for failed/cancelled entries (**409** otherwise), with a new ID and ordinary priority. It reuses saved settings and any frozen seed. A retry is a new full batch; completed files from the old job remain. Restore missing references/adapters first. Generator-side retry can return **400/422** if those saved settings/inputs are unusable. Repeating the retry call intentionally creates another job; it has no idempotency header parameter.
 
@@ -369,7 +372,7 @@ All candidate prompts are committed before rendering and reused after interrupti
 
 ## Independent queue API (generator may be off)
 
-The standalone service routes settings to a model's SQLite database. Start it with `make queue`; it needs the Python environment but no image/LLM weights or mounted media drive for CRUD.
+The standalone service stores requests for every model in the shared SQLite database. Start it with `make queue`; it needs the Python environment but no image/LLM weights or mounted media drive for CRUD.
 
 ### Submission envelope
 
@@ -378,7 +381,7 @@ POST `http://localhost:55302/v1/jobs` accepts:
 | Field | Type | Default and meaning |
 | --- | --- | --- |
 | `request` | object | Required. Image settings from the generation table. |
-| `model` | string | `z-image-turbo`. A supported model can be queued before setup. |
+| `model` | string or omitted | Shared saved default if omitted. Only setup models are admitted. |
 | `adapter_sha256` | string or null | Optional lowercase 64-character hex checksum. Advanced admission pin for an adapter; omit for ordinary submissions. |
 
 ```sh
@@ -390,11 +393,11 @@ curl --fail-with-body http://localhost:55302/v1/jobs \
 
 The envelope rejects unknown outer fields. Nested `request.model`, if present, must match the outer model. `request.generate_immediately` defaults false and must be a strict boolean. JSON values must be finite (no NaN/infinity). Other image settings are validated by the generator when consumed: **202 means persisted, not model-validated or generated**. Bad image settings become failed jobs without blocking later work.
 
-For PATCH, send only the complete replacement envelope `{"request":{...image settings...}}`; select the queue with `?model=<id>`. Other queue operations also use that query; see the shared endpoint table.
+For PATCH, send only the complete replacement envelope `{"request":{...image settings...}}`; address the job ID directly. Only list/clear offer an optional model filter; see the shared endpoint table.
 
 A queue response has resolved top-level `model` and the raw job fields above. Single-image `result` is its saved generation metadata, including `file_path`, `metadata_path`, `seed`, `size`, `prompt`, `model`, `created`, `seconds` and other settings. Batch `result` is `{created,seconds,images:[...saved metadata...]}`. These raw objects have no generator download URLs or base64 field, even if `request.response_format` asks for URL format. Use the generator's detail endpoint for `result.data[]` and image URLs when it is running. A queue response's raw result may be partial before success.
 
-Only the selected model's generator consumes its queue. Jobs requiring disabled LoRAs or expansion stay waiting until that capability is enabled or the job is cancelled; an incompatible head job can hold up later work. Referenced files/adapters must remain available until processing. The queue process never selects a worker, starts inference or recovers running jobs.
+One generator consumes all setup models from the shared queue. Jobs whose models are unavailable or whose LoRA/expansion capability is disabled stay waiting with an explanation while later eligible work continues. Referenced files/adapters must remain available until processing. The queue process never selects a worker, starts inference or recovers running jobs.
 
 ## Reference photos and variations
 
@@ -532,7 +535,7 @@ These read-only endpoints are on the **generator (5732)**, with a webpage at `/o
 | GET `/v1/observability` | Sampler `recording`, startup `model`, session ID, `last_sample`, optional error, source availability, cadence/retention, model IDs/names, window IDs and measurement definitions. |
 | GET `/v1/observability/metrics` | `window`: `5m` (default), `30m`, `1h`, `6h`, `24h`, `3d`, `7d`. Optional `model=<id>` filters history; omission includes all models/sessions. Optional `end` is a finite current/past Unix timestamp (default now). `max_points`: 30–1200, default 600. |
 | GET `/v1/observability/jobs` | Paginated measured **attempts**, newest first. Optional `model`; `limit` 1–100 (default 20), `offset` >=0 (default 0). Returns `data`, `total`, `limit`, `offset`, `has_more`. Waiting/unmeasured jobs do not appear. |
-| GET `/v1/observability/jobs/{id}` | One job’s recorded attempts, plus its graph. Optional `model` disambiguates the model. `window`: `full` (default), `1m`, `5m`, `15m`; `max_points` as above. Short windows end at the latest completion, or now during execution. Only execution is sampled; waiting/restart intervals between attempts appear as gaps. |
+| GET `/v1/observability/jobs/{identifier}` | One job’s recorded attempts, plus its graph. Optional `model` disambiguates the model. `window`: `full` (default), `1m`, `5m`, `15m`; `max_points` as above. Short windows end at the latest completion, or now during execution. Only execution is sampled; waiting/restart intervals between attempts appear as gaps. |
 
 Example requests:
 
@@ -555,7 +558,7 @@ Graph responses have `start`/`end` Unix seconds, `bucket_seconds`, `points[]` an
 | `gpu_utilization_percent` | Apple GPU driver `Device Utilization %`, **whole device**, including other apps. Not per-process GPU attribution. |
 | `gpu_memory_bytes` | Whole-device driver `In use system memory`. On Apple Silicon this shares unified RAM; **do not add it to RSS/system RAM**. |
 
-`summary` has `sample_count`, first/last sample timestamps, and one entry per metric with `mean`, `peak`, and valid-value `count`. Job detail also returns `runs[]`: `session`, `job_id`, `attempt`, actual startup `model`, `started`, `finished`, `status` (`running`, `succeeded`, `failed`, `interrupted`) and that attempt’s summary. Each recovery attempt remains identifiable. A recovered previous execution closes at its last observed sample; it is not reported as successful. In full job view, the UI can combine saved attempt summaries even when raw points have expired. Short-window summaries use only retained points in that window.
+`summary` has `sample_count`, first/last sample timestamps, and one entry per metric with `mean`, `peak`, and valid-value `count`. Job detail also returns `runs[]`: `session`, `job_id`, `attempt`, actual job `model`, `started`, `finished`, `status` (`running`, `succeeded`, `failed`, `interrupted`) and that attempt’s summary. Each recovery attempt remains identifiable. A recovered previous execution closes at its last observed sample; it is not reported as successful. In full job view, the UI can combine saved attempt summaries even when raw points have expired. Short-window summaries use only retained points in that window.
 
 Samples are taken every **1s during a job / 5s idle**, plus execution boundaries. Raw samples expire after **8 days**; finished/interrupted summaries remain in `state/observability/metrics.sqlite3`. Retention and restarts can therefore leave a job with a saved summary and no raw graph points. This database, WAL/journals and all resource history are private local state, not Git assets. No prompts, images or command lines are copied into it.
 
@@ -632,14 +635,22 @@ Other 503 errors do not necessarily include that code/header. The queue API's st
 
 ## Persistent generation queue
 
-Each model's SQLite database is **`<project>/state/queues/<model-id>/jobs.sqlite3`**, with journals, backups and worker leases alongside. `DATA_DIR` relocates weights/media, not SQLite. Both HTTP services share this state; only the leased generator owns inference and running-job recovery. There is no worker registration/selection API.
+The shared SQLite database is **`<project>/state/queue/jobs.sqlite3`**, with journals, backups and worker leases alongside. `DATA_DIR` relocates weights/media, not SQLite. Both HTTP services share this state; only the leased generator owns inference and running-job recovery. There is no worker registration/selection API.
 
 Graceful shutdown finishes the active batch and leaves waiting jobs persisted. Abrupt shutdown recovery reuses job IDs, frozen defaults/seeds, saved expansions and completed options, rendering only missing images. Sampling of an interrupted image restarts; intermediate diffusion state is not saved. Matching fully published PNG/sidecars can be adopted after a crash before the success commit. Completed history is not rerun automatically. Native children retain ownership leases until they finish.
 
 References, adapters and output/index files are external to SQLite and must remain accessible. A missing media SSD blocks generation without creating fallback downloads; standalone queue CRUD remains available. Failed work does not retry forever or block subsequent valid jobs. GPU-lock contention waits with pending jobs still removable; it does not unload idle resident models. `GPU_LOCK_FILE` or ignored `storage.json` setting `gpu_lock_file` selects the shared lock; the portable default is `<store>/.model-services/gpu.lock`.
 
-### Existing queue migration and backups
+### Queue durability and backups
 
-Older `<store>/<model-id>/queue/jobs.sqlite3` databases migrate at generator startup under both worker leases. Stop the old worker and let native inference finish first. Migration uses SQLite backup including committed WAL data, checks integrity/content and retains a project-local `legacy-backup-*.sqlite3` before retiring the old database. Differing source/destination databases cause a clear error without overwriting or merging them; identical copies after interruption are recognized.
+The new shared queue starts empty. Restart both services against version4; no old per-model database migration or API compatibility is provided. SQL uses short transactions and `synchronous=FULL`; inference runs outside database transactions. Back up project `state/` using a stopped service or SQLite's backup API, together with media/references/indexes. This protects work across process restarts; it does not replace backups for disk failure. A source-only clone starts with an empty shared queue.
 
-Schema 4 adds persisted waiting positions and upgrades schemas 1–3 while preserving initial priority order, IDs, history, pause state and frozen settings. Schema 3 introduced deferred preparation checkpoints. Older servers refuse schema 4; stop both services before upgrading and restart both against the updated code. SQL uses short transactions and `synchronous=FULL`; inference runs outside database transactions. Back up project `state/` using a stopped service or SQLite's backup API, together with media/references/indexes. This protects work across process restarts; it does not replace backups for disk failure. A source-only clone starts with an empty queue.
+### Runtime dispatch and setup readiness
+
+The generator processes eligible jobs in saved global order, one complete batch at a time, and never groups jobs by model behind the caller’s back. Switching stops the old backend child before launching another. Consecutive Z-Image jobs reuse the resident model; native Chroma/Klein/Qwen retain per-image loading. The HTTP API remains available while `queue.stage` reports loading/expansion/rendering. A backend failure fails that job and later eligible jobs continue. Shutdown waits for the current batch, then releases the owned runtime.
+
+A previously queued job whose model files are missing remains queued; both job APIs expose `blocked_reason` for missing model files; generator responses also explain disabled optional capabilities. Disabled LLM/LoRA requirements also remain queued rather than silently changing their settings. Models missing setup cannot be newly submitted or retried until restored. Both services can still read/cancel existing history if model storage is unavailable. The queue API uses no inference imports and never starts a model. The fresh shared queue intentionally does not import former per-model databases; existing media/catalogs are retained.
+
+Every generator image result includes `model` in addition to its absolute `file_path` and `metadata_path`. Preview expansion accepts optional `model`, using that model’s guidance/tokenizer; omission uses the shared default. Discovery is the source of per-model limits/defaults. To update the saved default, run `make serve MODEL=<ready-id>`; an otherwise matching running generator is reused even if busy, without changing already-resolved job models. Startup mode changes still require it to be idle.
+
+The webpage enables **Edit photo** when at least one setup editor exists. Entering that view clears the model choice; select an editing model before sending a request. An empty edit selector never falls back to the default generation model. With no setup editor, the tab stays disabled and its tooltip explains which models to set up.

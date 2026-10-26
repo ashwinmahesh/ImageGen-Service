@@ -20,13 +20,17 @@ def list_loras():
     return list_entries(LORA_DIR,catalog())
 
 
-def resolve_lora(identifier, strength=None):
+def resolve_lora(identifier, strength=None, *, model=None):
     if identifier is None:
         return None
-    entry = next((entry for entry in catalog() if entry["id"] == identifier), None)
+    if model is not None and model!=API_MODEL:
+        from adapter_catalog import model_loras
+        directory,entries=model_loras(ROOT,model)
+    else:directory,entries=LORA_DIR,catalog()
+    entry = next((entry for entry in entries if entry["id"] == identifier), None)
     if entry is None:
         raise ValueError("Unknown LoRA for this model; see GET /v1/loras")
-    path = adapter_path(entry)
+    path = catalog_adapter_path(directory,entry)
     if not path.is_file() or not entry.get("sha256"):
         raise ValueError("LoRA is not installed. Import a compatible .safetensors file with make install-lora FILE=/absolute/path")
     stat = path.stat()

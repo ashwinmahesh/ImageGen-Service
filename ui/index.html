@@ -106,8 +106,8 @@
     </div>
     <section class="queue-panel" aria-label="Image generation queue">
       <div class="queue-heading"><h2>Queue</h2><span class="queue-count" id="queue-summary">Connecting…</span></div>
-      <p class="queue-help">Saved on disk and resumed after a server restart. This queue belongs to the active model.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
-      <div class="queue-tools"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs for this model. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. This queue belongs to the model selected at startup."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
+      <p class="queue-help">Saved on disk and resumed after a server restart. One queue handles all setup image models.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
+      <div class="queue-tools"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs across models. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. All models share this queue and its ordering."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
       <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
       <div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
     </section>
@@ -117,20 +117,20 @@
   <script>
     const $ = id => document.getElementById(id);
     let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
-    let activeModel = null, defaultSteps = 9, maxSteps = 12, referenceMode = 'variation';
+    let activeModel = null, defaultModel = null, loraRequestVersion = 0, defaultSteps = 9, maxSteps = 12, referenceMode = 'variation';
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
     let workflow = 'generate', modelCatalog = [], serverCapabilities = {}, modePrompts = {generate:'', edit:''};
     let selectionRect = null, selectionStart = null, maskUpload = null, savedMaskPath = null;
     const sourceCanvas = $('source-canvas'), sourceContext = sourceCanvas.getContext('2d');
-    function chosenModel() { return $('model-choice').value || activeModel; }
+    function chosenModel() { return $('model-choice').value || (workflow==='generate' ? defaultModel : null); }
     function chosenProfile() { return modelCatalog.find(item => item.id === chosenModel()); }
-    function editsSupported() { return chosenProfile()?.tasks?.includes('edit') === true; }
+    function editsSupported() { return modelCatalog.some(item => item.tasks?.includes('edit')); }
     function updateWorkflowAvailability() {
       const supported=editsSupported(), control=$('mode-edit-control');
       const editModels=modelCatalog.filter(item => item.tasks?.includes('edit')).map(item => item.name || item.id);
-      $('mode-edit-tooltip').textContent='Switch to a model that supports edits.'+(editModels.length ? ' Supported models: '+editModels.join(', ')+'.' : '');
+      $('mode-edit-tooltip').textContent='Switch to a model that supports edits.'+(editModels.length ? ' Supported models: '+editModels.join(', ')+'.' : ' '+(serverCapabilities.photo_editing?.setup_hint || ''));
       $('mode-edit').disabled=!supported || generating || previewingExpansion;
       control.dataset.unavailable=String(!supported);
       control.tabIndex=supported ? -1 : 0;
@@ -142,25 +142,42 @@
     function editingReady() { return workflow !== 'edit' || Boolean(referenceFile || $('reference').value.trim()); }
     function maskSupported() { return chosenProfile()?.mask_editing === true; }
     async function loadModels() {
-      try { const response=await fetch('/v1/models',{cache:'no-store'}); if (!response.ok) throw new Error('Unavailable'); modelCatalog=(await response.json()).data; populateModels(); }
+      try { const response=await fetch('/v1/models',{cache:'no-store'}); if (!response.ok) throw new Error('Unavailable'); const catalog=await response.json(), changed=JSON.stringify(catalog.data)!==JSON.stringify(modelCatalog); modelCatalog=catalog.data; if (changed) populateModels(); }
       catch { $('model-status').textContent='Could not load available models. Reload after checking the server.'; }
     }
-    function populateModels(preferred) {
+    function populateModels(preferred, blank=false) {
       const previous=preferred || $('model-choice').value;
       const choices=modelCatalog.filter(item => workflow==='generate' || item.tasks?.includes('edit'));
-      $('model-choice').replaceChildren(...choices.map(item => new Option(item.name+(item.id===activeModel ? ' · active' : item.downloaded ? ' · ready to start' : ' · setup required'),item.id)));
-      const selected=choices.find(item => item.id===previous) || choices.find(item => item.id===activeModel) || choices.find(item => item.id==='flux2-klein-9b') || choices[0];
-      if (selected) $('model-choice').value=selected.id;
+      const options=choices.map(item => new Option(item.name+(item.id===defaultModel ? ' · default' : ''),item.id));
+      if (workflow==='edit') { const placeholder=new Option('Choose an editing model…',''); placeholder.disabled=true; options.unshift(placeholder); }
+      $('model-choice').replaceChildren(...options);
+      const selected=blank ? null : choices.find(item=>item.id===previous) || (workflow==='generate' ? choices.find(item=>item.id===defaultModel) || choices[0] : null);
+      $('model-choice').value=selected?.id || '';
       updateModelChoice();
     }
     function updateModelChoice() {
       const profile=chosenProfile();
       updateWorkflowAvailability();
-      if (!profile) return;
+      $('edit-area').disabled=!profile;
+      if (!profile) {
+        $('license-notice').textContent=''; $('license-notice').hidden=true;
+        referenceMode=workflow==='edit' ? 'edit' : 'variation';
+        $('model-status').textContent=workflow==='edit' && editsSupported() ? 'Choose an editing model to continue.' : 'No setup models available. Run make setup, then refresh this page.';
+        $('edit-area').options[1].disabled=true; $('edit-area-hint').textContent='Choose a model to see its editing options.';
+        $('steps').value=''; updateReferenceSizing(); updateButton(); updateVariationControls(); return;
+      }
       defaultSteps=profile.default_steps; maxSteps=profile.max_steps;
       $('steps').value=defaultSteps; $('steps').max=maxSteps;
-      const active=profile.id===activeModel;
-      $('model-status').textContent=active ? (workflow==='edit' ? 'Ready for photo editing. Your source photo sets the framing.' : 'Ready for generation, with or without a reference photo.') : `${profile.name} ${profile.downloaded ? 'is installed' : 'needs setup'}. This server runs ${serverCapabilities.name || activeModel}.\n${profile.downloaded ? '' : 'make setup MODEL='+profile.id+'\n'}make serve MODEL=${profile.id}`;
+      referenceMode=profile.reference_mode || 'variation';
+      $('prompt-hint').textContent=workflow==='edit' ? 'Describe only the requested change. Keep unrequested details as they are.' : 'Put key details first. '+profile.prompt_note;
+      if (!lastResult) $('saved-path').textContent=profile.output_dir || 'Selected model’s images folder';
+      const referenceHelp=document.querySelector('[aria-label="Help with reference photo"]');
+      if (referenceHelp) referenceHelp.dataset.help=referenceMode==='edit' ? 'Upload a photo and describe the desired change. This model follows editing instructions; there is no preservation-strength control.' : 'Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed.';
+      $('reference-hint').textContent=workflow==='edit' ? 'Choose the existing photo, then describe only the changes.' : referenceMode==='edit' ? 'Upload a photo and describe the change you want, or generate from text alone.' : 'Use a photo as the starting point for a variation.';
+      $('edit').textContent=referenceMode==='edit' ? 'Edit image' : 'Make a variation';
+      const license=profile[profile.id]?.license;
+      $('license-notice').textContent=license?.notice || ''; $('license-notice').hidden=!license?.notice;
+      $('model-status').textContent=workflow==='edit' ? 'Ready for photo editing. The server loads this model automatically when your job runs.' : 'Ready. The server loads this model automatically when your job runs.';
       $('steps-hint').textContent=`${defaultSteps} steps is recommended for ${profile.name}. ${workflow==='edit' ? 'More steps can change the source more; start here.' : 'Reuse a seed to compare settings.'}`;
       $('edit-area').options[1].disabled=!maskSupported();
       if (!maskSupported()) { $('edit-area').value='whole'; selectionRect=null; maskUpload=null; savedMaskPath=null; }
@@ -168,7 +185,7 @@
       updateReferenceSizing(); updateSourceCanvas(); updateButton(); updateVariationControls();
     }
     function setWorkflow(next) {
-      if (generating || previewingExpansion || (next==='edit' && !editsSupported())) return;
+      if (next===workflow || generating || previewingExpansion || (next==='edit' && !editsSupported())) return;
       modePrompts[workflow]=$('prompt').value;
       const preferred=chosenModel(); workflow=next;
       $('prompt').value=modePrompts[next];
@@ -193,11 +210,11 @@
       $('lora-section').hidden=next==='edit' || !lorasEnabled; $('base-only-mode').hidden=next==='edit' || lorasEnabled;
       $('expanded-details').hidden=true; expansionPreview=null;
       if (next==='edit') { $('lora').value=''; $('reference-size').value='1024'; }
-      populateModels(preferred); updateReferenceSizing(); updateVariationControls();
+      populateModels(next==='edit' ? null : preferred,next==='edit'); loadLoRAs(); updateReferenceSizing(); updateVariationControls();
     }
     $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
     $('mode-edit').addEventListener('click',()=>setWorkflow('edit'));
-    $('model-choice').addEventListener('change',updateModelChoice);
+    $('model-choice').addEventListener('change',()=>{updateModelChoice();loadLoRAs();$('expanded-details').hidden=true;expansionPreview=null;});
     function updateSourceCanvas() {
       const image=$('reference-preview');
       const visible=workflow==='edit' && image.complete && image.naturalWidth>0 && !$('reference-card').hidden;
@@ -251,10 +268,14 @@
         loraCatalog.some(item => !item.available) ? 'Downloaded styles appear here. Import the compatible Z-Image weights first.' : 'Choose an installed style, or use the original model.';
     }
     async function loadLoRAs() {
+      const selected=chosenModel(), version=++loraRequestVersion;
+      $('lora').replaceChildren(new Option('None — original model','')); loraCatalog=[]; updateLoRA();
+      if (!selected) return;
       try {
-        const response = await fetch('/v1/loras', {cache: 'no-store', signal: AbortSignal.timeout(5000)});
+        const response = await fetch('/v1/loras?'+new URLSearchParams({model:selected}), {cache: 'no-store', signal: AbortSignal.timeout(5000)});
         if (!response.ok) throw new Error('Unavailable');
         const catalog = await response.json();
+        if (version!==loraRequestVersion || chosenModel()!==selected) return;
         setLoRAMode(catalog.enabled !== false);
         loraCatalog = catalog.data;
         $('lora').replaceChildren(new Option('None — original model', ''));
@@ -270,7 +291,7 @@
     function updateButton() {
       updateWorkflowAvailability();
       const selectedArea=workflow==='edit' && $('edit-area').value==='selected';
-      $('generate').disabled=generating || previewingExpansion || !ready || chosenModel()!==activeModel || !editingReady() || (selectedArea && !selectionRect && !savedMaskPath);
+      $('generate').disabled=generating || previewingExpansion || !ready || !chosenProfile() || !editingReady() || (selectedArea && !selectionRect && !savedMaskPath);
       if (!generating) { const count=Number($('image-count').value); $('button-text').textContent=$('generate-immediately').checked ? (workflow==='edit' ? count===1 ? 'Edit photo' : `Create ${count} edit options` : count===1 ? 'Generate image' : `Generate ${count} images`) : count===1 ? 'Add to queue' : `Queue ${count} images`; }
     }
     function varyingCompositions() { return workflow !== 'edit' && Number($('image-count').value)>1 && expansionEnabled && $('expand-prompt').checked && $('vary-prompt').checked; }
@@ -278,7 +299,7 @@
       const multiple=Number($('image-count').value)>1, enabled=expansionEnabled && $('expand-prompt').checked;
       $('variation-controls').hidden=!multiple || workflow==='edit'; $('vary-prompt').disabled=!enabled || workflow==='edit';
       $('variation-hint').textContent=!expansionEnabled ? 'Restart with make serve and keep the LLM enabled for distinct composition prompts. Different seeds alone may give similar pictures.' : !enabled ? 'Turn on Prompt expansion above to vary the compositions.' : 'Gives each option its own composition prompt while keeping your stated subjects, style and constraints. Adds LLM time. Strong references or precise framing can limit differences. Candidate prompts are saved with each image.';
-      $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions() || chosenModel()!==activeModel;
+      $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions() || !chosenProfile();
       $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
     }
     function showError(message) { $('error').textContent = message; $('error').hidden = false; }
@@ -333,37 +354,31 @@
     });
     $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
     $('reference').addEventListener('input', () => { if (referenceFile || !$('reference-card').hidden) clearPhoto(); referenceDimensions = null; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
+    function updateRuntimeStatus(data) {
+      if (generating) return;
+      const name=modelCatalog.find(item=>item.id===data.active_model)?.name || data.active_model || 'queued image';
+      status(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…` : data.status==='ready' ? 'Ready on your Mac' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : 'checking');
+    }
     async function checkHealth() {
       try {
         const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
         if (!response.ok) throw new Error('Unavailable');
         const data = await response.json();
-        const changed = activeModel && activeModel !== data.model;
-        const cap = data.capabilities; serverCapabilities=cap || {};
-        if (!cap || typeof cap.default_steps !== 'number') throw new Error('Missing model capabilities');
-        if (activeModel !== data.model) {
-          activeModel = data.model; referenceMode = cap.reference_mode || 'variation'; watchingJob = localStorage.getItem('imagegen-watching:' + activeModel); queueOffset = 0; defaultSteps = cap.default_steps; maxSteps = cap.max_steps;
-          $('model-name').textContent = cap.name; document.title = cap.name + ' — Image Studio';
-          $('steps').value = defaultSteps; $('steps').max = maxSteps;
-          $('edit').textContent = referenceMode === 'edit' ? 'Edit image' : 'Make a variation';
-          $('reference-hint').textContent = workflow==='edit' ? 'Choose the existing photo and describe only the changes.' : 'Generate from text, or optionally add a photo as a visual reference. PNG, JPEG or WebP, up to 20 MB.';
-          const help = document.querySelector('[aria-label="Help with reference photo"]');
-          if (help) help.dataset.help = referenceMode === 'edit' ? 'Upload a photo and describe the desired edit in the prompt. This model uses instruction editing; there is no preservation-strength control.' : 'Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed.';
-          const license = cap[data.model]?.license;
-          $('license-notice').replaceChildren(); $('license-notice').hidden = !license?.notice;
-          if (license?.notice) { const link = document.createElement('a'); link.href = license.url; link.textContent = 'Model license'; link.target = '_blank'; link.rel = 'noopener'; $('license-notice').append(license.notice + ' ', link); }
-          updateReferenceSizing();
-          $('steps-hint').textContent = `${defaultSteps} steps is the default for ${cap.name}. Reuse a seed to explore variations.`;
-          $('prompt-hint').textContent = 'Put key details first. ' + cap.prompt_note;
-          populateModels(data.model);
-          if (changed) { lastResult = null; $('lora').value = ''; await loadLoRAs(); showError('The server model changed. Review your settings before generating.'); }
+        activeModel=data.active_model; defaultModel=data.default_model;
+        const cap=data.capabilities; serverCapabilities=cap || {};
+        if (!cap || typeof cap.default_steps!=='number') throw new Error('Missing model capabilities');
+        $('model-name').textContent='ImageGen'; document.title='ImageGen — Image Studio';
+        if (!watchingJob) watchingJob=localStorage.getItem('imagegen-watching');
+        if (!lastResult) {
+          const folder=chosenProfile() ? chosenProfile().output_dir : '';
+          $('saved-path').textContent=folder || 'Each model’s images folder';
+          $('output-dir').placeholder='Default: selected model’s images folder';
         }
-        if (!lastResult && typeof data.data_dir === 'string') { const folder = data.data_dir.replace(/\/$/, '') + '/images'; $('saved-path').textContent = folder; $('output-dir').placeholder = 'Default: ' + folder; }
         if (typeof data.loras_enabled === 'boolean' && data.loras_enabled !== lorasEnabled) {
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
         }
         const expansion = cap.prompt_expansion || {};
-        const guidance = workflow==='edit' && expansion.photo_editing?.guidance_profile ? {id:expansion.photo_editing.guidance_profile,verified_token_count:false} : cap[data.model]?.prompt_expansion_guidance;
+        const selected=chosenProfile(), guidance=selected?.[selected.id]?.prompt_expansion_guidance;
         $('expansion-guidance').textContent = guidance ? `Guidance: ${guidance.id}${guidance.verified_token_count ? ' · image token budget checked' : ' · native token count unavailable'}` : '';
         if (expansionEnabled !== !!expansion.enabled) {
           expansionEnabled = !!expansion.enabled;
@@ -372,7 +387,7 @@
         }
         updateVariationControls();
         ready = data.status === 'ready'; serverBusy = data.busy;
-        if (!generating) status(serverBusy ? 'Generating an image' : ready ? 'Ready on your Mac' : 'Loading model…', serverBusy ? 'busy' : ready ? 'ready' : 'checking');
+        updateRuntimeStatus(data);
       } catch { ready = false; if (!generating) status('Server offline', 'offline'); }
       updateButton();
     }
@@ -383,8 +398,12 @@
       $('prompt').focus();
     });
     $('reuse').addEventListener('click', () => { if (lastSeed !== null) { $('seed').value = lastSeed; $('seed').closest('details').open = true; $('seed').focus(); } });
-    $('edit').addEventListener('click', () => {
+    $('edit').addEventListener('click', async () => {
       if (!lastResult || generating) return;
+      if (lastResult.model && modelCatalog.some(item=>item.id===lastResult.model) && chosenModel()!==lastResult.model) {
+        if (workflow==='edit') setWorkflow('generate');
+        $('model-choice').value=lastResult.model;updateModelChoice();await loadLoRAs();
+      }
       if (referenceMode==='edit') setWorkflow('edit');
       clearPhoto(); $('reference').value = lastResult.file_path;
       $('reference-preview').src = lastResult.url; $('reference-name').textContent = 'Your generated image';
@@ -402,7 +421,7 @@
     });
     $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
     $('form').addEventListener('submit', async event => {
-      event.preventDefault(); if (generating || previewingExpansion || !ready || chosenModel()!==activeModel) return;
+      event.preventDefault(); if (generating || previewingExpansion || !ready || !chosenProfile()) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
       const payload = {model: chosenModel(), prompt, n:Number($('image-count').value), size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
@@ -474,7 +493,7 @@
       if (previewingExpansion || generating || !ready) return;
       const prompt=$('prompt').value.trim();
       if (!prompt) { showError('Describe the image before previewing expansion.'); return; }
-      const payload={prompt};
+      const payload={prompt,model:chosenModel()};
       if (workflow==='edit') { payload.task='edit'; if ($('preserve').value.trim()) payload.preserve=$('preserve').value.trim(); }
       if (workflow!=='edit' && lorasEnabled && $('lora').value) { payload.lora=$('lora').value; payload.lora_strength=Number($('lora-strength').value); }
       previewingExpansion=true; $('preview-expansion').disabled=true; updateButton(); $('error').hidden=true;
@@ -491,7 +510,7 @@
     $('image-count').addEventListener('change',() => {updateButton();updateVariationControls();});
     $('expand-prompt').addEventListener('change',updateVariationControls);
     $('vary-prompt').addEventListener('change',updateVariationControls);
-    function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching:' + activeModel, id); }
+    function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching', id); }
     function optionURL(item) {
       const identifier=String(item.file_path).split('/').pop().replace(/\.png$/,'');
       const url=new URL(item.url || (/^[0-9a-f]{32}$/.test(identifier) ? '/images/'+identifier+'.png' : ''),location.origin);
@@ -508,12 +527,13 @@
       $('result').src=url.href; $('result').alt=payload.prompt; $('result').hidden=false; $('empty').hidden=true;
       for (const [position,card] of [...$('image-options').children].entries()) card.setAttribute('aria-pressed',String(position===index));
       lastSeed=item.seed;
-      lastResult={file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
+      $('edit').textContent=modelCatalog.find(profile=>profile.id===item.model)?.reference_mode==='edit' ? 'Edit image' : 'Make a variation';
+      lastResult={model:item.model,file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
       if (item.prompt_expansion) showExpansion(item.prompt_expansion);
       else { $('expanded-details').hidden=true; expansionPreview=null; }
       const count=batch.request.n || 1;
       $('result-info').textContent=(count>1 ? `Option ${item.candidate_index || index+1} of ${count} · ` : '')+`${item.size.replace('x',' × ')} · ${batch.result.generation_seconds}s${count>1 ? ' total' : ''} · Seed ${lastSeed}`;
-      $('download').href=url.href; $('download').download=`${activeModel}-${lastSeed}.png`; $('actions').hidden=false;
+      $('download').href=url.href; $('download').download=`${lastResult?.model || chosenModel()}-${lastSeed}.png`; $('actions').hidden=false;
       $('saved-path').textContent=item.file_path;
     }
     async function displayJob(job) {
@@ -594,9 +614,9 @@
       const row=document.createElement('div'); row.className='queue-item';
       const copy=document.createElement('div'); copy.className='queue-copy';
       const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
-      const detail=document.createElement('small'); detail.textContent=`${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
+      const detail=document.createElement('small'); detail.textContent=`${modelCatalog.find(item=>item.id===job.model)?.name || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
       copy.append(title,detail);
-      if (job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.error; copy.append(error); }
+      if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
       row.dataset.jobId=job.id;
       if (job.status==='queued') {
         row.dataset.position=job.queue_position;
@@ -619,16 +639,16 @@
       else if (job.status==='succeeded') { action.textContent='View'; action.addEventListener('click',async() => { try { await displayJob(await requestJSON('/v1/jobs/'+job.id)); } catch(error) { showError(error.message); } }); }
       else if (['failed','cancelled'].includes(job.status)) { action.textContent='Retry'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); }
       else { action.textContent='Follow'; action.addEventListener('click',() => { followJob(job.id); refreshQueue(); }); }
-      actions.append(action); if(job.attempts>0){const metrics=document.createElement('a');metrics.className='queue-metrics';metrics.textContent='Metrics';metrics.href='/observability?'+new URLSearchParams({job:job.id,model:activeModel});metrics.title='View resource measurements for this job';actions.append(metrics);} row.append(actions); return row;
+      actions.append(action); if(job.attempts>0){const metrics=document.createElement('a');metrics.className='queue-metrics';metrics.textContent='Metrics';metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model});metrics.title='View resource measurements for this job';actions.append(metrics);} row.append(actions); return row;
     }
     async function refreshQueue() {
-      if (pollingQueue || queueDrag || queueMutating || !activeModel) return;
+      if (pollingQueue || queueDrag || queueMutating) return;
       pollingQueue=true;
       try {
         const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
         if ($('queue-filter').value) params.set('status',$('queue-filter').value);
         const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health')]);
-        if (health.model !== activeModel) { await checkHealth(); return; }
+        activeModel=health.active_model; serverBusy=health.busy; updateRuntimeStatus(health);
         const summary=health.queue || {};
         queuePaused=!!summary.paused;
         $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
@@ -656,7 +676,7 @@
           if (finished) {
             if (job.status==='succeeded') await displayJob(job);
             else { if (job.partial_result) await displayJob(job); showError(job.error || 'The followed job was cancelled.'); }
-            localStorage.removeItem('imagegen-watching:'+activeModel); watchingJob=null;
+            localStorage.removeItem('imagegen-watching'); watchingJob=null;
           }
         }
       } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; }
@@ -687,9 +707,10 @@
         const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
+        if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
         if (metadata.task==='edit' || (mode==='reference' && referenceMode==='edit')) { setWorkflow('edit'); $('preserve').value=metadata.preserve || ''; }
-        const sameModel = !item.model || item.model === activeModel;
-        if (!sameModel) warnings.push(`This image used ${item.model}; the server currently runs ${activeModel}. Model-specific settings use current defaults.`);
+        const sameModel = !item.model || item.model === chosenModel();
+        if (!sameModel) warnings.push(`This image used ${item.model}; that model is not set up here. Model-specific settings use current defaults.`);
         const url = new URL(item.url, location.origin);
         if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
         $('prompt').value = metadata.expanded_prompt || item.prompt || '';
@@ -715,7 +736,8 @@
         } else if (typeof metadata.reference_image === 'string' && metadata.reference_image) {
           $('reference').value = metadata.reference_image; $('reference-options').hidden = referenceMode === 'edit';
           if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
-          if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
+          if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
+        if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
           warnings.push('This generation used a reference file; it must still exist at the saved path.');
         }
         updateReferenceSizing();
@@ -726,8 +748,8 @@
         $('prompt').focus();
       } catch (error) { showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await Promise.all([loadLoRAs(), checkHealth(),loadModels()]); await importSavedImage(); await refreshQueue(); }
-    initialize(); setInterval(checkHealth, 15000); setInterval(refreshQueue, 2000);
+    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await importSavedImage(); await refreshQueue(); }
+    initialize(); setInterval(async()=>{await checkHealth();if (!generating && !previewingExpansion) await loadModels();}, 15000); setInterval(refreshQueue, 2000);
   </script>
 </body>
 </html>

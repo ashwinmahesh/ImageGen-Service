@@ -113,7 +113,7 @@ def create_router(get_monitor,project):
                     'gpu_memory_bytes':'Whole-device GPU driver In use system memory, sharing unified RAM; do not add this to RSS/system RAM.'}}
 
     @router.get('/v1/observability/metrics',response_model=ResourceSeries,summary='CPU, memory and GPU history',
-                description='Across all startup models/sessions by default. Optional model filter. Samples are kept for eight days and bucketed into bounded means and sampled peaks. Null means unavailable; missing buckets mean no samples, including stopped generators. No backfill or implicit model load.')
+                description='Across all job models/sessions by default. Optional model filter. Samples are kept for eight days and bucketed into bounded means and sampled peaks. Null means unavailable; missing buckets mean no samples, including stopped generators. No backfill or implicit model load.')
     def metrics(window:Literal['5m','30m','1h','6h','24h','3d','7d']='5m',model:str|None=None,
                 end:float|None=Query(default=None,gt=0),max_points:int=Query(600,ge=30,le=1200)):
         checked_model(model);end=time.time() if end is None else end

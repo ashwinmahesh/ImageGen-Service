@@ -9,7 +9,7 @@ from storage_paths import require_storage
 log=logging.getLogger('image-generator')
 
 class QueueWorker:
-    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None,observer=None):
+    def __init__(self,store,execute,*,loras_enabled=lambda:True,llm_enabled=lambda:True,busy=None,gpu_lock_file=None,observer=None,eligible_models=lambda:None):
         self.store,self.execute=store,execute
         self.loras_enabled=loras_enabled
         self.llm_enabled=llm_enabled
@@ -22,6 +22,7 @@ class QueueWorker:
         self.gpu_lock_file=Path(gpu_lock_file) if gpu_lock_file else None
         self.stage='idle'
         self.observer=observer
+        self.eligible_models=eligible_models
 
     def observe(self,event,*args):
         if self.observer is not None:
@@ -66,7 +67,7 @@ class QueueWorker:
         try:
             while not self.stopping.is_set():
                 self.wake.clear()
-                if not self.store.has_work(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled()):
+                if not self.store.has_work() or not self.store.has_work(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled(),eligible_models=self.eligible_models()):
                     self.stage='idle'
                     self.wake.wait(.5)
                     continue
@@ -79,7 +80,7 @@ class QueueWorker:
                 observed_status='interrupted'
                 try:
                     # Claim only when the GPU is available. Waiting jobs stay removable.
-                    job=self.store.claim(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled())
+                    job=self.store.claim(loras_enabled=self.loras_enabled(),llm_enabled=self.llm_enabled(),eligible_models=self.eligible_models())
                     if job is None:
                         if gpu: gpu.close()
                         continue
@@ -99,6 +100,7 @@ class QueueWorker:
                     log.exception('Job %s failed',job['id'])
                     self.store.finish(job['id'],error=str(error)[:2000] or type(error).__name__,error_status=getattr(error,'http_status',500))
                     observed_status='failed'
+                    if getattr(error,'fatal',False):raise
                 else:
                     # If this commit fails, leave it running for recovery from its saved artifact.
                     self.store.finish(job['id'],result=result)

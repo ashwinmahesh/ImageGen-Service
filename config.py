@@ -8,7 +8,7 @@ from queue_storage import queue_database
 PROJECT_ROOT=Path(__file__).resolve().parent
 STORE_ROOT=data_directory(PROJECT_ROOT)
 API_MODEL=select_model(interactive=False)
-QUEUE_DATABASE=queue_database(PROJECT_ROOT,API_MODEL)
+QUEUE_DATABASE=queue_database(PROJECT_ROOT)
 PROFILE=PROFILES[API_MODEL]
 MODEL_ROOTS={identifier: STORE_ROOT/identifier for identifier in PROFILES}
 ROOT=MODEL_ROOTS[API_MODEL]

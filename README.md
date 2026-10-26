@@ -2,7 +2,7 @@
 
 **A local image generation studio and API for Apple Silicon Macs.** Turn a description or reference photo into images, explore several options, and keep the results in a searchable gallery. After the initial downloads, image generation and prompt expansion run on your Mac without a cloud API.
 
-The project brings **Z-Image Turbo**, **Chroma1-HD**, **Chroma1-Flash**, **FLUX.2 Klein 4B/9B** and **Qwen-Image 2.1 Turbo** into one app. They share a webpage, API and saved-image library; choose the model when you start the generator. A small local language model helps develop descriptions and explore compositions, while a persistent queue lets people and agents submit work whenever they need it.
+The project brings **Z-Image Turbo**, **Chroma1-HD**, **Chroma1-Flash**, **FLUX.2 Klein 4B/9B** and **Qwen-Image 2.1 Turbo** into one app. They share a webpage, API and saved-image library; choose a setup model for each image request. A small local language model helps develop descriptions and explore compositions, while a persistent queue lets people and agents submit work whenever they need it.
 
 Use the webpage for hands-on experimentation, or call the API from scripts and other tools. You can leave the lightweight queue running all day and start the image generator only when you want to use your Mac's compute.
 
@@ -44,11 +44,11 @@ The effect of prompt expansion and composition planning depends on the scene and
 
 ## Generate or edit a photo
 
-**Generate** offers every supported model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each view keeps its own prompt. Editing defaults to a 1024px long edge with the source aspect ratio, the model's distilled step count, and alternate attempts at the same edit rather than new compositions.
+**Generate** offers every setup model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each view keeps its own prompt. Editing defaults to a 1024px long edge with the source aspect ratio, the model's distilled step count, and alternate attempts at the same edit rather than new compositions.
 
 The editing refiner clarifies the requested change and preservation requirements; it cannot see the photo and does not use the generation scene-expansion policy. Source-photo preview and Qwen area selection are available for uploaded files and gallery images. The API supports `POST /v1/images/edits` or asynchronous `POST /v1/jobs` with `task:"edit"`. Selected-area edits use `mask_image` on both the generator API and the independent queue API; see the [masked request examples](docs/api.md#selected-area-qwen-edits).
 
-The model selector shows setup/start instructions for inactive models. The server continues to use one startup-selected backend; choosing a different dropdown entry does not load or switch models automatically.
+Choose a setup model for each request in the webpage. The generator switches automatically when that job reaches the front of the queue, after finishing the current batch. Only one image backend is active at a time; switching may add loading time. Consecutive Z-Image jobs reuse its resident model, while Chroma/Klein/Qwen retain their per-image low-memory runtime behavior.
 
 ## Choose a model
 
@@ -61,9 +61,9 @@ The model selector shows setup/start instructions for inactive models. The serve
 | `flux2-klein-9b` | MLX 4-bit | 4 | Instruction editing |
 | `qwen-image-2.1-turbo` | MLX 4-bit, including vision encoder | 8 | Whole-photo/masked editing and RGBA output |
 
-Add a model with `make setup MODEL=<model-id>`, then select it with `make serve MODEL=<model-id>`. The interactive setup list marks models whose local assets are ready with `[SETUP COMPLETE]`. Setup downloads weights; serving uses local assets only. Start Qwen Turbo around 1024px for detail; peak memory depends on the reference and output size. These additions have fake-backend coverage; real performance on a 24GB Mac still needs measurement.
+Add a model with `make setup MODEL=<model-id>`, then choose it in the webpage or an API request. `make serve MODEL=<model-id>` chooses the default for omitted request models. The interactive setup list marks models whose local assets are ready with `[SETUP COMPLETE]`. Setup downloads weights; serving uses local assets only. Start Qwen Turbo around 1024px for detail; peak memory depends on the reference and output size. These additions have fake-backend coverage; real performance on a 24GB Mac still needs measurement.
 
-Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) and [Qwen Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) requires the respective owner's separate license. The service shows their model-specific notices at startup and in the webpage/API.
+Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) and [Qwen Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) requires the respective owner's separate license. The service shows their model-specific notices when each backend loads and in the webpage/API.
 
 ## Keep a searchable image library
 
@@ -79,14 +79,14 @@ The app has two services that share a persistent SQLite queue:
 
 | Service | What it does |
 | --- | --- |
-| **Generator and webpage**, [localhost:5732](http://localhost:5732/) | Runs the selected image model and optional prompt expander, serves the UI/gallery, and processes that model's queue. |
+| **Generator and webpage**, [localhost:5732](http://localhost:5732/) | Runs one image backend at a time and the optional prompt expander, serves the UI/gallery, and processes the shared queue across all setup models. |
 | **Lightweight queue API**, [localhost:55302/docs](http://localhost:55302/docs) | Accepts and manages jobs while the generator is off, without loading image models or the LLM. |
 
 Ordinary jobs run in order. The webpage defaults to **Generate immediately**, which puts your request in the next free slot ahead of ordinary queued work. Active batches finish first. You can pause ordinary work, cancel waiting jobs, clear the waiting list and retry failed jobs.
 
 ![Saved generation queue with pause and cancellation controls](docs/screenshots/queue.png)
 
-Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Start the generator with another model when you want to process that model's waiting jobs.
+Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Jobs retain their requested model. If its files become unavailable after admission, it stays waiting with an explanation while other eligible jobs continue. New requests for models that need setup are rejected; run setup first.
 
 The **Queue** panel lets you drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
 
@@ -94,7 +94,7 @@ The **Queue** panel lets you drag waiting jobs into a different order or use **R
 
 Quantized model weights and Apple's Metal GPU help make local inference practical. Image options render sequentially, and the prompt-expansion process releases its memory before image rendering. FLUX.2 Klein and Qwen use pre-quantized MLX checkpoints and low-memory child processes, releasing their weights after each image. Resolution, image count and model choice affect memory use and generation time; Chroma can be substantially slower on this Mac.
 
-Model downloads and generated media can live inside the project or on an external SSD. Setup remembers the location and creates links when needed. The source code, Python environment and SQLite queue databases stay in the project. Back up both your model/media store and the project's `state/` folder to preserve images, tags and waiting work. Downloaded weights and personal media are excluded from Git.
+Model downloads and generated media can live inside the project or on an external SSD. Setup remembers the location and creates links when needed. The source code, Python environment and SQLite queue database stay in the project. Back up both your model/media store and the project's `state/` folder to preserve images, tags and waiting work. Downloaded weights and personal media are excluded from Git.
 
 The generator, gallery and queue screenshots use demonstration data and a simulated backend; their timings are not benchmarks. The multiple-options screenshot shows a real two-image Z-Image test.
 
@@ -115,7 +115,7 @@ make setup
 make serve
 ```
 
-During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving offers installed models, labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
+During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving asks for a default from installed models; all setup models can process jobs. The saved default is shared by both APIs and used when a request omits its model. The menu labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
 
 Setup is safe to rerun, including for a model marked `[SETUP COMPLETE]`: unchanged weights need no redownload, and missing or changed pinned files are updated in place. Dependencies and shared assets are still checked. Choose `q` at the setup model menu or press Ctrl+C during setup to cancel cleanly; downloaded files are kept for your next attempt.
 
@@ -128,7 +128,7 @@ Setup is safe to rerun, including for a model marked `[SETUP COMPLETE]`: unchang
 - **[Setup reference](docs/setup.md)**: model sources, storage choices, startup options and runtime details.
 - **[Prompt-expansion design](docs/prompt-expansion.md)**: techniques, research and evaluation limits.
 
-While running, the generator publishes [interactive API docs](http://localhost:5732/docs). The standalone queue API has [its own docs](http://localhost:55302/docs) and a request envelope for routing work to offline models. The [quick-start API walkthrough](QUICKSTART.md#5-generate-through-the-api) explains the difference.
+While running, the generator publishes [interactive API docs](http://localhost:5732/docs). The standalone queue API has [its own docs](http://localhost:55302/docs) and a request envelope for submitting work while the generator is stopped. The [quick-start API walkthrough](QUICKSTART.md#5-generate-through-the-api) explains the difference.
 
 For code changes, read [AGENTS.md](AGENTS.md). An AI tool operating the service can use [the service skill](skill/image-model-server/SKILL.md).
 

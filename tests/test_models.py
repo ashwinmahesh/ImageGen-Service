@@ -56,13 +56,15 @@ class SelectionTest(unittest.TestCase):
                 self.assertIn('make setup MODEL='+name,output.getvalue())
             self.assertNotIn('  1.',output.getvalue())
 
-    def test_each_startup_model_has_own_schema_and_only_accepts_itself(self):
+    def test_default_model_and_each_request_use_model_specific_limits(self):
         script='''import server,json
 request=server.GenerateRequest(prompt='A fox')
 assert request.model==server.API_MODEL
 assert request.steps==server.PROFILE['steps']
 assert server.GenerateRequest(prompt='A fox',steps=server.PROFILE['max_steps'])
-for change in [{'steps':server.PROFILE['max_steps']+1},{'model':next(x for x in server.PROFILES if x!=server.API_MODEL)}]:
+for identifier,profile in server.PROFILES.items():
+    assert server.GenerateRequest(prompt='A fox',model=identifier).steps==profile['steps']
+for change in [{'steps':server.PROFILE['max_steps']+1}]:
     try: server.GenerateRequest(prompt='A fox',**change)
     except ValueError: pass
     else: raise AssertionError(change)
@@ -254,14 +256,14 @@ class NativeAdapterTest(unittest.TestCase):
             self.assertTrue((root/'flash/weights/download.json').is_file())
 
 class StartupSafetyTest(unittest.TestCase):
-    def test_explicit_model_is_forwarded_and_busy_cross_model_switch_is_refused(self):
+    def test_default_model_is_forwarded_and_can_change_without_restarting_busy_runtime(self):
         from tests.test_serving_mode import LauncherModeTest
         helper=LauncherModeTest()
         execute,_=helper.run_launcher(['--model','chroma1-flash'])
         command=execute.call_args.args[1]
         self.assertEqual(command[command.index('--model')+1],'chroma1-flash')
-        with self.assertRaisesRegex(SystemExit,'generating'):
-            helper.run_launcher(['--model','chroma1-hd'],{'model':'chroma1-flash','busy':True,'loras_enabled':True})
+        execute,kill=helper.run_launcher(['--model','chroma1-hd'],{'active_model':'chroma1-flash','busy':True,'loras_enabled':True,'prompt_expansion':{'enabled':True}})
+        execute.assert_not_called();kill.assert_not_called()
 
     def test_missing_selected_assets_fail_before_stopping_a_running_service(self):
         import launch

@@ -218,32 +218,40 @@ class JobStore:
             self._set_order(db,running+waiting)
             return changed
 
-    def has_work(self,*,loras_enabled=True,llm_enabled=True):
-        with self.connection() as db:
-            paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
-            condition=" AND immediate=1" if paused else ''
-            row=db.execute("SELECT payload FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
-            if not row: return False
+    @staticmethod
+    def _eligible(db,loras_enabled,llm_enabled,eligible_models):
+        paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
+        condition=" AND immediate=1" if paused else ''
+        for row in db.execute("SELECT * FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence"):
             request=json.loads(row['payload'])
-            return (loras_enabled or not request.get('lora')) and (llm_enabled or not request.get('expand_prompt'))
+            if eligible_models is not None and request.get('model') not in eligible_models:continue
+            enabled=(loras_enabled or not request.get('lora')) and (llm_enabled or not request.get('expand_prompt'))
+            if enabled:return row
+            if eligible_models is None:return None
+        return None
 
-    def claim(self,*,loras_enabled=True,llm_enabled=True):
+    def has_work(self,*,loras_enabled=True,llm_enabled=True,eligible_models=None):
+        with self.connection() as db:
+            return self._eligible(db,loras_enabled,llm_enabled,eligible_models) is not None
+
+    def claim(self,*,loras_enabled=True,llm_enabled=True,eligible_models=None):
         with self.connection(write=True) as db:
-            paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
-            condition=" AND immediate=1" if paused else ''
-            row=db.execute("SELECT * FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
-            if not row:
-                return None
-            if json.loads(row['payload']).get('lora') and not loras_enabled:
-                return None  # Preserve the head job until adapters are enabled or it is cancelled.
-            if json.loads(row['payload']).get('expand_prompt') and not llm_enabled:
-                return None  # Preserve jobs requiring an optional startup capability.
+            row=self._eligible(db,loras_enabled,llm_enabled,eligible_models)
+            if row is None:return None
             db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
             self._set_order(db,[item['id'] for item in self._waiting(db)])
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
-            item['_adapter_sha']=row['adapter_sha']
-            item['_prepared']=bool(row['prepared'])
+            item['_adapter_sha']=row['adapter_sha'];item['_prepared']=bool(row['prepared'])
             return item
+
+    def setting(self,key,default=None):
+        with self.connection() as db:
+            row=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+            return json.loads(row[0]) if row else default
+
+    def set_setting(self,key,value):
+        with self.connection(write=True) as db:
+            db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,json.dumps(value)))
 
     def save_expansion(self,identifier,expansion):
         with self.connection(write=True) as db:
@@ -276,9 +284,11 @@ class JobStore:
             self._set_order(db,[item['id'] for item in self._waiting(db)])
         return self.get(identifier)
 
-    def clear(self):
+    def clear(self,model=None):
         with self.connection(write=True) as db:
-            return db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE status='queued'",(time.time(),)).rowcount
+            count=db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE status='queued'"+(" AND json_extract(payload,'$.model')=?" if model else ''),[time.time(),*([model] if model else [])]).rowcount
+            self._set_order(db,[item['id'] for item in self._waiting(db)])
+            return count
 
     def requeue(self,identifier):
         with self.connection(write=True) as db:
@@ -301,13 +311,16 @@ class JobStore:
             condition=" AND immediate=1" if counts['paused'] else ''
             head=db.execute("SELECT id,payload FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
             counts['next_job_id']=head['id'] if head else None
+            counts['next_model']=json.loads(head['payload']).get('model') if head else None
             counts['next_requires_llm']=bool(head and json.loads(head['payload']).get('expand_prompt'))
             counts['next_requires_lora']=bool(head and json.loads(head['payload']).get('lora'))
             return counts
 
-    def listing(self,limit=24,offset=0,status=None):
+    def listing(self,limit=24,offset=0,status=None,model=None):
         where=" WHERE status IN ('queued','running')" if status=='pending' else (' WHERE status=?' if status else '')
         values=[status] if status and status!='pending' else []
+        if model:
+            where+=(" AND " if where else " WHERE ")+"json_extract(payload,'$.model')=?";values.append(model)
         with self.connection() as db:
             total=db.execute('SELECT COUNT(*) FROM jobs'+where,values).fetchone()[0]
             rows=db.execute("SELECT * FROM jobs"+where+" ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, CASE WHEN status='queued' THEN queue_position END ASC, CASE WHEN status IN ('queued','running') THEN sequence END ASC, sequence DESC LIMIT ? OFFSET ?",[*values,limit,offset]).fetchall()

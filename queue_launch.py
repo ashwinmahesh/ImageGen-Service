@@ -49,7 +49,10 @@ def start_lock():
 def ensure_queue(port=DEFAULT_QUEUE_PORT):
     """Detach only the queue process; Ctrl-C in the generator leaves it available."""
     with start_lock() as folder:
-        if state(port):
+        existing=state(port)
+        if existing:
+            if existing.get('version')!='4.0.0' or existing.get('queue_scope')!='shared':
+                raise SystemExit('The queue API uses an older contract. Run make stop-queue, then make serve (or make queue) to start the shared queue.')
             return
         if not port_free(port):
             raise SystemExit(f'Queue port {port} belongs to another service. Choose QUEUE_PORT=<unused-port>; leaving that service running.')

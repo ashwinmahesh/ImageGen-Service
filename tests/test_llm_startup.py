@@ -51,7 +51,7 @@ class LLMStartup(unittest.TestCase):
         state={'model':launch.API_MODEL,'busy':True,'loras_enabled':True,'prompt_expansion':{'enabled':False}}
         execute,kill=self.run_launcher(['--no-llm'],state)
         execute.assert_not_called();kill.assert_not_called()
-        with self.assertRaisesRegex(SystemExit,'generating'):self.run_launcher([],state)
+        with self.assertRaisesRegex(SystemExit,'processing'):self.run_launcher([],state)
 
     def test_interactive_off_reaches_server_and_removed_flag_rejects(self):
         with patch.object(launch,'select_llm_mode',return_value=False):
