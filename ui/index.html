@@ -129,6 +129,8 @@
     function editsSupported() { return chosenProfile()?.tasks?.includes('edit') === true; }
     function updateWorkflowAvailability() {
       const supported=editsSupported(), control=$('mode-edit-control');
+      const editModels=modelCatalog.filter(item => item.tasks?.includes('edit')).map(item => item.name || item.id);
+      $('mode-edit-tooltip').textContent='Switch to a model that supports edits.'+(editModels.length ? ' Supported models: '+editModels.join(', ')+'.' : '');
       $('mode-edit').disabled=!supported || generating || previewingExpansion;
       control.dataset.unavailable=String(!supported);
       control.tabIndex=supported ? -1 : 0;

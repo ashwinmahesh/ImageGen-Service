@@ -58,7 +58,7 @@ Only Realism is an optional public adapter preset. Default setup downloads no Lo
 
 Use accessible switches for boolean UI settings, labeled **Prompt expansion** for the local LLM control. Keep all help icons as grey circled question marks, and inset select chevrons from the right border. Preserve native input checked/disabled semantics and keyboard control.
 
-Disable the Edit photo mode button when the selected model's tasks omit edit. Its hover/focus tooltip must say “Switch to a model that supports edits”. Recompute capability restrictions after model changes and submission cleanup; unsupported models must never enter edit mode through another UI path.
+Disable the Edit photo mode button when the selected model's tasks omit edit. Its hover/focus tooltip must say “Switch to a model that supports edits” and list the names of all editing-capable models from discovery, including models awaiting setup. Recompute capability restrictions after model changes and submission cleanup; unsupported models must never enter edit mode through another UI path.
 
 Selected-area API edits must work through both the generator's flat request and the standalone queue's `request` envelope. Keep queue admission independent of source/mask reads and defer model/media validation to consumption. Document complete examples in both schemas/references and verify masks survive preparation, checkpoints and recovery without re-rendering committed artifacts.
 

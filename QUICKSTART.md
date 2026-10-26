@@ -131,7 +131,7 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 ### Edit an existing photo
 
 1. Start an editing model, for example `make serve MODEL=qwen-image-2.1-turbo`.
-2. Choose an editing-capable model, then select **Edit photo**. The button is disabled for unsupported models; hovering shows “Switch to a model that supports edits”. The edit model selector offers FLUX.2 Klein 4B/9B and Qwen Turbo. Inactive models show their setup/start commands; the server still runs one model at startup.
+2. Choose an editing-capable model, then select **Edit photo**. The button is disabled for unsupported models; hovering or focusing it explains how to unlock editing and lists the models that support it, including those that still need setup. The edit model selector offers FLUX.2 Klein 4B/9B and Qwen Turbo. Inactive models show their setup/start commands; the server still runs one model at startup.
 3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
 4. For Qwen, choose **Selected area**, then drag a rectangle over the source preview. **Whole photo** remains available; Klein supports whole-photo editing only.
 5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
