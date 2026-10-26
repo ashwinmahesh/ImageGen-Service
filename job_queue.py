@@ -49,7 +49,7 @@ class JobStore:
         self.path.parent.mkdir(parents=True,exist_ok=True)
         with self.connection() as db:
             version=db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0,1,2,3):
+            if version not in (0,1,2,3,4):
                 raise RuntimeError('Unsupported queue database version; use a compatible server')
             # Short rollback-journal transactions; all queue files stay project-local.
             db.execute('PRAGMA journal_mode=DELETE')
@@ -86,7 +86,59 @@ class JobStore:
                     if version in (1,2):
                         # Older admissions had already resolved defaults, seeds and adapter checksums.
                         migration.execute('UPDATE jobs SET prepared=1')
-                migration.execute('PRAGMA user_version=3')
+                if 'queue_position' not in columns:
+                    migration.execute('ALTER TABLE jobs ADD COLUMN queue_position INTEGER')
+                    identifiers=[row[0] for row in migration.execute(
+                        "SELECT id FROM jobs WHERE status='queued' ORDER BY immediate DESC,sequence")]
+                    self._set_order(migration,identifiers)
+                migration.execute('CREATE INDEX IF NOT EXISTS queue_position_order ON jobs(status,queue_position,sequence)')
+                migration.execute('PRAGMA user_version=4')
+
+    @staticmethod
+    def _waiting(db):
+        return db.execute("SELECT id,immediate FROM jobs WHERE status='queued' ORDER BY queue_position,sequence").fetchall()
+
+    @staticmethod
+    def _set_order(db,identifiers):
+        # Dense one-based positions are scoped to waiting work, independent of history.
+        db.executemany('UPDATE jobs SET queue_position=? WHERE id=? AND queue_position IS NOT ?',
+                       [(position,identifier,position) for position,identifier in enumerate(identifiers,1)])
+
+    def _insert_order(self,db,identifier,immediate):
+        rows=[row for row in self._waiting(db) if row['id']!=identifier]
+        index=next((index for index,row in enumerate(rows) if not row['immediate']),len(rows)) if immediate else len(rows)
+        identifiers=[row['id'] for row in rows]
+        identifiers.insert(index,identifier)
+        self._set_order(db,identifiers)
+
+    def move(self,identifier,position):
+        """Move waiting work, including recovered attempts, in one transaction."""
+        with self.connection(write=True) as db:
+            row=db.execute('SELECT status FROM jobs WHERE id=?',(identifier,)).fetchone()
+            if row is None:
+                raise FileNotFoundError('Unknown job ID')
+            if row['status']!='queued':
+                raise QueueConflict('Only waiting jobs can be moved; active work is not interrupted')
+            identifiers=[row['id'] for row in self._waiting(db)]
+            if type(position) is not int or not 1<=position<=len(identifiers):
+                raise QueueConflict(f'position must be between 1 and {len(identifiers)} waiting jobs; refresh the queue and retry')
+            identifiers.remove(identifier)
+            identifiers.insert(position-1,identifier)
+            self._set_order(db,identifiers)
+            return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
+
+    def run_now(self,identifier):
+        """Prioritize this identity without changing frozen request/checkpoints."""
+        with self.connection(write=True) as db:
+            row=db.execute('SELECT status FROM jobs WHERE id=?',(identifier,)).fetchone()
+            if row is None:
+                raise FileNotFoundError('Unknown job ID')
+            if row['status']!='queued':
+                raise QueueConflict('Only waiting jobs can run now; active work is not interrupted')
+            identifiers=[identifier]+[row['id'] for row in self._waiting(db) if row['id']!=identifier]
+            db.execute('UPDATE jobs SET immediate=1 WHERE id=?',(identifier,))
+            self._set_order(db,identifiers)
+            return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
 
     @staticmethod
     def record(row):
@@ -126,6 +178,7 @@ class JobStore:
             identifier=uuid.uuid4().hex
             db.execute('INSERT INTO jobs(id,status,payload,fingerprint,adapter_sha,idempotency_key,created,immediate,retry_of) VALUES(?,?,?,?,?,?,?,?,?)',
                 (identifier,'queued',json.dumps(payload,allow_nan=False),request_fingerprint,adapter_sha,key,time.time(),int(immediate),retry_of))
+            self._insert_order(db,identifier,immediate)
             return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
 
     def update(self,identifier,payload):
@@ -138,6 +191,8 @@ class JobStore:
                 raise QueueConflict('Only never-started waiting jobs can be edited; retry an interrupted job instead')
             db.execute('UPDATE jobs SET payload=?,fingerprint=?,immediate=?,adapter_sha=NULL,prepared=0 WHERE id=?',
                        (json.dumps(payload,allow_nan=False),fingerprint(payload),int(payload.get('generate_immediately',False)),identifier))
+            if bool(row['immediate'])!=payload.get('generate_immediately',False):
+                self._insert_order(db,identifier,payload.get('generate_immediately',False))
             return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
 
     def prepare(self,identifier,payload,adapter_sha=None):
@@ -157,13 +212,17 @@ class JobStore:
     def recover(self):
         # Called only after acquiring the process-wide worker lease.
         with self.connection(write=True) as db:
-            return db.execute("UPDATE jobs SET status='queued',started=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
+            running=[row[0] for row in db.execute("SELECT id FROM jobs WHERE status='running' ORDER BY started,sequence")]
+            waiting=[row['id'] for row in self._waiting(db)]
+            changed=db.execute("UPDATE jobs SET status='queued',started=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
+            self._set_order(db,running+waiting)
+            return changed
 
     def has_work(self,*,loras_enabled=True,llm_enabled=True):
         with self.connection() as db:
             paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
             condition=" AND immediate=1" if paused else ''
-            row=db.execute("SELECT payload FROM jobs WHERE status='queued'"+condition+" ORDER BY immediate DESC,sequence LIMIT 1").fetchone()
+            row=db.execute("SELECT payload FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
             if not row: return False
             request=json.loads(row['payload'])
             return (loras_enabled or not request.get('lora')) and (llm_enabled or not request.get('expand_prompt'))
@@ -172,14 +231,15 @@ class JobStore:
         with self.connection(write=True) as db:
             paused=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
             condition=" AND immediate=1" if paused else ''
-            row=db.execute("SELECT * FROM jobs WHERE status='queued'"+condition+" ORDER BY immediate DESC,sequence LIMIT 1").fetchone()
+            row=db.execute("SELECT * FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
             if not row:
                 return None
             if json.loads(row['payload']).get('lora') and not loras_enabled:
                 return None  # Preserve the head job until adapters are enabled or it is cancelled.
             if json.loads(row['payload']).get('expand_prompt') and not llm_enabled:
                 return None  # Preserve jobs requiring an optional startup capability.
-            db.execute("UPDATE jobs SET status='running',started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
+            db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
+            self._set_order(db,[item['id'] for item in self._waiting(db)])
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
             item['_adapter_sha']=row['adapter_sha']
             item['_prepared']=bool(row['prepared'])
@@ -212,16 +272,20 @@ class JobStore:
                 raise FileNotFoundError('Unknown job ID')
             if row['status']!='queued':
                 raise QueueConflict('Only waiting jobs can be cancelled; running inference is not interrupted')
-            db.execute("UPDATE jobs SET status='cancelled',finished=? WHERE id=?",(time.time(),identifier))
+            db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE id=?",(time.time(),identifier))
+            self._set_order(db,[item['id'] for item in self._waiting(db)])
         return self.get(identifier)
 
     def clear(self):
         with self.connection(write=True) as db:
-            return db.execute("UPDATE jobs SET status='cancelled',finished=? WHERE status='queued'",(time.time(),)).rowcount
+            return db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE status='queued'",(time.time(),)).rowcount
 
     def requeue(self,identifier):
         with self.connection(write=True) as db:
-            db.execute("UPDATE jobs SET status='queued',started=NULL WHERE id=? AND status='running'",(identifier,))
+            waiting=[row['id'] for row in self._waiting(db)]
+            changed=db.execute("UPDATE jobs SET status='queued',started=NULL WHERE id=? AND status='running'",(identifier,)).rowcount
+            if changed:
+                self._set_order(db,[identifier]+waiting)
 
     def pause(self,value):
         with self.connection(write=True) as db:
@@ -234,7 +298,8 @@ class JobStore:
             counts.update({row[0]:row[1] for row in db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status')})
             counts['paused']=json.loads(db.execute("SELECT value FROM settings WHERE key='paused'").fetchone()[0])
             counts['database_path']=str(self.path)
-            head=db.execute("SELECT id,payload FROM jobs WHERE status='queued' ORDER BY immediate DESC,sequence LIMIT 1").fetchone()
+            condition=" AND immediate=1" if counts['paused'] else ''
+            head=db.execute("SELECT id,payload FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence LIMIT 1").fetchone()
             counts['next_job_id']=head['id'] if head else None
             counts['next_requires_llm']=bool(head and json.loads(head['payload']).get('expand_prompt'))
             counts['next_requires_lora']=bool(head and json.loads(head['payload']).get('lora'))
@@ -245,5 +310,5 @@ class JobStore:
         values=[status] if status and status!='pending' else []
         with self.connection() as db:
             total=db.execute('SELECT COUNT(*) FROM jobs'+where,values).fetchone()[0]
-            rows=db.execute("SELECT * FROM jobs"+where+" ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, CASE WHEN status='queued' THEN immediate END DESC, CASE WHEN status IN ('queued','running') THEN sequence END ASC, sequence DESC LIMIT ? OFFSET ?",[*values,limit,offset]).fetchall()
+            rows=db.execute("SELECT * FROM jobs"+where+" ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, CASE WHEN status='queued' THEN queue_position END ASC, CASE WHEN status IN ('queued','running') THEN sequence END ASC, sequence DESC LIMIT ? OFFSET ?",[*values,limit,offset]).fetchall()
             return [self.record(row) for row in rows],total

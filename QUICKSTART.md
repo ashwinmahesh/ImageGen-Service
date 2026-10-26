@@ -112,10 +112,12 @@ The API names below map to the webpage controls.
 | Style adapter | `lora`, `lora_strength` | Optional compatible installed LoRA; strength 0–2. Choose an ID from the API catalog. Configured trigger words are added automatically. |
 | Tags | `tags` | Optional labels for gallery search. UI: comma-separated text. API: an array such as `["Forest","Watercolor"]`. Editable later. |
 | Save location | `output_dir` | Absolute folder or `~/...` on the server's Mac. Omit to use the model's images folder. |
-| Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false for ordinary FIFO order. |
+| Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false to join the end of the queue. |
 | API result format | `response_format` | Use `"url"` for easy previews/downloads. Default is `"b64_json"`. Both save the PNG and metadata on disk. |
 
 For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-image-turbo` before starting the generator. Normal setup downloads no LoRAs. Different seeds or composition prompts can help variety, but strongly constrained scenes and preserved references may still look similar.
+
+In the **Queue** panel, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
 
 ## 5. Generate through the API
 
@@ -155,6 +157,18 @@ curl --fail-with-body "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID"
 
 Run the second command again occasionally until the status is `succeeded`, `failed` or `cancelled`. On success, **`result.data[]`** contains every generated image, with its `url`, full `file_path`, `metadata_path` and seed. Open an image's `url` in your browser, or use the file already saved on disk. On failure, read the job's `error`. Closing your browser or timing out a request does not cancel a saved job.
 
+### Move a waiting job or run it next
+
+Read `queue_position` from a job/list response. It starts at 1 across all waiting jobs, independent of pagination. Send the desired position to move it up/down:
+
+```sh
+curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/move" \
+  -H 'Content-Type: application/json' -d '{"position":1}'
+curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
+```
+
+Run Now marks that same job immediate and moves it first; it doesn't interrupt active work. These controls also exist on port 55302 with optional `?model=<id>`, even when the generator is off. Running/finished jobs return 409. If another client changes the queue, refresh positions before trying again.
+
 ### Discover models, adapters and saved images
 
 ```sh
@@ -191,7 +205,7 @@ curl --fail-with-body http://localhost:55302/v1/jobs \
   }'
 ```
 
-On this standalone API, omitted `model` **always defaults to Z-Image Turbo**, regardless of which generator you last ran. Ordinary work defaults to FIFO. The queue accepts settings for later validation; a saved job may still fail when the generator processes it.
+On this standalone API, omitted `model` **always defaults to Z-Image Turbo**, regardless of which generator you last ran. Ordinary work joins the end of the queue; you can reorder it later. The queue accepts settings for later validation; a saved job may still fail when the generator processes it.
 
 List or inspect queued work with:
 

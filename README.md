@@ -65,6 +65,8 @@ Ordinary jobs run in order. The webpage defaults to **Generate immediately**, wh
 
 Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Start the generator with another model when you want to process that model's waiting jobs.
 
+The **Queue** panel lets you drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
+
 ## Built for local hardware and storage
 
 Quantized model weights and Apple's Metal GPU help make local inference practical. Image options render sequentially, and the prompt-expansion process releases its memory before image rendering. Resolution, image count and model choice affect memory use and generation time; Chroma can be substantially slower on this Mac.

@@ -103,7 +103,7 @@ class QueueServiceTest(unittest.TestCase):
         second=store.claim()
         self.assertEqual(store.prepare(second['id'],{**replacement,'seed':99})['request']['seed'],99)
         with sqlite3.connect(store.path) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],4)
 
     def test_queue_imports_do_not_load_inference_or_worker(self):
         code="import sys,queue_api; assert not any(k in sys.modules for k in ['server','config','lora_catalog','generation_worker','mlx','torch','mflux','prompt_expander','engine','chroma_engine'])"

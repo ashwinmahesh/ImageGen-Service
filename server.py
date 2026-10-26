@@ -36,7 +36,7 @@ from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
 from generation_worker import QueueWorker
 from queue_storage import initialize_queue
 from queue_client import QueueClient
-from queue_api import DEFAULT_QUEUE_PORT
+from queue_api import DEFAULT_QUEUE_PORT, MoveJob
 import prompt_expander
 from prompt_policy import public_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
@@ -768,6 +768,7 @@ class JobResponse(BaseModel):
     finished: float | None=None
     attempts: int
     generate_immediately: bool
+    queue_position: int | None=Field(default=None,description="One-based position among all waiting jobs; absent once running or finished.")
     request: dict
     error: str | None=None
     retry_of: str | None=None
@@ -806,7 +807,7 @@ def job_response(job,request,*,include_result=True):
 
 
 @app.post('/v1/jobs',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
-          summary='Persist an image job',description='Default generate_immediately=false adds FIFO work. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
+          summary='Persist an image job',description='Default generate_immediately=false joins the end of the queue. true runs next ahead of ordinary waiting jobs without interrupting current work. A 202 is returned only after the SQLite commit. Same Idempotency-Key and settings return the original job; reusing it with different settings returns 409. Poll the job after a disconnect or restart. Uses shared SQLite directly and works while the standalone queue API is down. Storage outages return503/code=queue_storage_unavailable with Retry-After; if a reply was lost, retry the same Idempotency-Key and settings. Only the startup model is accepted.')
 def enqueue_job(payload:GenerateRequest,request:Request,
                 idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     return job_response(submit_job(payload,idempotency_key),request)
@@ -847,6 +848,24 @@ def update_job(identifier:str,payload:GenerateRequest,request:Request):
     return job_response(item,request)
 
 
+@app.post('/v1/jobs/{identifier}/move',response_model=JobResponse,response_model_exclude_none=True,
+          summary='Move a waiting job to a saved queue position',description='position is one-based among all waiting jobs, independent of pagination and priority. Only queued jobs may move; active/finished jobs and stale positions beyond the queue return 409. Request settings and checkpoints are preserved. Uses SQLite directly, including when the queue API is offline.')
+def move_job(identifier:str,payload:MoveJob,request:Request):
+    find_job(identifier)
+    item=job_store.move(identifier,payload.position)
+    job_worker.wake.set()
+    return job_response(item,request)
+
+
+@app.post('/v1/jobs/{identifier}/run-now',response_model=JobResponse,response_model_exclude_none=True,
+          summary='Run a waiting job at the next free slot',description='Moves the same job to position 1 and enables immediate scheduling priority, even while paused. Never interrupts an active image batch. Only queued jobs qualify (409 otherwise). Preserves the original request, frozen seed, idempotency comparison and progress. Uses SQLite directly.')
+def run_job_now(identifier:str,request:Request):
+    find_job(identifier)
+    item=job_store.run_now(identifier)
+    job_worker.wake.set()
+    return job_response(item,request)
+
+
 @app.delete('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Cancel one waiting job',
             description='Retains its cancelled record. Running inference cannot be cancelled and returns 409.')
 def cancel_job(identifier:str,request:Request):
@@ -867,7 +886,7 @@ def clear_jobs():
 
 
 @app.post('/v1/jobs/{identifier}/retry',response_model=JobResponse,status_code=202,response_model_exclude_none=True,
-          summary='Retry a failed or cancelled job',description='Creates a new FIFO job with the saved settings/seed and a new output identity.')
+          summary='Retry a failed or cancelled job',description='Creates a new ordinary job with the saved settings/seed and a new output identity.')
 def retry_job(identifier:str,request:Request):
     item=find_job(identifier)
     if item['status'] not in ['failed','cancelled']: raise HTTPException(409,'Only failed or cancelled jobs can be retried')
@@ -886,7 +905,7 @@ class QueueSettings(BaseModel):
     paused:bool=Field(strict=True)
 
 
-@app.patch('/v1/queue',summary='Pause or resume ordinary FIFO work',description='Persisted across restarts. An active image finishes. Explicit immediate requests may still run while FIFO work is paused.')
+@app.patch('/v1/queue',summary='Pause or resume ordinary queued work',description='Persisted across restarts. An active image finishes. Explicit immediate requests may still run while ordinary work is paused.')
 def queue_settings(payload:QueueSettings):
     queue_ready(require_worker=False)
     state=job_store.pause(payload.paused); job_worker.wake.set()
@@ -894,7 +913,7 @@ def queue_settings(payload:QueueSettings):
 
 
 @app.post('/v1/images/generations',response_model=GenerateResponse,response_model_exclude_none=True,
-          summary='Generate and wait for the saved image',description='Compatibility synchronous endpoint backed by the same persistent worker. Defaults to generate_immediately=true (next free slot ahead of ordinary queued jobs). false waits for a FIFO turn. Use POST /v1/jobs for a promptly returned durable job ID and restart-safe polling.')
+          summary='Generate and wait for the saved image',description='Compatibility synchronous endpoint backed by the same persistent worker. Defaults to generate_immediately=true (next free slot ahead of ordinary queued jobs). false waits for its queue turn. Use POST /v1/jobs for a promptly returned durable job ID and restart-safe polling.')
 async def generations(payload:SyncGenerateRequest,request:Request,
                       idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
     record=await asyncio.to_thread(submit_job,payload,idempotency_key)

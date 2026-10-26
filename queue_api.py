@@ -26,6 +26,7 @@ class QueueJob(BaseModel):
     model:Model
     status:Literal['queued','running','succeeded','failed','cancelled']
     sequence:int
+    queue_position:int|None=Field(default=None,description="One-based position among all waiting jobs; null once running or finished.")
     request:dict=Field(description='Original queued settings, then frozen effective defaults/seed once consumed.')
     generate_immediately:bool
     created:float
@@ -141,7 +142,7 @@ def create_app(project=PROJECT_ROOT):
         'the image settings, such as prompt, size, seed, n and expand_prompt. Missing generation '
         'defaults and a random seed are frozen by the generator before rendering. '
         'generate_immediately:true inside request gives next-free-slot priority, without interrupting '
-        'active work; default false is FIFO. Idempotency-Key is scoped to the model: matching '
+        'active work; default false joins the end of the queue. Idempotency-Key is scoped to the model: matching '
         'settings return the same ID, different settings return 409. 202 confirms the SQLite commit.'))
     def enqueue(payload:Submission,idempotency_key:str|None=Header(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')):
         data=payload.data()
@@ -168,6 +169,22 @@ def create_app(project=PROJECT_ROOT):
         data=with_model(payload.request,model)
         return record(store(model).update(identifier,data))
 
+    @app.post('/v1/jobs/{identifier}/move',response_model=QueueJob,summary='Move a waiting job to a saved queue position',description=(
+        'position is one-based among all waiting jobs, independent of pagination and priority. '
+        'Only queued jobs can move (409 otherwise); an out-of-date position beyond the queue returns 409. '
+        'Does not change request settings, immediate status or saved checkpoints.'))
+    def move(identifier:str,payload:MoveJob,model:Model=DEFAULT_MODEL):
+        find(model,identifier)
+        return record(store(model).move(identifier,payload.position))
+
+    @app.post('/v1/jobs/{identifier}/run-now',response_model=QueueJob,summary='Move a waiting job to the next free slot',description=(
+        'Moves the same job to position 1 and gives it immediate scheduling priority, including while paused. '
+        'Never interrupts active inference or starts a generator. Only queued jobs are eligible (409 otherwise). '
+        'Preserves request, seed, idempotency comparison and saved progress.'))
+    def run_now(identifier:str,model:Model=DEFAULT_MODEL):
+        find(model,identifier)
+        return record(store(model).run_now(identifier))
+
     @app.delete('/v1/jobs/{identifier}',response_model=QueueJob,summary='Cancel a waiting job; preserve its record')
     def cancel(identifier:str,model:Model=DEFAULT_MODEL):
         find(model,identifier)
@@ -177,7 +194,7 @@ def create_app(project=PROJECT_ROOT):
     def clear(model:Model=DEFAULT_MODEL):
         return {'cancelled':store(model).clear()}
 
-    @app.post('/v1/jobs/{identifier}/retry',response_model=QueueJob,status_code=202,summary='Create a fresh FIFO job from a failed or cancelled entry')
+    @app.post('/v1/jobs/{identifier}/retry',response_model=QueueJob,status_code=202,summary='Create a fresh ordinary job from a failed or cancelled entry')
     def retry(identifier:str,model:Model=DEFAULT_MODEL):
         item=find(model,identifier)
         if item['status'] not in ('failed','cancelled'):
@@ -189,7 +206,7 @@ def create_app(project=PROJECT_ROOT):
     def summary(model:Model=DEFAULT_MODEL):
         return {'model':model,**store(model).summary()}
 
-    @app.patch('/v1/queue',summary='Pause or resume a model queue',description='Persisted across process restarts. Immediate-priority entries can still run while ordinary FIFO work is paused.')
+    @app.patch('/v1/queue',summary='Pause or resume a model queue',description='Persisted across process restarts. Immediate-priority entries can still run while ordinary queued work is paused.')
     def pause(payload:Pause,model:Model=DEFAULT_MODEL):
         return {'model':model,**store(model).pause(payload.paused)}
 
@@ -221,6 +238,11 @@ class Submission(Replacement):
 
     def data(self):
         return with_model(self.request,self.model)
+
+
+class MoveJob(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    position:int=Field(ge=1,strict=True,description='One-based destination among all waiting jobs, not the current page. Read queue_position from the list; 1 is next.')
 
 
 class Pause(BaseModel):

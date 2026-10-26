@@ -75,7 +75,7 @@ The generator's `capabilities` object exposes these named controls:
 
 **Queue response:** `status`, `service:"imagegen-queue"`, `project_dir`, `default_model:"z-image-turbo"` and `version`. This checks the queue HTTP process; it does not load a model or guarantee that a later storage write will succeed.
 
-Queue counts/state contain integer `queued`, `running`, `succeeded`, `failed`, `cancelled`; boolean `paused`; string `database_path`; nullable `next_job_id`; and boolean `next_requires_llm` / `next_requires_lora`. Generator stages are `idle`, `waiting_for_accelerator` and `generating`.
+Queue counts/state contain integer `queued`, `running`, `succeeded`, `failed`, `cancelled`; boolean `paused`; string `database_path`; nullable `next_job_id` (next eligible waiting job, null while paused without immediate work); and boolean `next_requires_llm` / `next_requires_lora`. Generator stages are `idle`, `waiting_for_accelerator` and `generating`.
 
 ### GET /v1/models
 
@@ -113,7 +113,7 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `seed` | integer or null | Omit/null for random; otherwise 0–4294967295. First option's seed; later options increment modulo 2^32. |
 | `expand_prompt` | boolean | false in API; enabled UI initially checks it. Requires LLM-enabled serving. Saves the original and expanded text. |
 | `vary_prompt` | boolean | false. Requires `expand_prompt:true` and `n>=2`; creates a distinct expansion for each option. |
-| `generate_immediately` | boolean | false for async jobs, true for synchronous generation. True gets the next free slot before ordinary FIFO work; never interrupts active work. |
+| `generate_immediately` | boolean | false for async jobs, true for synchronous generation. True gets the next free slot before ordinary waiting work; never interrupts active work. |
 | `response_format` | string | `"b64_json"` or `"url"`; default `"b64_json"`. URL format is convenient for polling and downloads. Both save files. |
 | `output_dir` | string | `<store>/<active-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
 | `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. |
@@ -175,9 +175,11 @@ In this table **Both** means the endpoint exists on each port. The generator ope
 | GET `/v1/jobs` | Both | 200 | List jobs using optional `status`, `limit`, `offset`; returns a page. |
 | GET `/v1/jobs/{identifier}` | Both | 200 | Read one job and any saved result. |
 | PATCH `/v1/jobs/{identifier}` | Both | 200 | Replace a never-started waiting request. Generator: complete flat settings. Queue: `{request:{...}}`. Returns the updated job. |
+| POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
+| POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |
 | DELETE `/v1/jobs/{identifier}` | Both | 200 | Cancel a waiting job; returns its cancelled record. No request body. |
 | DELETE `/v1/jobs` | Both | 200 | Cancel all waiting jobs for that model; returns `{cancelled:integer}`. No body. |
-| POST `/v1/jobs/{identifier}/retry` | Both | 202 | Retry a failed/cancelled job as a new ordinary FIFO job. No body. Returns the new record, with `retry_of`. |
+| POST `/v1/jobs/{identifier}/retry` | Both | 202 | Retry a failed/cancelled job as a new ordinary job. No body. Returns the new record, with `retry_of`. |
 | GET `/v1/queue` | Queue | 200 | Read that model's counts/pause state. On the generator, read `queue` in GET `/health`. |
 | PATCH `/v1/queue` | Both | 200 | Body `{"paused":true}` or `{"paused":false}`. Returns counts/state. Queue response also includes `model`. |
 
@@ -190,7 +192,7 @@ In this table **Both** means the endpoint exists on each port. The generator ope
 | `offset` | 0 | Nonnegative integer. |
 | `model` | `z-image-turbo` | Queue port only; selects a supported model's database. |
 
-Order is running first, then waiting work in execution order (immediate priority, FIFO within priority), then finished history newest first. A page contains `data[]`, matching `total`, `limit`, `offset`, `has_more`, `has_previous`, and boundary offsets `next_offset` / `previous_offset`. Generator pages omit unavailable offsets; queue pages return them as null and include top-level `model`.
+Order is running first, then waiting work in its saved execution order, then finished history newest first. Each waiting job exposes `queue_position`, starting at 1 across the entire waiting queue, independent of page size, offset and status filters. Position is absent/null for active and finished work. A page contains `data[]`, matching `total`, `limit`, `offset`, `has_more`, `has_previous`, and boundary offsets `next_offset` / `previous_offset`. Generator pages omit unavailable offsets; queue pages return them as null and include top-level `model`.
 
 Generator job lists omit full/partial image result bodies; fetch a job's detail for those. Queue lists return raw job records, including saved metadata when present.
 
@@ -199,15 +201,38 @@ curl --fail-with-body 'http://localhost:5732/v1/jobs?status=pending&limit=24&off
 curl --fail-with-body 'http://localhost:55302/v1/jobs?model=chroma1-flash&limit=24&offset=0'
 ```
 
+### Reordering and Run Now
+
+**POST `/v1/jobs/{identifier}/move`** accepts exactly `{"position":N}`: a strict integer from 1 to the current waiting-job count. Move up by sending the job's current `queue_position - 1`, move down with `queue_position + 1`, or send any destination. The move and the other positions update together in one SQLite transaction, including across pagination boundaries. The response is the same job with its updated position. Moves apply to any waiting job, including an interrupted/recovered attempt, and preserve immediate status, request settings, seed, saved expansions, checkpoints and idempotency comparison.
+
+**POST `/v1/jobs/{identifier}/run-now`** takes no body. It moves the same waiting job to position 1 and sets its top-level `generate_immediately:true`. It does not create a duplicate, start the generator, enable disabled LoRAs/LLM, bypass the shared accelerator lock or interrupt an active batch. The original `request.generate_immediately` is retained as provenance and may differ from this current scheduling flag. Repeating Run Now while the job is still waiting keeps that identity and puts it first again; once claimed it returns **409**.
+
+Both operations return **200** after the scheduling change commits, **404** for an unknown/wrong-model ID, **409** when the target is already running/finished, and normal storage **503** errors. Move returns **422** for a missing/noninteger/nonpositive position or extra fields; a position beyond the current waiting count returns **409**. Another client or worker can change the list, so refresh after a conflict. A response may become stale as soon as the worker claims the next job.
+
+Ordinary admissions append to the queue. New `generate_immediately:true` admissions insert immediately before the first ordinary waiting job, retaining the order of any leading immediate jobs. **Manual moves then define execution order, even across priority jobs**. While paused, only immediate jobs are eligible, in their saved relative order; Run Now makes its target eligible. Once resumed, all waiting jobs follow the saved order. A recovered active batch is returned to the front so its saved progress resumes. Order and pause state survive restarts.
+
+The webpage provides a grip on the left of each waiting row. Drag it above/below another visible waiting job, or focus it and press ↑ / ↓ to move one position (including across page boundaries). **Run Now** follows that job's progress in the preview. Active and finished jobs have no scheduling controls. Both services use the same SQL operations; generator/UI controls work even while standalone queue HTTP is offline.
+
+```sh
+# Replace this value with a waiting job ID.
+IMAGEGEN_JOB_ID="paste-the-job-id-here"
+curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/move" \
+  -H 'Content-Type: application/json' -d '{"position":1}'
+curl --fail-with-body --request POST "http://localhost:5732/v1/jobs/$IMAGEGEN_JOB_ID/run-now"
+# The queue service uses the same operations plus optional model selection.
+curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_JOB_ID/move?model=z-image-turbo" \
+  -H 'Content-Type: application/json' -d '{"position":2}'
+```
+
 ### Editing, cancellation, retries and pause
 
-PATCH is a **complete replacement**, not a partial merge. It is allowed only when `status:"queued"` and `attempts:0`. Omitted settings use defaults when validated; include all settings you want to retain. ID/order/creation time stay the same. The model cannot change; priority and the idempotency comparison follow the new settings. Running, previously attempted/interrupted and finished jobs return **409**.
+PATCH is a **complete replacement**, not a partial merge. It is allowed only when `status:"queued"` and `attempts:0`. Omitted settings use defaults when validated; include all settings you want to retain. ID and creation time stay the same. The model cannot change; priority and the idempotency comparison follow the new settings. Position stays the same unless `generate_immediately` changes: switching it on inserts before the first ordinary waiting job, switching it off appends to the queue. Running, previously attempted/interrupted and finished jobs return **409**.
 
 DELETE cancels waiting work only. Deleting a running/finished job returns **409**; an unknown ID returns **404**. Clear cancels all waiting work in that model's queue, preserving active work, history and saved media. There is no permanent job-history or image-deletion API.
 
-Retry is allowed only for failed/cancelled entries (**409** otherwise), with a new ID and ordinary FIFO priority. It reuses saved settings and any frozen seed. A retry is a new full batch; completed files from the old job remain. Restore missing references/adapters first. Generator-side retry can return **400/422** if those saved settings/inputs are unusable. Repeating the retry call intentionally creates another job; it has no idempotency header parameter.
+Retry is allowed only for failed/cancelled entries (**409** otherwise), with a new ID and ordinary priority. It reuses saved settings and any frozen seed. A retry is a new full batch; completed files from the old job remain. Restore missing references/adapters first. Generator-side retry can return **400/422** if those saved settings/inputs are unusable. Repeating the retry call intentionally creates another job; it has no idempotency header parameter.
 
-Pause persists across restarts. The active batch finishes; explicitly immediate jobs may still run while ordinary FIFO work is paused. No cancellation endpoint interrupts active inference.
+Pause persists across restarts. The active batch finishes; explicitly immediate jobs may still run while ordinary queued work is paused. No cancellation endpoint interrupts active inference.
 
 ```sh
 curl --fail-with-body --request PATCH http://localhost:5732/v1/queue \
@@ -223,7 +248,8 @@ curl --fail-with-body --request PATCH http://localhost:5732/v1/queue \
 | `id`, `model` | strings | Stable job ID and resolved queue/model. |
 | `status` | string | `queued`, `running`, `succeeded`, `failed` or `cancelled`. |
 | `request` | object | Saved settings. Queue admissions may initially lack defaults/seed; the generator freezes effective values before inference. |
-| `generate_immediately` | boolean | Saved priority. |
+| `generate_immediately` | boolean | Current scheduling priority; Run Now may change it without changing the saved request. |
+| `queue_position` | integer or null | One-based position among all waiting jobs; absent/null for running/finished jobs. |
 | `created`, `started`, `finished` | numbers | Unix seconds; started/finished can be null or omitted until applicable. |
 | `attempts` | integer | Number of times inference ownership was claimed. |
 | `retry_of` | string or null | Original ID when this record was created by retry. |
@@ -233,7 +259,7 @@ curl --fail-with-body --request PATCH http://localhost:5732/v1/queue \
 
 **Generator-specific fields:** `total_images` and `completed_images` are integers. `candidate_expansions[]` contains per-option plans for varied batches. Shared expansion instead uses `prompt_expansion`. `result` is present only for complete success; `partial_result` can contain saved options while running/failed. Neither pending state nor partial files establish full success.
 
-**Queue-specific fields:** integer `sequence` preserves order, and nullable integer `error_status` records the failure's HTTP status. Raw `result` can hold a partial checkpoint before success. Queue responses do not provide the generator's candidate-count/partial-result wrapper. Always check **`status:"succeeded"`** before treating either response as complete.
+**Queue-specific fields:** integer `sequence` records immutable admission order (use `queue_position` for waiting execution order), and nullable integer `error_status` records the failure's HTTP status. Raw `result` can hold a partial checkpoint before success. Queue responses do not provide the generator's candidate-count/partial-result wrapper. Always check **`status:"succeeded"`** before treating either response as complete.
 
 ### Generator image response
 
@@ -500,4 +526,4 @@ References, adapters and output/index files are external to SQLite and must rema
 
 Older `<store>/<model-id>/queue/jobs.sqlite3` databases migrate at generator startup under both worker leases. Stop the old worker and let native inference finish first. Migration uses SQLite backup including committed WAL data, checks integrity/content and retains a project-local `legacy-backup-*.sqlite3` before retiring the old database. Differing source/destination databases cause a clear error without overwriting or merging them; identical copies after interruption are recognized.
 
-Schema 3 adds deferred preparation checkpoints and upgrades schemas 1/2 without changing job IDs/order or already-frozen settings. Older servers refuse schema 3. SQL uses short transactions and `synchronous=FULL`; inference runs outside database transactions. Back up project `state/` using a stopped service or SQLite's backup API, together with media/references/indexes. This protects work across process restarts; it does not replace backups for disk failure. A source-only clone starts with an empty queue.
+Schema 4 adds persisted waiting positions and upgrades schemas 1–3 while preserving initial priority order, IDs, history, pause state and frozen settings. Schema 3 introduced deferred preparation checkpoints. Older servers refuse schema 4; stop both services before upgrading and restart both against the updated code. SQL uses short transactions and `synchronous=FULL`; inference runs outside database transactions. Back up project `state/` using a stopped service or SQLite's backup API, together with media/references/indexes. This protects work across process restarts; it does not replace backups for disk failure. A source-only clone starts with an empty queue.

@@ -25,6 +25,12 @@
     @media(max-width:640px){header{padding:20px;flex-wrap:wrap}.header-actions{gap:12px;flex-wrap:wrap}.nav a{padding:6px 10px}.brand strong{font-size:16px}main{padding:27px 18px 10px}h1{font-size:27px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:22px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
     @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
     .queue-panel{margin-top:30px;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--panel)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:8px}.queue-item{padding:13px 0;border-top:1px solid var(--line);flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500}.queue-copy small{color:var(--muted);font-size:12px}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
+
+    .queue-drag.queue-drag{flex-shrink:0;align-self:stretch;min-width:30px;padding:4px;color:#929397;background:transparent;border:1px solid transparent;font-size:24px;cursor:grab;touch-action:none;user-select:none}
+    .queue-drag:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.queue-drag:active{cursor:grabbing}
+    .queue-item.dragging{opacity:.45}.queue-item.drop-before{box-shadow:0 -2px 0 var(--accent)}.queue-item.drop-after{box-shadow:0 2px 0 var(--accent)}
+    .queue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}.queue-actions button{padding:8px 10px}
+    @media(max-width:600px){.queue-item{flex-wrap:wrap}.queue-actions{margin-left:auto}.queue-drag.queue-drag{align-self:center}.queue-copy{min-width:150px}}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
@@ -69,8 +75,8 @@
         <details><summary>Save location</summary>
           <div class="field"><div class="help-label"><label for="output-dir">Save folder <span style="font-weight:400;color:var(--muted)">(optional)</span></label><button type="button" class="help-button" aria-label="Help with save folder" data-help="Choose a folder on the Mac running the server: use an absolute path or ~/. Leave blank for this model’s default images folder."><span aria-hidden="true">?</span></button></div><input id="output-dir" type="text" placeholder="Default: selected data folder" autocomplete="off"><p class="hint">Enter an absolute folder path or leave blank to use the default.</p></div>
         </details>
-        <div class="help-choice"><label class="immediate-choice"><input id="generate-immediately" type="checkbox" checked>Generate immediately</label><button type="button" class="help-button" aria-label="Help with Generate immediately" data-help="Runs next ahead of ordinary queued work, after the active batch finishes. Turn off to join the ordinary first-in, first-out queue."><span aria-hidden="true">?</span></button></div>
-        <p class="queue-help">Runs next, ahead of ordinary queued images. Turn off to add to the FIFO queue. Your current image will finish first.</p>
+        <div class="help-choice"><label class="immediate-choice"><input id="generate-immediately" type="checkbox" checked>Generate immediately</label><button type="button" class="help-button" aria-label="Help with Generate immediately" data-help="Runs next ahead of ordinary queued work, after the active batch finishes. Turn off to join the ordinary queue."><span aria-hidden="true">?</span></button></div>
+        <p class="queue-help">Runs next, ahead of ordinary queued images. Turn off to add to the queue. Your current image will finish first.</p>
         <button class="generate" id="generate" type="submit" disabled><span id="button-text">Generate image</span><span aria-hidden="true">↗</span></button>
         <p class="shortcut">⌘ / Ctrl + Enter to generate</p>
         <p class="hint" id="import-note" role="status" hidden></p>
@@ -87,9 +93,9 @@
       </section>
     </div>
     <section class="queue-panel" aria-label="Image generation queue">
-      <div class="queue-heading"><h2>Generation queue</h2><span class="queue-count" id="queue-summary">Connecting…</span></div>
-      <p class="queue-help">Saved on disk and resumed after a server restart. This queue belongs to the active model.</p>
-      <div class="queue-tools"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause FIFO queue</button><button type="button" class="help-button" aria-label="Help with Pause FIFO queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs for this model. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. This queue belongs to the model selected at startup."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
+      <div class="queue-heading"><h2>Queue</h2><span class="queue-count" id="queue-summary">Connecting…</span></div>
+      <p class="queue-help">Saved on disk and resumed after a server restart. This queue belongs to the active model.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
+      <div class="queue-tools"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs for this model. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. This queue belongs to the model selected at startup."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
       <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
       <div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
     </section>
@@ -98,7 +104,7 @@
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
-    let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null;
+    let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
     let activeModel = null, defaultSteps = 9, maxSteps = 12;
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
@@ -291,7 +297,7 @@
         if (!response.ok) { const detail = Array.isArray(job.detail) ? job.detail.map(item => item.msg).join('; ') : job.detail; throw new Error(detail || `Submission failed (${response.status}).`); }
         sessionStorage.removeItem('imagegen-pending');
         if (payload.generate_immediately) followJob(job.id);
-        $('announcement').textContent = payload.generate_immediately ? 'Image request saved. It will run in the next immediate slot.' : 'Image added to the persisted FIFO queue.';
+        $('announcement').textContent = payload.generate_immediately ? 'Image request saved. It will run in the next immediate slot.' : 'Image added to the persisted queue.';
         $('import-note').textContent = $('announcement').textContent; $('import-note').hidden = false;
         queueOffset = 0; await refreshQueue();
       } catch (error) {
@@ -384,26 +390,89 @@
       return data;
     }
     async function queueAction(url, options) {
-      try { await requestJSON(url,options); await refreshQueue(); }
+      if (queueMutating) return;
+      queueMutating=true;
+      try { return await requestJSON(url,options); }
       catch(error) { showError(error.message); }
+      finally { queueMutating=false; await refreshQueue(); }
     }
+    function moveQueueJob(identifier,position) {
+      return queueAction('/v1/jobs/'+identifier+'/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position})});
+    }
+    function clearQueueDrag() {
+      const drag=queueDrag; queueDrag=null;
+      $('queue-list').querySelectorAll('.queue-item').forEach(row => row.classList.remove('dragging','drop-before','drop-after'));
+      return drag;
+    }
+    function attachQueueDrag(handle,row,job) {
+      handle.addEventListener('keydown',event => {
+        if (!['ArrowUp','ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const position=job.queue_position+(event.key==='ArrowUp' ? -1 : 1);
+        if (position<1 || position>Number($('queue-list').dataset.waiting)) return;
+        moveQueueJob(job.id,position).then(() => {
+          $('queue-list').querySelector(`[data-job-id="${job.id}"] .queue-drag`)?.focus();
+        });
+      });
+      handle.addEventListener('pointerdown',event => {
+        if (event.button!==0 || queueMutating) return;
+        queueDrag={id:job.id,position:job.queue_position,startY:event.clientY,active:false};
+        handle.setPointerCapture(event.pointerId);
+      });
+      handle.addEventListener('pointermove',event => {
+        if (!queueDrag || queueDrag.id!==job.id) return;
+        if (!queueDrag.active && Math.abs(event.clientY-queueDrag.startY)<5) return;
+        queueDrag.active=true; row.classList.add('dragging');
+        const others=[...$('queue-list').querySelectorAll('[data-position]')].filter(item => item!==row);
+        others.forEach(item => item.classList.remove('drop-before','drop-after'));
+        if (!others.length) return;
+        const next=others.find(item => { const bounds=item.getBoundingClientRect(); return event.clientY<bounds.top+bounds.height/2; });
+        const target=next || others.at(-1),position=Number(target.dataset.position);
+        target.classList.add(next ? 'drop-before' : 'drop-after');
+        queueDrag.position=next ? position-(job.queue_position<position ? 1 : 0) : position+(job.queue_position>position ? 1 : 0);
+        if (event.clientY<70) window.scrollBy(0,-18);
+        else if (event.clientY>window.innerHeight-70) window.scrollBy(0,18);
+      });
+      handle.addEventListener('pointerup',() => {
+        const drag=clearQueueDrag();
+        if (drag?.active && drag.position!==job.queue_position) moveQueueJob(job.id,drag.position);
+        else refreshQueue();
+      });
+      handle.addEventListener('pointercancel',() => { clearQueueDrag(); refreshQueue(); });
+      handle.addEventListener('lostpointercapture',() => { if (queueDrag) { clearQueueDrag(); refreshQueue(); } });
+    }
+    window.addEventListener('blur',clearQueueDrag);
     function renderQueueJob(job) {
       const row=document.createElement('div'); row.className='queue-item';
       const copy=document.createElement('div'); copy.className='queue-copy';
       const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
-      const detail=document.createElement('small'); detail.textContent=`${job.status} · ${job.generate_immediately ? 'Immediate priority' : 'FIFO'} · ${job.request.size} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
+      const detail=document.createElement('small'); detail.textContent=`${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
       copy.append(title,detail);
       if (job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.error; copy.append(error); }
+      row.dataset.jobId=job.id;
+      if (job.status==='queued') {
+        row.dataset.position=job.queue_position;
+        const handle=document.createElement('button'); handle.type='button'; handle.className='queue-drag'; handle.textContent='⠿';
+        handle.setAttribute('aria-label',`Move waiting job ${job.queue_position}: ${job.request.prompt.slice(0,80)}`);
+        handle.setAttribute('aria-describedby','queue-drag-help');
+        attachQueueDrag(handle,row,job); row.append(handle);
+      }
       row.append(copy);
+      const actions=document.createElement('div'); actions.className='queue-actions';
+      if (job.status==='queued') {
+        const run=document.createElement('button'); run.type='button'; run.className='secondary'; run.textContent='Run Now';
+        run.title='Run at the next free slot, even while paused; the active batch finishes first.';
+        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { followJob(job.id); refreshQueue(); } })); actions.append(run);
+      }
       const action=document.createElement('button'); action.className='secondary'; action.type='button';
       if (job.status==='queued') { action.textContent='Remove'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); }
       else if (job.status==='succeeded') { action.textContent='View'; action.addEventListener('click',async() => { try { await displayJob(await requestJSON('/v1/jobs/'+job.id)); } catch(error) { showError(error.message); } }); }
       else if (['failed','cancelled'].includes(job.status)) { action.textContent='Retry'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); }
       else { action.textContent='Follow'; action.addEventListener('click',() => { followJob(job.id); refreshQueue(); }); }
-      row.append(action); return row;
+      actions.append(action); row.append(actions); return row;
     }
     async function refreshQueue() {
-      if (pollingQueue || !activeModel) return;
+      if (pollingQueue || queueDrag || queueMutating || !activeModel) return;
       pollingQueue=true;
       try {
         const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
@@ -412,12 +481,14 @@
         if (health.model !== activeModel) { await checkHealth(); return; }
         const summary=health.queue || {};
         queuePaused=!!summary.paused;
-        $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · FIFO paused' : ''}`;
-        $('pause-queue').textContent=queuePaused ? 'Resume FIFO queue' : 'Pause FIFO queue';
+        $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
+        $('pause-queue').textContent=queuePaused ? 'Resume queue' : 'Pause queue';
         $('clear-queue').disabled=!summary.queued;
         $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
         $('queue-notice').hidden=!$('queue-notice').textContent;
         if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
+        if (queueDrag || queueMutating) return;
+        $('queue-list').dataset.waiting=String(summary.queued || 0);
         const version=JSON.stringify(list.data);
         if (version!==queueListVersion) {
           $('queue-list').replaceChildren(...list.data.map(renderQueueJob)); queueListVersion=version;
