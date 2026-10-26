@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
 from model_profiles import PROFILES
 from observability import WINDOWS
+from job_logs import read_job_logs
 
 
 class MetricSummary(BaseModel):
@@ -66,6 +67,30 @@ class ObservedJobs(BaseModel):
 class ObservedJob(ResourceSeries):
     job_id:str
     runs:list[ObservedRun]
+
+
+class JobLogSource(BaseModel):
+    kind:Literal['runtime','native']
+    label:str
+    attempt:int|None
+    candidate_index:int|None
+    file_path:str
+    text:str
+    size_bytes:int
+    bytes_read:int
+    truncated:bool
+    modified:float
+
+
+class JobLogs(BaseModel):
+    job_id:str
+    model:str
+    status:str
+    error:str|None
+    available:bool
+    sources:list[JobLogSource]
+    max_bytes:int
+    note:str
 
 
 def create_router(get_monitor,project):
@@ -132,5 +157,14 @@ def create_router(get_monitor,project):
         checked_model(model)
         if len(identifier)!=32 or any(char not in '0123456789abcdef' for char in identifier):raise HTTPException(404,'Unknown job ID')
         return read(lambda:monitor().store.job(identifier,model=model,window=window,max_points=max_points))
+
+    @router.get('/v1/observability/jobs/{identifier}/logs',response_model=JobLogs,summary='Read available generation logs for a job',
+                description='Bounded text tails from up to ten runtime attempts and five native image logs. Runtime logs are per attempt; native logs are the latest per-output file and may be overwritten on retry. No arbitrary paths accepted. Independent of resource sampling; old shared runtime logs are not attributed to jobs.')
+    def logs(identifier:str,model:str|None=None,max_bytes:int=Query(65536,ge=1024,le=262144)):
+        checked_model(model)
+        try:return read_job_logs(project,identifier,model=model,max_bytes=max_bytes)
+        except FileNotFoundError as error:raise HTTPException(404,str(error)) from None
+        except (OSError,sqlite3.Error,RuntimeError,ValueError):
+            raise HTTPException(503,detail={'code':'job_logs_unavailable','message':'Job logs are unavailable; check the project state directory and model storage.'},headers={'Retry-After':'2'}) from None
 
     return router

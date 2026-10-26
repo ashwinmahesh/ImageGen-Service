@@ -18,6 +18,12 @@
       <button class="button" type="button" id="refresh">Refresh ↻</button><button class="button" type="button" id="overview" hidden>← All activity</button>
     </div>
     <p class="selection" id="selection">All measured activity</p><p class="notice" id="error" role="alert" hidden></p>
+    <section class="job-logs" id="job-logs" hidden aria-labelledby="logs-title">
+      <div class="logs-heading"><h2 id="logs-title">Generation logs</h2><span id="logs-status" role="status">Loading…</span></div>
+      <p class="footnote">Latest available log tails for this job, independent of the graph’s time window. Live updates refresh every five seconds.</p>
+      <p class="notice" id="logs-error" role="alert" hidden></p><p class="footnote" id="logs-note"></p>
+      <div id="log-sources"></div>
+    </section>
     <div class="stats"><article><span>Service CPU · sample mean</span><strong id="cpu-value">—</strong><small>Percentage of total CPU capacity</small></article><article><span>Service RAM · sampled peak</span><strong id="memory-value">—</strong><small>Generator and child-process RSS</small></article><article><span>GPU busy · sampled peak</span><strong id="gpu-value">—</strong><small>Whole device, including other apps</small></article></div>
     <section class="charts" aria-label="Resource graphs">
       <article class="chart-card"><div class="chart-heading"><h2>CPU utilization</h2><button class="help-button" type="button" aria-label="Help with CPU utilization" data-help="Service CPU includes the generator and its children, excluding the independent queue API. It is normalized across all logical cores: 100% means the entire machine’s CPU capacity. System CPU includes other apps. The first interval has no CPU value."><span aria-hidden="true">?</span></button></div><div class="legend"><span class="service">Service</span><span class="system">Whole system</span><span class="peak">Dashed: sampled peak</span></div><div class="chart" id="cpu-chart"></div></article>

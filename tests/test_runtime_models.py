@@ -116,6 +116,25 @@ model_child.main()
             self.assertIn('loading_model',stages)
         finally:manager.close()
 
+    def test_warm_generation_switches_to_qwen_edit_and_logs_remain_scoped(self):
+        from PIL import Image
+        from job_logs import read_job_logs
+        setup_model(self.root,'qwen-image-2.1-turbo')
+        source=self.root/'source.png';Image.new('RGB',(256,256),'blue').save(source)
+        first=self.add(seed=123)
+        second=self.add('qwen-image-2.1-turbo',task='edit',reference_image=str(source),prompt='Change the sky to orange',seed=124)
+        manager=ModelProcess(self.root,llm_enabled=False,loras_enabled=False,command=self.child_command())
+        try:
+            one=self.store.claim();result=manager.execute(one);pid=manager.process.pid;self.store.finish(one['id'],result=result)
+            two=self.store.claim();edited=manager.execute(two)
+            self.assertEqual(edited['task'],'edit');self.assertNotEqual(pid,manager.process.pid)
+            self.assertEqual(edited['model'],'qwen-image-2.1-turbo')
+            for record in (one,two):
+                text=''.join(source['text'] for source in read_job_logs(self.root,record['id'])['sources'])
+                self.assertIn('Generation attempt completed',text);self.assertIn(record['id'],text)
+                self.assertNotIn(two['id'] if record is one else one['id'],text)
+        finally:manager.close()
+
     def test_failed_model_start_does_not_stop_later_jobs(self):
         manager=ModelProcess(self.root,llm_enabled=False,stage=lambda value:None,command=self.child_command())
         failed=self.add('chroma1-flash');good=self.add()

@@ -207,6 +207,20 @@ class MonitorTest(unittest.TestCase):
 
 
 class LifecycleTest(unittest.TestCase):
+    def test_shutdown_releases_warm_runtime_before_sampler(self):
+        import server
+        from model_process import ModelProcess
+        events=[];manager=ModelProcess(ROOT);manager.close=Mock(side_effect=lambda:events.append('runtime'))
+        monitor=Mock();monitor.stop.side_effect=lambda:events.append('sampler')
+        worker=Mock();worker.stop.side_effect=lambda:events.append('worker')
+        async def enter():
+            async with server.lifespan(server.app):pass
+        with patch.object(server,'model',manager),patch.object(server,'ResourceMonitor',return_value=monitor),patch.object(server,'initialize_service'), \
+             patch.object(server,'executor',ThreadPoolExecutor(max_workers=1)),patch.object(server,'job_worker',worker), \
+             patch.object(server,'observability_monitor',None),patch.object(server,'observability_error',None):
+            asyncio.run(enter())
+        self.assertEqual(events,['worker','runtime','sampler'])
+
     def test_startup_failure_stops_sampling_and_unavailable_sampling_does_not_block_startup(self):
         import server
         async def enter():

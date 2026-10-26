@@ -528,7 +528,7 @@ curl --fail-with-body --request PATCH \
 
 ## Observability
 
-These read-only endpoints are on the **generator (5742)**, with a webpage at `/observability`. They read separate project-local resource history; the queue API (55302) does not expose them. Recording begins with generator startup, including model loading, and ends when it stops. Old activity cannot be backfilled.
+These read-only endpoints are on the **generator (5742)**, with a webpage at `/observability`. Metrics read separate project-local resource history; the job-log route reads the shared queue record and attributable log files; the queue API (55302) does not expose them. Recording begins with generator startup, including model loading, and ends when it stops. Old activity cannot be backfilled.
 
 | Method / path | Parameters and behavior |
 | --- | --- |
@@ -536,6 +536,7 @@ These read-only endpoints are on the **generator (5742)**, with a webpage at `/o
 | GET `/v1/observability/metrics` | `window`: `5m` (default), `30m`, `1h`, `6h`, `24h`, `3d`, `7d`. Optional `model=<id>` filters history; omission includes all models/sessions. Optional `end` is a finite current/past Unix timestamp (default now). `max_points`: 30–1200, default 600. |
 | GET `/v1/observability/jobs` | Paginated measured **attempts**, newest first. Optional `model`; `limit` 1–100 (default 20), `offset` >=0 (default 0). Returns `data`, `total`, `limit`, `offset`, `has_more`. Waiting/unmeasured jobs do not appear. |
 | GET `/v1/observability/jobs/{identifier}` | One job’s recorded attempts, plus its graph. Optional `model` disambiguates the model. `window`: `full` (default), `1m`, `5m`, `15m`; `max_points` as above. Short windows end at the latest completion, or now during execution. Only execution is sampled; waiting/restart intervals between attempts appear as gaps. |
+| GET `/v1/observability/jobs/{identifier}/logs` | Available generation-log tails for a persisted queue job, independent of resource sampling. Optional `model` must match the job; `max_bytes` 1024–262144, default 65536 total raw bytes. At most ten runtime attempts and five native image logs. |
 
 Example requests:
 
@@ -544,6 +545,7 @@ curl 'http://127.0.0.1:5742/v1/observability'
 curl 'http://127.0.0.1:5742/v1/observability/metrics?window=30m&model=z-image-turbo&max_points=300'
 curl 'http://127.0.0.1:5742/v1/observability/jobs?limit=20&offset=0'
 curl "http://127.0.0.1:5742/v1/observability/jobs/$JOB_ID?model=z-image-turbo&window=full"
+curl "http://127.0.0.1:5742/v1/observability/jobs/$JOB_ID/logs?max_bytes=65536"
 ```
 
 Graph responses have `start`/`end` Unix seconds, `bucket_seconds`, `points[]` and `summary`. Each point contains the actual first/last sample timestamps, midpoint `timestamp`, sample `count`, recorded `models[]`, `sessions[]`, `stages[]`, `values` (bucket means) and `peaks` (sampled maxima). Missing counters are **null**, not zero; absent buckets are not fabricated. Means are sample means, not elapsed-time-weighted averages. The UI breaks lines across missing intervals and session/model changes.
@@ -565,6 +567,14 @@ Samples are taken every **1s during a job / 5s idle**, plus execution boundaries
 GPU counters are best-effort read-only IORegistry diagnostics, verified locally without sudo. Unavailable counters remain blank and are retried with backoff. Summed RSS can double-count shared pages; CPU snapshots can miss short-lived children and 1s sampling can miss brief spikes. Per-job plots correlate measured resources with execution and are not an exclusive GPU/cost profiler. The page’s tooltips state these limitations. [psutil documentation](https://psutil.io/) describes process/system readings; the GPU [collector example](https://github.com/XReyRobert/macos-telegraf-gpumonitoring) documents the driver counter names.
 
 Bad models/windows/ranges return **422**. An unknown/unmeasured job returns **404**, including jobs still waiting or predating instrumentation. A missing sampler or unavailable telemetry store returns **503** with `detail.code: observability_unavailable` and `Retry-After: 2`. These failures are independent of queue storage and do not change generator readiness or prevent generation. `/health.observability` reports sampler/source availability when initialized, or a startup error if sampling could not start.
+
+### Generation-log response
+
+`GET /v1/observability/jobs/{identifier}/logs` returns `job_id`, `model`, queue `status`, nullable job `error`, `available`, `sources`, `max_bytes` and a `note` explaining missing/legacy files. Each source has `kind` (`runtime` or `native`), `label`, nullable `attempt` and `candidate_index` (1-based), absolute `file_path`, plain `text`, total `size_bytes`, tail `bytes_read`, `truncated`, and Unix `modified`. The budget is shared across the bounded source list; actual text can be smaller when files are absent. ANSI escapes/control characters are removed and carriage returns normalized. Live views refresh every five seconds and show latest available tails regardless of the graph time window.
+
+New scheduler/Python logs are appended separately for each attempt under `state/job-logs/<job-id>/attempt-<number>.log`, including model selection, stages and failures. Native CLI logs remain in the configured model's `logs/` folder; retries may overwrite them, so they are labelled as latest contents without claiming an exact attempt. Job capture failure does not fail inference. Logs may contain prompts, local paths or other runtime output; keep them private. They persist until locally removed and are independent of the eight-day metrics retention.
+
+A known job without attributable files returns **200** with `available:false` and empty `sources`. Old shared runtime logs are never exposed as a job's logs. Invalid/unknown job IDs and a mismatched valid model return **404**; unknown model or out-of-range byte limits return **422**. Queue-record/storage failure returns **503** with `detail.code:job_logs_unavailable` and `Retry-After:2`; individual missing/unreadable files leave other sources usable. Sampling and queue-HTTP outages do not prevent log reads when the shared SQLite and files are readable. This endpoint does not accept a file path or mutate queue state.
 
 ## Media, webpages and API documentation
 

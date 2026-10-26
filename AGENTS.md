@@ -6,6 +6,7 @@ This file is for agents changing the repository. An agent operating the service 
 
 - `server.py`: generator FastAPI app, validation, media, gallery and direct SQLite queue endpoints.
 - `queue_api.py` / `queue_launch.py`: independent queue API and background-process launcher.
+- `job_logs.py`: nonfatal per-attempt child capture, scheduler diagnostics and bounded attributed log reads.
 - `resource_probe.py` / `observability.py` / `observability_api.py`: bounded resource probes, independent metric storage/sampler and read-only history routes.
 - `job_queue.py`: shared SQLite `JobStore`, ordering, mutations and durable checkpoints.
 - `generation_worker.py` / `queue_storage.py`: exclusive consumer, recovery, accelerator coordination and project-local shared queue storage. `model_process.py` / `model_child.py` / `runtime_protocol.py` own backend lifetime and private FD-carrying IPC.
@@ -82,3 +83,7 @@ Update these together when their behavior changes:
 - `AGENTS.md`: contributor guidance and architectural constraints.
 
 For reusable workflow changes, update the user's installed `model-server-gen` skill while preserving other-modality guidance. Synchronize existing Codex/Claude copies and portable exports when maintaining them; repository edits alone do not update installed skills. Do not publish private data or rewrite published history without explicit authorization.
+
+Per-job logs are served only by the generator at `/v1/observability/jobs/{id}/logs`, independently of sampling. Capture Python stdout/stderr only inside the isolated serial child; never redirect shared HTTP thread streams. Scheduler failures before child execution append directly to the job log, and cleanup tracebacks also go to `state/model-process/server.log`. Preserve the old-runtime-exit safeguard: query status only for owned-group processes, tolerate exit races/zombies, and stop the consumer if release cannot be proved. Read bounded regular log files; do not expose arbitrary path reads, global shared logs or HTML-rendered output. Logs, including prompts/paths emitted by runtimes, are private local state.
+
+The Edit workflow has one preview box, showing empty/source/result as appropriate. Center the source, hide Generate output in Edit even when a followed Generate job finishes later, and replace the source with the completed edit. For Qwen, a real drag automatically selects the region mode; a click alone keeps whole-photo mode. Keep selection geometry attached to source coordinates.

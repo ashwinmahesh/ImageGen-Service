@@ -10,6 +10,7 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--socket-fd',type=int,required=True)
     args=parser.parse_args();channel=socket.socket(fileno=args.socket_fd)
     import server
+    from job_logs import capture_runtime,event
     from job_queue import JobStore
     from queue_storage import queue_database
     original_load=server.load_model
@@ -22,7 +23,8 @@ def main():
         @property
         def stage(self):return self.value
         @stage.setter
-        def stage(self,value):self.value=value;send(channel,{'event':'stage','stage':value})
+        def stage(self,value):
+            self.value=value;event('Stage: '+value);send(channel,{'event':'stage','stage':value})
     server.job_worker=Stage()
     lifetime_lease=None
     while True:
@@ -39,7 +41,8 @@ def main():
             if job['request']['model']!=server.API_MODEL:raise ValueError('Model process request mismatch')
             if message['database_path']!=str(queue_database(server.PROJECT_ROOT)):raise ValueError('Model queue path mismatch')
             server.job_store=JobStore(message['database_path'])
-            result=server.execute_job(job)
+            with capture_runtime(server.PROJECT_ROOT,job):
+                result=server.execute_job(job)
             send(channel,{'event':'result','result':result})
         except Exception as error:
             traceback.print_exc()

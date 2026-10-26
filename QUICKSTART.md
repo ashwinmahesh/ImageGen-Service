@@ -135,9 +135,11 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 1. Set up an editing model, for example `make setup MODEL=qwen-image-2.1-turbo`, then run `make serve`.
 2. Select **Edit photo**, then choose an editing model. The tab is available whenever at least one setup model supports editing, even if the Generate tab currently uses Z-Image or Chroma. It opens with an empty model selector; choose a setup Klein or Qwen model before submitting. If none are setup, the tab stays disabled and its hover/focus tooltip names suitable models to set up.
 3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
-4. For Qwen, choose **Selected area**, then drag a rectangle over the source preview. **Whole photo** remains available; Klein supports whole-photo editing only.
+4. For Qwen, drag a rectangle over the source preview; **Selected area** is chosen automatically. **Whole photo** remains available; Klein supports whole-photo editing only.
 5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
 6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
+
+The Edit preview uses a single box: upload a photo to show it centered, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.
 
 The **Generate** view continues to offer Klein and Qwen for creating images from text, without requiring a source photo. Selected areas also work through both APIs: pass `mask_image` with `task:"edit"` in the generator's flat request, or inside the standalone queue's `request` envelope with `model:"qwen-image-2.1-turbo"`. White mask pixels edit; black pixels preserve. See the [photo-editing examples](docs/api.md#selected-area-qwen-edits).
 
@@ -145,11 +147,12 @@ For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-imag
 
 Open **Queue** in the header. The modal keeps its header and pagination visible while entries scroll. **Monitor** closes it and follows a job in the preview; waiting entries also have green **Run Now** and red **Remove** buttons. Close it with **Close**, Escape or the backdrop. In the modal, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
 
+
 ### Monitor resource use
 
 Choose **Observability** in the header, or open [http://localhost:5742/observability](http://localhost:5742/observability). Select 5m, 30m, 1h, 6h, 24h, 3 days or 7 days, and optionally filter by model. Hover a graph—or focus it and use the arrow keys—to inspect values and model names. Solid lines show sample means; dashed lines preserve sampled peaks in longer windows.
 
-Choose **View job** in the measured-jobs table, or **Metrics** beside an attempted queue entry. Job view offers **Entire job**, **Last minute**, **Last 5 minutes** and **Last 15 minutes**, ending at completion for finished jobs. Retries/recovery attempts are identified separately. The table has Previous/Next pagination. Live updates refresh the webpage every five seconds; switching them off does not stop server-side recording.
+Choose **View job** in the measured-jobs table, or **Metrics** beside an attempted queue entry. Job view offers **Entire job**, **Last minute**, **Last 5 minutes** and **Last 15 minutes**, ending at completion for finished jobs. Retries/recovery attempts are identified separately. The table has Previous/Next pagination. The job’s **Generation logs** panel shows available stages, runtime output and errors; expand a source to read its latest text. New attempts have separate logs, while native image logs show their latest contents. Older jobs can have no logs. Live updates refresh the webpage every five seconds; switching them off does not stop server-side recording.
 
 The generator records every second during jobs and every five seconds while idle. No samples are backfilled for old jobs or periods when it was stopped. Raw samples are retained for eight days; finished attempt summaries remain afterward. History is stored at `state/observability/metrics.sqlite3` inside the project, separate from the queue and external model store.
 

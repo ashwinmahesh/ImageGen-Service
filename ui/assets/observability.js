@@ -100,8 +100,41 @@
     }
     $('previous').disabled=offset===0;$('next').disabled=!result.has_more;$('page-label').textContent=`Page ${Math.floor(offset/20)+1} of ${Math.max(1,Math.ceil(total/20))}`;
   }
+  let logsJob=null;
+  function configureLogs(){
+    $('job-logs').hidden=!job;
+    if(logsJob!==job){logsJob=job;$('log-sources').replaceChildren();$('logs-note').textContent='';$('logs-error').hidden=true;$('logs-status').textContent='Loading…';}
+  }
+  function renderLogs(data){
+    $('logs-status').textContent=data.available?'Available · '+data.status:'No logs yet';
+    $('logs-note').textContent=data.note || '';
+    $('logs-error').hidden=!data.error;if(data.error)$('logs-error').textContent='Job failed: '+data.error;
+    const existing=new Map([...$('log-sources').children].map(node=>[node.dataset.path,node]));
+    const retained=new Set();
+    for(const source of data.sources){
+      let details=existing.get(source.file_path);retained.add(source.file_path);
+      if(!details){details=el('details');details.dataset.path=source.file_path;details.open=true;details.append(el('summary'),el('p','','log-meta'),el('pre'));$('log-sources').append(details);}
+      details.querySelector('summary').textContent=source.label+(source.truncated?' · tail truncated':'');
+      details.querySelector('.log-meta').textContent=source.file_path+' · '+source.bytes_read.toLocaleString()+' of '+source.size_bytes.toLocaleString()+' bytes';
+      const pre=details.querySelector('pre');if(pre.textContent!==source.text){const bottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-8;pre.textContent=source.text || 'Log file is empty.';if(bottom)pre.scrollTop=pre.scrollHeight;}
+    }
+    for(const [path,node] of existing)if(!retained.has(path))node.remove();
+  }
+  async function refreshLogs(current,number){
+    if(!job)return;
+    const query=new URLSearchParams();if(jobModel)query.set('model',jobModel);
+    try{
+      const data=await json('/v1/observability/jobs/'+encodeURIComponent(job)+'/logs?'+query,current.signal);
+      if(number===requestNumber)renderLogs(data);
+    }catch(error){
+      if(number!==requestNumber)return;
+      $('logs-status').textContent='Logs unavailable';$('logs-error').hidden=false;
+      $('logs-error').textContent=error.name==='AbortError'?'Log request timed out; live updates will retry.':error.message;
+    }
+  }
   async function refresh(){
     if(controller)controller.abort();refreshing=true;controller=new AbortController();const current=controller,number=++requestNumber,timer=setTimeout(()=>current.abort(),12000);
+    configureLogs();const logsRequest=refreshLogs(current,number);
     const selectedModel=job?jobModel:$('model-filter').value,query=new URLSearchParams({window:job?jobWindow:overviewWindow});if(selectedModel)query.set('model',selectedModel);
     const jobsQuery=new URLSearchParams({limit:'20',offset:String(offset)});if(selectedModel)jobsQuery.set('model',selectedModel);
     try{
@@ -113,7 +146,7 @@
       $('selection').textContent=job?`Job ${job} · ${selectedModel?name(selectedModel):data.runs.map(run=>name(run.model)).join(', ')}`:selectedModel?name(selectedModel)+' · all measured sessions':'All models · all measured sessions';
       render(data);renderJobs(result);
     }catch(error){if(number!==requestNumber)return;if(error.name==='AbortError')error=new Error('History request timed out. Check that the generator is running.');$('error').textContent=job&&error.status===404?'No measurements for this job yet. It may still be waiting, or it ran before observability was added. This page will retry while live updates are enabled.':error.message;$('error').hidden=false;$('connection').textContent='History unavailable';$('connection').classList.add('offline');}
-    finally{clearTimeout(timer);if(number===requestNumber)refreshing=false;}
+    finally{await logsRequest;clearTimeout(timer);if(number===requestNumber)refreshing=false;}
   }
   $('time-window').addEventListener('change',()=>{if(job)jobWindow=$('time-window').value;else overviewWindow=$('time-window').value;refresh();});
   $('model-filter').addEventListener('change',()=>{offset=0;refresh();});$('refresh').addEventListener('click',refresh);

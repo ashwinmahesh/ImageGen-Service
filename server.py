@@ -153,7 +153,10 @@ async def lifespan(app):
             if job_worker:await asyncio.to_thread(job_worker.stop)
             executor.shutdown(wait=True)
         finally:
-            if observability_monitor:await asyncio.to_thread(observability_monitor.stop)
+            try:
+                if isinstance(model,ModelProcess):await asyncio.to_thread(model.close)
+            finally:
+                if observability_monitor:await asyncio.to_thread(observability_monitor.stop)
 
 
 app = FastAPI(

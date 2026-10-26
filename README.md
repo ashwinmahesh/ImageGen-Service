@@ -32,7 +32,7 @@ The LLM is instructed to keep framing and other details you've explicitly specif
 
 ### Guide the result with a reference or style adapter
 
-A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, drag a rectangle on the source preview to edit a selected area; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
+A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, drag a rectangle on the source preview to switch automatically to a selected-area edit; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
 
 Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters).
 
@@ -44,7 +44,7 @@ The effect of prompt expansion and composition planning depends on the scene and
 
 ## Generate or edit a photo
 
-**Generate** offers every setup model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each view keeps its own prompt. Editing defaults to a 1024px long edge with the source aspect ratio, the model's distilled step count, and alternate attempts at the same edit rather than new compositions.
+**Generate** offers every setup model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each view keeps its own prompt and hides results from the other workflow. Edit uses one preview box: empty before upload, a centered source photo after upload, and the edited result after completion. Editing defaults to a 1024px long edge with the source aspect ratio, the model's distilled step count, and alternate attempts at the same edit rather than new compositions.
 
 The editing refiner clarifies the requested change and preservation requirements; it cannot see the photo and does not use the generation scene-expansion policy. Source-photo preview and Qwen area selection are available for uploaded files and gallery images. The API supports `POST /v1/images/edits` or asynchronous `POST /v1/jobs` with `task:"edit"`. Selected-area edits use `mask_image` on both the generator API and the independent queue API; see the [masked request examples](docs/api.md#selected-area-qwen-edits).
 
@@ -100,7 +100,7 @@ The generator, gallery and queue screenshots use demonstration data and a simula
 
 ## Resource history
 
-Open **Observability** in the webpage header to see CPU, memory and GPU line graphs over **5m, 30m, 1h, 6h, 24h, 3 days or 7 days**. Filter by model or open a measured job for its full execution timeline and shorter windows. The queue’s **Metrics** links open the matching job.
+Open **Observability** in the webpage header to see CPU, memory and GPU line graphs over **5m, 30m, 1h, 6h, 24h, 3 days or 7 days**. Filter by model or open a measured job for its full execution timeline and shorter windows. The queue’s **Metrics** links open the matching job. Its **Generation logs** panel shows available runtime messages, stages and errors, with live updates and separate attempt logs. Older jobs may only have native output logs or no attributable logs.
 
 CPU and RAM include the generator and its child processes, including prompt expansion and native model tools. GPU readings cover the whole device, including other apps; GPU memory shares the Mac’s RAM. Sampling runs while the generator is on, with stopped periods shown as gaps. Eight days of raw history and durable job summaries live in project-local SQLite, independently of the queue. See the [API reference](docs/api.md#observability) for the exact measurement scopes.
 
