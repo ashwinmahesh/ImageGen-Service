@@ -23,10 +23,15 @@ Choose an image model:
   4. FLUX.2 Klein 4B (flux2-klein-4b)
   5. FLUX.2 Klein 9B (flux2-klein-9b)
   6. Qwen-Image 2.1 Turbo (qwen-image-2.1-turbo)
+  q. Cancel setup
 Model [1 / Z-Image Turbo]:
 ```
 
 Press Enter for **Z-Image Turbo**, or enter a number or full model ID. Setup installs dependencies and downloads the selected image model's required assets plus one shared prompt-expansion LLM; it does not start serving. Repeat setup to install another model. All models use the same environment and source code.
+
+Cancel with `q` (also `quit`/`cancel`) at the model menu, or **Ctrl+C at any point during setup**, including storage selection, dependency installation and downloads. An input EOF at the model menu also cancels. Setup prints a short cancellation message without a Python traceback and stops only its own setup subprocess group. Existing files and cached partial downloads are retained; rerun `make setup` to finish or repair interrupted setup. No generation/queue service is started or stopped.
+
+The startup log explains that **rerunning setup for an already downloaded model is safe**: unchanged model weights are a no-op with no redownload, while missing or changed pinned files are downloaded/updated in place. It does not create a duplicate model folder or automatically switch to an unpinned upstream revision. Dependency installation/checks, shared prompt-model verification and completion metadata can still run, so the entire setup command is not a strict no-op.
 
 Setup labels use the same read-only local asset preflight as the serving menu, including shared Chroma files/runtime and indexed MLX checkpoint shards. An old completion marker alone is insufficient. The label reports model assets, not a running server or optional LLM/LoRA readiness. It does not load weights, hash large files or download anything. Missing/unreadable storage gets no completion labels; the storage setup step still reports configuration or mount errors. All models remain selectable with unchanged numbers/default, including completed models. Explicit model selection and noninteractive setup skip the menu and its readiness scan.
 

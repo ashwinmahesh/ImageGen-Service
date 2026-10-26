@@ -110,7 +110,8 @@ class InstalledModelMenuTest(unittest.TestCase):
     def setup_menu(self, answer=''):
         select=lambda **kwargs:model_profiles.select_model(interactive=True,prompt=lambda _:answer,**kwargs)
         with patch.object(model_setup,'ROOT',self.project),patch.object(model_setup,'select_model',side_effect=select), \
-             patch.object(model_setup.subprocess,'call',return_value=0) as run,contextlib.redirect_stdout(io.StringIO()) as output:
+             patch.object(model_setup.subprocess,'Popen') as run,contextlib.redirect_stdout(io.StringIO()) as output:
+            run.return_value.wait.return_value=0
             self.assertEqual(model_setup.main(),0)
         return output.getvalue(),run.call_args.kwargs['env']['IMAGE_MODEL']
 
@@ -147,7 +148,8 @@ class InstalledModelMenuTest(unittest.TestCase):
     def test_setup_skips_readiness_scan_for_explicit_and_noninteractive_selection(self):
         for environment in ({'MODEL':'chroma1-flash'}, {'NONINTERACTIVE':'1'}):
             with patch.dict(os.environ,environment,clear=True),patch.object(model_setup,'completed_models') as scan, \
-                 patch.object(model_setup.subprocess,'call',return_value=0),contextlib.redirect_stdout(io.StringIO()) as output:
+                 patch.object(model_setup.subprocess,'Popen') as run,contextlib.redirect_stdout(io.StringIO()) as output:
+                run.return_value.wait.return_value=0
                 self.assertEqual(model_setup.main(),0)
                 scan.assert_not_called()
                 self.assertNotIn('Choose an image model:',output.getvalue())

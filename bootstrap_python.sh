@@ -5,6 +5,9 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 mode=$1
 shift
 case "$mode" in setup|run) ;; *) echo 'Expected setup or run mode.' >&2; exit 1 ;; esac
+if [ "$mode" = setup ]; then
+    trap 'printf "\nSetup cancelled. Existing files were kept; rerun make setup to continue.\n" >&2; exit 130' INT
+fi
 can_run() {
     "$1" -I -c 'import platform,sys; raise SystemExit(sys.implementation.name != "cpython" or sys.version_info < (3,9) or platform.system() != "Darwin" or platform.machine() != "arm64")' >/dev/null 2>&1
 }

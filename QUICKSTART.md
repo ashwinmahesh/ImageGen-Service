@@ -30,6 +30,8 @@ Follow the setup questions:
 2. **Choose a storage folder.** Press Enter to keep model downloads and pictures inside the project. To use an external SSD, enter an absolute path such as `/Volumes/MySSD/models`.
 3. **Wait for setup to finish.** It selects Python, installs pinned dependencies into `.venv`, and downloads the chosen image model plus a shared Qwen prompt-expansion model. Setup does not start either server.
 
+To cancel, enter `q` at the model menu or press **Ctrl+C** at any point during setup. Existing files and cached partial downloads are kept; rerun `make setup` to continue. Selecting an already downloaded model is safe: unchanged weights need no redownload, and missing or changed pinned files are updated in place. Setup still checks dependencies and shared assets.
+
 The external folder is a parent store: setup creates model folders inside it and links them into the project. Your choice is remembered, so later setup runs reuse it. Keep the drive connected when generating. Queue databases always stay inside the project's `state/` folder.
 
 Setup supports standard Apple Silicon CPython **3.12, 3.13 and 3.14**, except 3.14.1. It checks your target environment first, then installed interpreters, and downloads 3.14.9 only if none are compatible. Downloaded Python and its helper/cache stay in ignored `.python` and `.bootstrap` folders inside the project; `DATA_DIR` still controls models and pictures.

@@ -85,7 +85,7 @@ def _show_unavailable(identifiers):
         print('Run a model\'s setup command to add it to the numbered options, then run make serve again.')
 
 
-def select_model(explicit=None, *, interactive=None, prompt=input, choices=None, setup_complete=None):
+def select_model(explicit=None, *, interactive=None, prompt=input, choices=None, setup_complete=None, allow_cancel=False):
     identifiers=tuple(PROFILES if choices is None else (name for name in PROFILES if name in choices))
     selected=explicit or os.environ.get('IMAGE_MODEL') or os.environ.get('MODEL')
     if interactive is None:
@@ -107,7 +107,11 @@ def select_model(explicit=None, *, interactive=None, prompt=input, choices=None,
             print(f"  {index}. {profile['name']}{label} ({identifier})")
         if choices is not None:
             _show_unavailable(identifiers)
+        if allow_cancel:
+            print('  q. Cancel setup')
         answer=prompt(f"Model [{identifiers.index(default)+1} / {PROFILES[default]['name']}]: ").strip()
+        if allow_cancel and answer.lower() in ('q','quit','cancel'):
+            raise KeyboardInterrupt
         selected=dict(enumerate(identifiers,1)).get(int(answer)) if answer.isdigit() else answer
         if answer and not selected:
             raise ValueError('Choose a listed model number or ID')

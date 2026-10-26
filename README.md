@@ -111,6 +111,8 @@ make serve
 
 During first setup, Enter chooses Z-Image Turbo and project-local storage; you can select another model or an external folder. Serving offers installed models, labels Klein with `(edits enabled)` and Qwen with `(edit selected area enabled)`, and enables prompt expansion by default. Open **[http://localhost:5732](http://localhost:5732/)** once startup finishes.
 
+Setup is safe to rerun, including for a model marked `[SETUP COMPLETE]`: unchanged weights need no redownload, and missing or changed pinned files are updated in place. Dependencies and shared assets are still checked. Choose `q` at the setup model menu or press Ctrl+C during setup to cancel cleanly; downloaded files are kept for your next attempt.
+
 `make serve` also starts the background queue API if needed. Ctrl-C stops the generator after its active batch finishes; `make stop-queue` stops the queue API separately. Use `make serve NO_LLM=1` to disable prompt expansion or `make serve NO_LORAS=1` to disable adapters.
 
 ## Documentation
