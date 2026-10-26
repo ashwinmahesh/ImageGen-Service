@@ -143,7 +143,7 @@ The **Generate** view continues to offer Klein and Qwen for creating images from
 
 For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-image-turbo` before starting the generator. Normal setup downloads no LoRAs. Different seeds or composition prompts can help variety, but strongly constrained scenes and preserved references may still look similar.
 
-In the **Queue** panel, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
+Open **Queue** in the header. The modal keeps its header and pagination visible while entries scroll. **Monitor** closes it and follows a job in the preview; waiting entries also have green **Run Now** and red **Remove** buttons. Close it with **Close**, Escape or the backdrop. In the modal, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
 
 ### Monitor resource use
 

@@ -24,7 +24,7 @@
     @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}header,footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
     @media(max-width:640px){header{padding:12px 18px;flex-wrap:wrap}.header-actions{gap:12px;flex-wrap:wrap}.nav a{padding:6px 10px}.brand strong{font-size:16px}main{padding:14px 18px 10px}h1{font-size:22px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:12px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
     @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
-    .queue-panel{margin-top:30px;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
+    .queue-panel{margin:auto;width:min(1180px,calc(100vw - 32px));height:80vh;max-height:80vh;height:80dvh;max-height:80dvh;color:var(--text);overflow:hidden;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
 
     .queue-drag.queue-drag{flex-shrink:0;align-self:stretch;min-width:30px;min-height:30px;padding:4px;color:#929397;background:transparent;border:1px solid transparent;font-size:20px;line-height:1;cursor:grab;touch-action:none;user-select:none}
     .queue-drag-spacer{flex:0 0 30px;align-self:stretch}
@@ -40,12 +40,21 @@
 
     /* Subtle depth on charcoal surfaces; blue stays an accent. */
     .controls,.queue-panel,.source-editor{box-shadow:inset 0 1px 0 #ffffff06,0 12px 32px #00000018}.preview{box-shadow:inset 0 1px 0 #ffffff05,0 16px 40px #0000001c}
+
+    .queue-panel[open]{display:flex;flex-direction:column}.queue-panel::backdrop{background:#07080bb8;backdrop-filter:blur(6px)}body:has(#queue-dialog[open]){overflow:hidden}
+    .queue-panel> :not(#queue-list){flex-shrink:0}.queue-panel #queue-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;align-content:start}.queue-dialog-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.queue-panel .queue-count{margin:10px 0 0}.queue-panel .queue-pages{padding-top:12px;border-top:1px solid var(--line)}
+    #queue-badge{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:9px;background:#273649;color:var(--accent);font-size:11px}#queue-badge[hidden]{display:none}
+    .queue-actions .secondary,.queue-actions .queue-metrics{display:inline-flex;align-items:center;justify-content:center;flex:0 0 96px;width:96px;height:30px;padding:0 4px;border-radius:6px;font-size:12px;line-height:1.1;text-align:center;text-decoration:none}
+    .queue-actions .queue-monitor{border-color:#497bb1;background:#20364e;color:#c6e3ff}.queue-actions .queue-monitor:hover:not(:disabled){background:#2c4969}
+    .queue-actions .queue-run-now{border-color:#4c8b5d;background:#25432f;color:#c8f0d1}.queue-actions .queue-run-now:hover:not(:disabled){background:#345a40}
+    .queue-actions .queue-remove{border-color:#a1545b;background:#43282e;color:#ffccd2}.queue-actions .queue-remove:hover:not(:disabled){background:#60353e}
+    @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1}.queue-actions .secondary,.queue-actions .queue-metrics{flex-basis:calc((100% - 12px)/3);max-width:96px;min-width:65px;font-size:11px}}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
 </head>
 <body>
-  <header><div class="brand"><img class="mark" width="35" height="35" alt="" aria-hidden="true" src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2393c5fd%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2310243c%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%2310243c%22%2F%3E%3C%2Fsvg%3E"><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a><a href="/observability">Observability</a></nav><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
+  <header><div class="brand"><img class="mark" width="35" height="35" alt="" aria-hidden="true" src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2393c5fd%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2310243c%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%2310243c%22%2F%3E%3C%2Fsvg%3E"><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a><a href="/observability">Observability</a></nav><button class="secondary" id="open-queue" type="button" aria-haspopup="dialog" aria-controls="queue-dialog">Queue <span id="queue-badge" hidden></span></button><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
     <p class="hint" id="license-notice" hidden></p>
@@ -107,15 +116,16 @@
         <div class="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your selected folder.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
       </section>
     </div>
-    <section class="queue-panel" aria-label="Image generation queue">
-      <div class="queue-heading"><h2>Queue</h2><span class="queue-count" id="queue-summary">Connecting…</span></div>
-      <p class="queue-help">Saved on disk and resumed after a server restart. One queue handles all setup image models.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
-      <div class="queue-tools"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs across models. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. All models share this queue and its ordering."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
-      <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
-      <div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
-    </section>
+
     <p id="announcement" role="status" aria-live="polite"></p>
   </main>
+    <dialog class="queue-panel" id="queue-dialog" aria-labelledby="queue-title">
+      <div class="queue-heading"><h2 id="queue-title">Queue</h2><div class="queue-dialog-actions"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs across models. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><button class="secondary" id="close-queue" type="button" aria-label="Close queue">Close</button></div></div><p class="queue-count" id="queue-summary" role="status">Connecting…</p>
+      <p class="queue-help">Saved on disk and resumed after a server restart. One queue handles all setup image models.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
+      <div class="queue-tools"><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. All models share this queue and its ordering."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
+      <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
+      <p class="error" id="queue-error" role="alert" hidden></p><div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
+    </dialog>
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
@@ -305,7 +315,7 @@
       $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions() || !chosenProfile();
       $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
     }
-    function showError(message) { $('error').textContent = message; $('error').hidden = false; }
+    function showError(message) { const target=$($('queue-dialog').open ? 'queue-error' : 'error'); target.textContent=message; target.hidden=false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
       $('reference-options').hidden = !hasReference || referenceMode === 'edit' || workflow==='edit';
@@ -562,7 +572,7 @@
     }
     async function queueAction(url, options) {
       if (queueMutating) return;
-      queueMutating=true;
+      queueMutating=true; $('queue-error').hidden=true;
       try { return await requestJSON(url,options); }
       catch(error) { showError(error.message); }
       finally { queueMutating=false; await refreshQueue(); }
@@ -601,8 +611,9 @@
         const target=next || others.at(-1),position=Number(target.dataset.position);
         target.classList.add(next ? 'drop-before' : 'drop-after');
         queueDrag.position=next ? position-(job.queue_position<position ? 1 : 0) : position+(job.queue_position>position ? 1 : 0);
-        if (event.clientY<70) window.scrollBy(0,-18);
-        else if (event.clientY>window.innerHeight-70) window.scrollBy(0,18);
+        const list=$('queue-list'),bounds=list.getBoundingClientRect();
+        if (event.clientY<bounds.top+35) list.scrollBy(0,-18);
+        else if (event.clientY>bounds.bottom-35) list.scrollBy(0,18);
       });
       handle.addEventListener('pointerup',() => {
         const drag=clearQueueDrag();
@@ -632,17 +643,28 @@
       }
       row.append(copy);
       const actions=document.createElement('div'); actions.className='queue-actions';
+      const inspect=document.createElement('button'); inspect.type='button'; inspect.className='secondary queue-monitor'; inspect.textContent=job.status==='succeeded' ? 'Open image' : 'Monitor';
+      inspect.addEventListener('click',async() => {
+        $('queue-dialog').close();
+        try {
+          const current=await requestJSON('/v1/jobs/'+job.id);
+          if (current.status==='succeeded' || current.partial_result) await displayJob(current);
+          if (['failed','cancelled'].includes(current.status)) showError(current.error || 'This job was cancelled.');
+          else if (current.status!=='succeeded') { followJob(job.id); await refreshQueue(); }
+        } catch(error) { showError(error.message); }
+      }); actions.append(inspect);
       if (job.status==='queued') {
-        const run=document.createElement('button'); run.type='button'; run.className='secondary'; run.textContent='Run Now';
+        const run=document.createElement('button'); run.type='button'; run.className='secondary queue-run-now'; run.textContent='Run Now';
         run.title='Run at the next free slot, even while paused; the active batch finishes first.';
-        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { followJob(job.id); refreshQueue(); } })); actions.append(run);
+        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close(); followJob(job.id); refreshQueue(); } })); actions.append(run);
+        const remove=document.createElement('button'); remove.type='button'; remove.className='secondary queue-remove'; remove.textContent='Remove';
+        remove.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); actions.append(remove);
+      } else if (['failed','cancelled'].includes(job.status)) {
+        const retry=document.createElement('button'); retry.type='button'; retry.className='secondary'; retry.textContent='Retry';
+        retry.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); actions.append(retry);
       }
-      const action=document.createElement('button'); action.className='secondary'; action.type='button';
-      if (job.status==='queued') { action.textContent='Remove'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); }
-      else if (job.status==='succeeded') { action.textContent='View'; action.addEventListener('click',async() => { try { await displayJob(await requestJSON('/v1/jobs/'+job.id)); } catch(error) { showError(error.message); } }); }
-      else if (['failed','cancelled'].includes(job.status)) { action.textContent='Retry'; action.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); }
-      else { action.textContent='Follow'; action.addEventListener('click',() => { followJob(job.id); refreshQueue(); }); }
-      actions.append(action); if(job.attempts>0){const metrics=document.createElement('a');metrics.className='queue-metrics';metrics.textContent='Metrics';metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model});metrics.title='View resource measurements for this job';actions.append(metrics);} row.append(actions); return row;
+      if (job.attempts>0) { const metrics=document.createElement('a'); metrics.className='secondary queue-metrics'; metrics.textContent='Metrics'; metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model}); metrics.title='View resource measurements for this job'; actions.append(metrics); }
+      row.append(actions); return row;
     }
     async function refreshQueue() {
       if (pollingQueue || queueDrag || queueMutating) return;
@@ -654,6 +676,7 @@
         activeModel=health.active_model; serverBusy=health.busy; updateRuntimeStatus(health);
         const summary=health.queue || {};
         queuePaused=!!summary.paused;
+        const count=(summary.running || 0)+(summary.queued || 0); $('queue-badge').textContent=String(count); $('queue-badge').hidden=!count;
         $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
         $('pause-queue').textContent=queuePaused ? 'Resume queue' : 'Pause queue';
         $('clear-queue').disabled=!summary.queued;
@@ -682,9 +705,13 @@
             localStorage.removeItem('imagegen-watching'); watchingJob=null;
           }
         }
-      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; }
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
       finally { pollingQueue=false; }
     }
+    $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
+    $('close-queue').addEventListener('click',() => $('queue-dialog').close());
+    $('queue-dialog').addEventListener('close',clearQueueDrag);
+    $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
     $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
     $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
     $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });

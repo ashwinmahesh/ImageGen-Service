@@ -84,11 +84,11 @@ The app has two services that share a persistent SQLite queue:
 
 Ordinary jobs run in order. The webpage defaults to **Generate immediately**, which puts your request in the next free slot ahead of ordinary queued work. Active batches finish first. You can pause ordinary work, cancel waiting jobs, clear the waiting list and retry failed jobs.
 
-![Saved generation queue with pause and cancellation controls](docs/screenshots/queue.png)
+![Queue modal with Monitor, Run Now, Remove and pagination controls](docs/screenshots/queue.png)
 
 Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Jobs retain their requested model. If its files become unavailable after admission, it stays waiting with an explanation while other eligible jobs continue. New requests for models that need setup are rejected; run setup first.
 
-The **Queue** panel lets you drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
+The header’s **Queue** button opens a modal with the active/waiting count, pause/clear controls and saved history. It lets you drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
 
 ## Built for local hardware and storage
 
