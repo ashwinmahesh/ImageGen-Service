@@ -27,6 +27,7 @@
     .queue-panel{margin-top:30px;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--panel)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
 
     .queue-drag.queue-drag{flex-shrink:0;align-self:stretch;min-width:30px;min-height:30px;padding:4px;color:#929397;background:transparent;border:1px solid transparent;font-size:20px;line-height:1;cursor:grab;touch-action:none;user-select:none}
+    .queue-drag-spacer{flex:0 0 30px;align-self:stretch}
     .queue-drag:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.queue-drag:active{cursor:grabbing}
     .queue-item.dragging{opacity:.45}.queue-item.drop-before{box-shadow:0 -2px 0 var(--accent)}.queue-item.drop-after{box-shadow:0 2px 0 var(--accent)}
     .queue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}.queue-actions button{padding:5px 9px;min-height:30px;line-height:1.4}
@@ -456,6 +457,8 @@
         handle.setAttribute('aria-label',`Move waiting job ${job.queue_position}: ${job.request.prompt.slice(0,80)}`);
         handle.setAttribute('aria-describedby','queue-drag-help');
         attachQueueDrag(handle,row,job); row.append(handle);
+      } else {
+        const spacer=document.createElement('span'); spacer.className='queue-drag-spacer'; spacer.setAttribute('aria-hidden','true'); row.append(spacer);
       }
       row.append(copy);
       const actions=document.createElement('div'); actions.className='queue-actions';
