@@ -492,6 +492,7 @@ The gallery's **Edit photo** action opens the generator webpage at `/?generation
 | GET `/v1/images` | Generator | 200 | Search/list saved images across model roots and indexed custom locations. |
 | GET `/v1/images/{identifier}` | Generator | 200 | Read one image's settings, paths and URLs. |
 | PATCH `/v1/images/{identifier}/tags` | Generator | 200 | Replace its editable tags; returns the updated detail. |
+| DELETE `/v1/images/{identifier}` | Generator | 200 | Permanently delete an image and its own saved settings, tags and previews. |
 
 ### GET /v1/images
 
@@ -524,13 +525,39 @@ Response has `object:"list"`, `data[]`, matching `total`, `limit`, `offset`, `ha
 | `lora` | object, optional | Adapter `id`, `name` and `strength` when recorded. |
 | `metadata` | object, detail only | Full saved JSON generation record, when readable. Not included by the list schema. |
 
-GET detail returns **404** for unknown/missing images. PATCH tags requires `{"tags":["Winter","Campaign"]}`; `{"tags":[]}` clears them. It uses the same normalization/limits as initial tags. Changes are stored atomically in the owning model's image index without modifying PNG/sidecar. Unknown images return **404**, invalid tags **422**, and unwritable storage **503**. No endpoint deletes images.
+GET detail returns **404** for unknown/missing images. PATCH tags requires `{"tags":["Winter","Campaign"]}`; `{"tags":[]}` clears them. It uses the same normalization/limits as initial tags. Changes are stored atomically in the owning model's image index without modifying PNG/sidecar. Unknown images return **404**, invalid tags **422**, and unwritable storage **503**.
 
 ```sh
 curl --fail-with-body --request PATCH \
   http://localhost:5742/v1/images/0123456789abcdef0123456789abcdef/tags \
   -H 'Content-Type: application/json' -d '{"tags":["Winter","Campaign"]}'
 ```
+
+### DELETE /v1/images/{identifier}
+
+Permanently deletes the gallery PNG, adjacent JSON settings, editable-tag index and all cached thumbnail versions. Use the image `id` from the gallery API, not a batch job ID. Indexed custom output locations work too. No body, model parameter or file path is accepted. This is a generator-only endpoint: no inference or standalone queue HTTP connection is needed. Sending DELETE authorizes deletion; the webpage presents a confirmation popup first.
+
+```sh
+# Replace this example ID with the gallery image you intend to delete.
+curl --fail-with-body --request DELETE \
+  http://localhost:5742/v1/images/0123456789abcdef0123456789abcdef
+```
+
+```json
+{"id":"0123456789abcdef0123456789abcdef","deleted":true,"cleanup_pending":[]}
+```
+
+A **200** response removes the image from the catalog and its media routes. Uploaded references, other generated images and durable job/observability history are preserved; old history can consequently point to unavailable media. There is no undo. Files are first renamed in their own directories; an ordinary staging failure restores files already moved before returning an error. This is not a cross-file crash-recovery transaction.
+
+`cleanup_pending` is normally empty. If storage allows renaming but refuses final erasure, the image is removed from the gallery and the response lists private `.delete-...` files needing manual cleanup. The server log and webpage report this condition; check permissions and erase only those listed files. Do not mistake it for completed disk cleanup.
+
+| Status | Meaning / recovery |
+| --- | --- |
+| **404** | Invalid, unknown, missing or already deleted image ID. A repeated DELETE returns 404. |
+| **409** | A queued/running job references the PNG as a source/mask, or its generating batch is unfinished. Finish or cancel the relevant job first. Ambiguous duplicate IDs and nonregular files such as leaf symlinks also block deletion without following their targets. |
+| **503** | Image storage/permissions failed, the queue is not initialized, or local SQLite is unavailable. SQLite failures use `code:queue_storage_unavailable` and `Retry-After:2`. |
+
+The pending-job check and deletion serialize with shared SQLite queue mutations; stale tag saves and in-flight thumbnails cannot recreate an index/preview after successful removal. After a timeout or lost response, refresh the gallery or GET its detail before retrying: the server may already have deleted the image. Browser Cancel/Escape dismisses confirmation without issuing DELETE. Search, tag filters, sort and page size remain selected after success; an emptied last page moves back to the last available page.
 
 ## Observability
 

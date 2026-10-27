@@ -107,6 +107,8 @@ For a photo variation, click **Choose photo** or expand **Or use a file path**. 
 
 Open **[Gallery](http://localhost:5742/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
 
+To delete a result, open it in **Gallery**, choose **Delete image** below its file path, then review the thumbnail and prompt in the confirmation popup. **Cancel** or Escape keeps it; **Delete image** permanently removes the PNG, its JSON settings, tags and cached previews, including files in custom save folders. There is no undo. Uploaded references, other images and job history stay saved. If a waiting or running job uses the image, finish or cancel that job first. The gallery refreshes after deletion and moves back a page if necessary.
+
 ### Settings you can change for each request
 
 The API names below map to the webpage controls.

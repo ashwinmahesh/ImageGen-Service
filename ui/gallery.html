@@ -20,6 +20,8 @@
     /* Match the generator’s charcoal depth without tinting saved images. */
     .empty{background:linear-gradient(140deg,#2a405b 0%,#202226 38%,#191919 80%)}.card{box-shadow:inset 0 1px 0 #ffffff06,0 10px 26px #00000018}
     .edit-action{display:flex;align-items:center;gap:8px;margin-bottom:20px}.edit-action .primary{flex:1}.edit-action [aria-disabled=true]{opacity:.5;cursor:not-allowed}
+
+    .delete-action{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.button.danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#3b292e;border-color:#69434b;color:#dfc4cb}.button.danger:hover:not(:disabled){background:#4d353c;border-color:#885b65;color:#f1dce2}.delete-icon{width:14px;height:14px;flex:none}.delete-confirm{width:min(480px,calc(100vw - 32px));padding:24px;max-height:90dvh;overflow:auto}.delete-confirm h2{font-size:20px;font-weight:550;margin:0 0 12px}.delete-confirm p{font-size:13px;color:var(--muted);line-height:1.6}.delete-target{display:flex;align-items:center;gap:14px;margin:20px 0}.delete-target img{width:88px;height:72px;object-fit:contain;background:#171717;border-radius:7px;flex:none}.delete-target div{min-width:0}.delete-target strong{font-size:13px;display:block}.delete-target code{display:block;font-size:10px;margin-top:6px;overflow-wrap:anywhere;color:var(--muted)}.delete-target p{font-size:12px;margin:5px 0 0;overflow-wrap:anywhere}.delete-confirm .dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.delete-confirm .error{color:#f7c6bc}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
@@ -53,8 +55,16 @@
         <dl class="settings" id="settings"></dl>
         <div class="detail-actions"><a id="variation" class="button">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
         <p class="eyebrow file-label">Saved file</p><code class="file-path" id="file-path"></code><button id="copy-path" class="button">Copy file path</button>
+        <div class="delete-action"><button id="delete-image" class="button danger" type="button"><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>Delete image</button></div>
       </div>
     </div>
+  </dialog>
+  <dialog id="delete-confirm" class="delete-confirm" aria-labelledby="delete-title" aria-describedby="delete-warning">
+    <h2 id="delete-title">Delete this image?</h2>
+    <p id="delete-warning">This permanently deletes the image, its saved settings, tags and cached previews. This cannot be undone.</p>
+    <div class="delete-target"><img id="delete-preview" alt="Image selected for deletion"><div><strong id="delete-label"></strong><p id="delete-prompt"></p><code id="delete-file"></code></div></div>
+    <p class="error" id="delete-error" role="alert" hidden></p>
+    <div class="dialog-actions"><button class="button" type="button" id="cancel-delete" autofocus>Cancel</button><button class="button danger" type="button" id="confirm-delete"><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>Delete image</button></div>
   </dialog>
   <p class="toast" id="toast" role="status" hidden></p>
   <script>
@@ -76,7 +86,7 @@
       updateEditAction();
     }
     $('edit-photo').addEventListener('click',event=>{if($('edit-photo').getAttribute('aria-disabled')==='true')event.preventDefault();});
-    let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
+    let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, deleting = false, pendingDelete = null, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
     function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
     function localURL(value) { const url = new URL(value, location.origin); if (url.origin !== location.origin) throw new Error('Unexpected image URL.'); return url.href; }
     function dateLabel(created, short = false) { const date = new Date(created * 1000); if (!Number.isFinite(date.getTime())) return 'Saved image'; return new Intl.DateTimeFormat(undefined, short ? {month:'short', day:'numeric'} : {dateStyle:'medium', timeStyle:'short'}).format(date); }
@@ -156,6 +166,7 @@
       updateEditAction();
       $('download').href = localURL(item.url); $('download').download = item.id + '.png';
       $('metadata').hidden = !item.metadata_url; if (item.metadata_url) { $('metadata').href = localURL(item.metadata_url); $('metadata').download = item.id + '.json'; }
+      $('delete-image').disabled = savingTags || deleting;
       $('previous').disabled = index <= 0; $('next').disabled = index >= images.length - 1;
       $('full-image').hidden = true; $('preview-state').textContent = 'Loading preview…'; $('preview-state').hidden = false;
       $('full-image').onload = () => { $('preview-state').hidden = true; $('full-image').hidden = false; };
@@ -170,9 +181,9 @@
     $('page-next').addEventListener('click', () => { if (nextOffset !== null) loadImages(nextOffset); });
     $('clear-filter').addEventListener('click', () => { activeTags = []; loadImages(0); });
     $('tag-form').addEventListener('submit', async event => {
-      event.preventDefault(); const item = images[activeIndex]; if (!item || savingTags) return;
+      event.preventDefault(); const item = images[activeIndex]; if (!item || savingTags || deleting || pendingDelete) return;
       const tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
-      savingTags = true; $('save-tags').disabled = true; $('tags').disabled = true; $('previous').disabled = true; $('next').disabled = true; $('tag-error').hidden = true;
+      savingTags = true; $('delete-image').disabled = true; $('save-tags').disabled = true; $('tags').disabled = true; $('previous').disabled = true; $('next').disabled = true; $('tag-error').hidden = true;
       try {
         const response = await fetch('/v1/images/' + item.id + '/tags', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tags}), signal:AbortSignal.timeout(10000)});
         const data = await response.json();
@@ -180,7 +191,32 @@
         toast('Tags saved'); savingTags = false;
         await loadImages(currentOffset, $('viewer').open ? images[activeIndex]?.id : null);
       } catch (error) { $('tag-error').textContent = error.name === 'AbortError' ? 'The request timed out. Refresh to check the saved tags before retrying.' : error.message; $('tag-error').hidden = false; }
-      finally { savingTags = false; $('save-tags').disabled = false; $('tags').disabled = false; $('previous').disabled = activeIndex <= 0; $('next').disabled = activeIndex >= images.length - 1; }
+      finally { savingTags = false; $('delete-image').disabled = deleting; $('save-tags').disabled = false; $('tags').disabled = false; $('previous').disabled = activeIndex <= 0; $('next').disabled = activeIndex >= images.length - 1; }
+    });
+    $('delete-image').addEventListener('click',()=>{
+      const item=images[activeIndex];if(!item || savingTags || deleting)return;
+      pendingDelete={...item};$('delete-error').hidden=true;
+      $('delete-preview').src=localURL(item.thumbnail_url);$('delete-label').textContent=dateLabel(item.created);
+      $('delete-prompt').textContent=(item.prompt || 'No prompt recorded').slice(0,180);$('delete-file').textContent=item.id+'.png';
+      $('delete-confirm').showModal();
+    });
+    $('cancel-delete').addEventListener('click',()=>{if(!deleting)$('delete-confirm').close();});
+    $('delete-confirm').addEventListener('cancel',event=>{if(deleting)event.preventDefault();});
+    $('delete-confirm').addEventListener('close',()=>{pendingDelete=null;});
+    $('delete-confirm').addEventListener('click',event=>{if(event.target!==$('delete-confirm') || deleting)return;const r=event.target.getBoundingClientRect();if(event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom)event.target.close();});
+    $('confirm-delete').addEventListener('click',async()=>{
+      const item=pendingDelete;if(!item || deleting || savingTags)return;
+      deleting=true;$('confirm-delete').disabled=true;$('cancel-delete').disabled=true;$('delete-error').hidden=true;
+      try{
+        const response=await fetch('/v1/images/'+encodeURIComponent(item.id),{method:'DELETE',signal:AbortSignal.timeout(15000)});
+        const result=await response.json();
+        if(!response.ok && response.status!==404)throw new Error(typeof result.detail==='string'?result.detail:'Could not delete this image.');
+        $('delete-confirm').close();$('viewer').close();activeIndex=-1;
+        images=images.filter(image=>image.id!==item.id);$('grid').replaceChildren();images.forEach(renderCard);
+        await loadImages(currentOffset);toast('Image deleted');$('refresh').focus();
+        if(result.cleanup_pending?.length){$('error').textContent='The image was removed from the gallery, but some files could not be erased. Check storage permissions and the server log for cleanup paths.';$('error').hidden=false;}
+      }catch(error){$('delete-error').textContent=['AbortError','TimeoutError'].includes(error.name) || error instanceof TypeError ? 'Could not confirm deletion. Cancel and refresh the gallery to check before retrying.' : error.message;$('delete-error').hidden=false;}
+      finally{deleting=false;$('confirm-delete').disabled=false;$('cancel-delete').disabled=false;$('delete-image').disabled=savingTags;}
     });
     $('close').addEventListener('click', () => $('viewer').close());
     $('viewer').addEventListener('click', event => { if (event.target === $('viewer')) $('viewer').close(); });

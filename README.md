@@ -73,6 +73,8 @@ Generator, Gallery and Observability share the same header, navigation, live ser
 
 The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation. Choose **Edit photo** to open the selected image directly in the Edit preview, even when a different model created it. The action is available whenever a setup model supports editing. Choose an editor if prompted, describe the change and submit; your original file stays unchanged. **Make a variation** and **Reuse settings** remain separate actions.
 
+To remove a saved result, open its gallery details and choose **Delete image**. A confirmation shows the image before you permanently delete its PNG, saved settings, tags and cached previews. Images still needed by queued or running jobs cannot be deleted; uploaded references and job history are kept.
+
 ![Searchable image gallery with editable tags](docs/screenshots/gallery.png)
 
 PNG images and JSON generation records are saved automatically in `<storage folder>/<model>/images`, unless you choose another output location. Tag edits are stored separately so the original image and generation record remain intact.
