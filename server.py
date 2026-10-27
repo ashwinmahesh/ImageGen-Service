@@ -27,7 +27,7 @@ if __name__ == '__main__':
         os.environ['IMAGE_MODEL']=selected.model
 
 from model_profiles import PROFILES, model_details
-from photo_workflows import supported_tasks, edit_prompt
+from photo_workflows import supported_tasks, edit_prompt, describe_mask_region
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
@@ -499,7 +499,8 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
                 model.tiling_config=None
         else:
             model.active_log=ROOT/'logs'/(identifier+'.log')
-        rendering_prompt=edit_prompt(payload.prompt,payload.preserve) if payload.task=='edit' else payload.prompt
+        region=describe_mask_region(read_mask(payload.mask_image,geometry.reference_size)) if mask_path else None
+        rendering_prompt=edit_prompt(payload.prompt,payload.preserve,region) if payload.task=='edit' else payload.prompt
         result = model.generate_image(
             seed=seed, prompt=rendering_prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
