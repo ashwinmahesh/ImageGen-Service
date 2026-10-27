@@ -31,7 +31,7 @@ from photo_workflows import supported_tasks, edit_prompt, describe_mask_boxes
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
-from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, ReferenceError
+from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
 from generation_worker import QueueWorker
@@ -507,7 +507,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and child_backend else {}),
             image_path=geometry.image_path,
             image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
-            **({'mask_path':mask_path} if mask_path else {}),
+            **({'mask_path':widen_mask_to_grid(mask_path)} if mask_path else {}),
         )
         result.save(str(path), overwrite=True)
         if mask_path:

@@ -137,6 +137,22 @@ def prepare_mask(mask_path, geometry, scratch_root):
         yield str(path)
 
 
+def widen_mask_to_grid(mask_path, grid=16):
+    """Select every model patch the mask touches, so thin strokes are not blended back to the source.
+
+    Qwen edits in 16x16 latent patches and pins each one toward the source in proportion
+    to how much of it is unselected. composite_edit still trims to the exact painted mask.
+    """
+    with Image.open(mask_path) as image:
+        mask=image.convert('L').point(lambda value:255 if value>127 else 0)
+    columns,rows=-(-mask.width//grid),-(-mask.height//grid)
+    patches=mask.resize((columns,rows),Image.Resampling.BOX).point(lambda value:255 if value else 0)
+    widened=patches.resize((columns*grid,rows*grid),Image.Resampling.NEAREST).crop((0,0,mask.width,mask.height))
+    path=Path(mask_path).with_name('model-mask.png')
+    widened.save(path)
+    return str(path)
+
+
 def composite_edit(path, source_path, mask_path):
     """Copy unselected source pixels exactly at the prepared output resolution."""
     with Image.open(path) as image:
