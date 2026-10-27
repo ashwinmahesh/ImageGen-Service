@@ -12,14 +12,22 @@ GRID_NAMES=(('top-left corner','top edge','top-right corner'),('left side','cent
 def describe_mask_region(mask):
     """Name where a white-edits mask lies on a 3x3 grid, since the model never sees the mask itself."""
     width,height=mask.size
-    selected=[]
+    binary=mask.point(lambda value:255 if value>127 else 0)
+    coverage={}
     for row in range(3):
         for column in range(3):
-            cell=mask.crop((column*width//3,row*height//3,(column+1)*width//3,(row+1)*height//3))
-            if sum(cell.point(lambda value:255 if value>127 else 0).histogram()[255:])>=0.4*cell.width*cell.height:
-                selected.append((row,column))
+            cell=binary.crop((column*width//3,row*height//3,(column+1)*width//3,(row+1)*height//3))
+            coverage[row,column]=cell.histogram()[255]/(cell.width*cell.height)
+    selected=[cell for cell,share in coverage.items() if share>=0.4]
     if not selected:
-        return 'a small part of the image'
+        # Thin strokes and small spots fill no cell, so name every cell they pass through.
+        touched=[cell for cell,share in coverage.items() if share>=0.005] or [max(coverage,key=coverage.get)]
+        box=binary.getbbox()
+        if box is None:
+            return 'a small part of the image'
+        filled=binary.histogram()[255]/((box[2]-box[0])*(box[3]-box[1]))
+        names=', '.join(GRID_NAMES[r][c] for r,c in touched)
+        return f'a thin strip running through the {names} of the image' if filled<0.3 else f'a small area in the {names} of the image'
     if len(selected)==9:
         return 'the whole image'
     border=[cell for cell in selected if cell!=(1,1)]
