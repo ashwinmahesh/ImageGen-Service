@@ -27,7 +27,7 @@
     .immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}
     .workflow-tabs{display:flex;gap:8px;margin:0 0 24px}.workflow-tabs button{border:1px solid var(--line);border-radius:8px;padding:11px 18px;background:transparent;color:var(--muted)}.workflow-tabs button[aria-pressed=true]{background:var(--accent-fill);color:#10243c;border-color:var(--accent)}
     .workflow-edit{position:relative;display:inline-flex}.workflow-edit[data-unavailable=true]{cursor:not-allowed}.workflow-edit button:disabled{pointer-events:none}.workflow-tooltip{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:10000;width:250px;max-width:calc(100vw - 60px);padding:11px 13px;border:1px solid #555555;border-radius:9px;background:#2c2c2c;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 8px 28px #0007}.workflow-edit[data-unavailable=true]:is(:hover,:focus-within) .workflow-tooltip{display:block}
-    .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{width:100%;min-width:0;margin-top:16px}.source-editor h2{font-size:16px;margin:0 0 6px}#source-canvas{cursor:crosshair;touch-action:none}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden],.brush-tools[hidden]{display:none}.brush-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:4px}.brush-modes{display:flex;gap:6px}.brush-tools label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:500;color:var(--muted)}.brush-tools input[type=range]{width:120px;padding:0;border:0;background:none;accent-color:var(--accent)}.brush-modes .secondary[aria-pressed=true]{background:#1e3a5f;border-color:#93c5fd}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
+    .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{width:100%;min-width:0;margin-top:16px}.source-editor h2{font-size:16px;margin:0 0 6px}#source-canvas{cursor:crosshair;touch-action:none}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden],.brush-tools[hidden]{display:none}.brush-tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:12px}.brush-modes{display:flex;gap:6px}.brush-tools label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:500;color:var(--muted)}.brush-tools input[type=range]{width:120px;padding:0;border:0;background:none;accent-color:var(--accent)}.brush-modes .secondary[aria-pressed=true]{background:#1e3a5f;border-color:#93c5fd}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
 
     /* Subtle depth on charcoal surfaces; blue stays an accent. */
     .controls{box-shadow:inset 0 1px 0 #ffffff06,0 12px 32px #00000018}.preview{box-shadow:inset 0 1px 0 #ffffff05,0 16px 40px #0000001c}
@@ -73,7 +73,7 @@
           <details class="reference-path"><summary>Or use a file path</summary><div class="field"><div class="help-label"><label for="reference">Reference photo path</label><button type="button" class="help-button" aria-label="Help with Reference photo path" data-help="Enter an absolute path to an image on the Mac running this server, rather than a web address."><span aria-hidden="true">?</span></button></div><input id="reference" type="text" placeholder="/absolute/path/to/reference.jpg" autocomplete="off"></div></details>
           <div id="reference-options" class="reference-options" hidden><div class="help-label"><label for="strength">Keep the original</label><button type="button" class="help-button" aria-label="Help with Keep the original" data-help="Higher values preserve more of the reference photo; lower values allow bigger changes. Start at 0.6."><span aria-hidden="true">?</span></button></div><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
-        <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p></div>
+        <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><div class="brush-tools" id="brush-tools" hidden><div class="brush-modes" role="group" aria-label="Selection tool"><button type="button" class="secondary" id="brush-paint" aria-pressed="true">Paint</button><button type="button" class="secondary" id="brush-rect" aria-pressed="false">Rectangle</button><button type="button" class="secondary" id="brush-erase" aria-pressed="false">Erase</button></div><label for="brush-size">Brush size<input type="range" id="brush-size" min="1" max="25" value="6"></label><button type="button" class="secondary" id="undo-stroke">Undo</button></div><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p></div>
         <div class="field" id="resolution-field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, Auto detects its dimensions without upscaling (up to a 2048 px long edge). Choose a long edge only to override it; the photo’s aspect ratio is preserved."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="auto">Auto · match photo</option><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <div class="field"><div class="help-label"><label for="image-count">Number of images</label><button type="button" class="help-button" aria-label="Help with Number of images" data-help="Generate 1–5 options, one after another, with different seeds. More options take more time; composition variation can add further variety."><span aria-hidden="true">?</span></button></div><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint" id="image-count-hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
         <section id="variation-controls" hidden><div class="help-choice"><label class="immediate-choice"><input id="vary-prompt" type="checkbox" role="switch" class="setting-switch" checked>Different compositions with LLM</label><button type="button" class="help-button" aria-label="Help with Different compositions with LLM" data-help="Gives each option its own composition prompt while keeping your stated subjects and style. Requires at least two images and prompt expansion."><span aria-hidden="true">?</span></button></div><p class="hint" id="variation-hint"></p></section>
@@ -97,7 +97,7 @@
           <img class="preview-media" id="result" alt="" hidden>
           <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Your request is saved. You can close this page and return later.</p></div>
         </div>
-        <section class="source-editor" id="source-editor" hidden aria-label="Source photo editing controls"><div class="source-toolbar"><div><h2>Source photo</h2><p class="hint" id="source-caption">Your original stays unchanged.</p></div><button type="button" class="secondary" id="clear-selection">Clear selection</button></div><div class="brush-tools" id="brush-tools" hidden><div class="brush-modes" role="group" aria-label="Brush mode"><button type="button" class="secondary" id="brush-paint" aria-pressed="true">Paint</button><button type="button" class="secondary" id="brush-erase" aria-pressed="false">Erase</button></div><label for="brush-size">Brush size<input type="range" id="brush-size" min="1" max="25" value="6"></label><button type="button" class="secondary" id="undo-stroke">Undo</button></div><p class="hint" id="selection-info" role="status">Paint over the photo to select the areas to edit.</p></section>
+        <section class="source-editor" id="source-editor" hidden aria-label="Source photo editing controls"><div class="source-toolbar"><div><h2>Source photo</h2><p class="hint" id="source-caption">Your original stays unchanged.</p></div><button type="button" class="secondary" id="clear-selection">Clear selection</button></div><p class="hint" id="selection-info" role="status">Paint over the photo to select the areas to edit.</p></section>
         <div id="image-options" class="options-grid" role="group" aria-label="Generated image options" hidden></div>
         <div class="result-bar" id="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your selected folder.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
       </section>
@@ -258,7 +258,7 @@
     $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
     $('mode-edit').addEventListener('click',()=>setWorkflow('edit'));
     $('model-choice').addEventListener('change',()=>{$('lora').value='';updateModelChoice();loadLoRAs();$('expanded-details').hidden=true;expansionPreview=null;});
-    function maskPainted() { return maskStrokes.some(stroke=>stroke.mode==='paint'); }
+    function maskPainted() { return maskStrokes.some(stroke=>stroke.mode!=='erase'); }
     function brushSize() { return Number($('brush-size').value)/100; }
     function drawStrokes(context,strokes,width,height) {
       const unit=Math.max(width,height);
@@ -266,6 +266,7 @@
       for (const stroke of strokes) {
         context.globalCompositeOperation=stroke.mode==='erase' ? 'destination-out' : 'source-over';
         const [[x,y],...rest]=stroke.points; context.beginPath();
+        if (stroke.mode==='rect') { const [a,b]=rest[0]; context.fillRect(Math.min(x,a)*width,Math.min(y,b)*height,Math.abs(a-x)*width,Math.abs(b-y)*height); continue; }
         if (!rest.length) { context.arc(x*width,y*height,stroke.size*unit/2,0,Math.PI*2); context.fill(); continue; }
         context.lineWidth=stroke.size*unit; context.moveTo(x*width,y*height);
         for (const [a,b] of rest) context.lineTo(a*width,b*height);
@@ -283,7 +284,7 @@
         maskTintContext.globalCompositeOperation='source-in'; maskTintContext.fillStyle='rgba(210,240,150,.45)'; maskTintContext.fillRect(0,0,width,height);
         sourceContext.drawImage(maskTint,0,0);
       }
-      if (brushHover && !generating) {
+      if (brushHover && !generating && brushMode!=='rect') {
         const radius=brushSize()*Math.max(width,height)/2;
         sourceContext.beginPath(); sourceContext.arc(brushHover[0]*width,brushHover[1]*height,radius,0,Math.PI*2);
         sourceContext.lineWidth=3; sourceContext.strokeStyle='#000a'; sourceContext.stroke();
@@ -299,20 +300,21 @@
       drawStrokes(maskContext,maskStrokes,maskLayer.width,maskLayer.height);
       const selecting=$('edit-area').value==='selected' && maskSupported();
       sourceCanvas.style.cursor=maskSupported() ? 'crosshair' : 'default';
-      $('brush-tools').hidden=!maskSupported();
+      $('brush-tools').hidden=!selecting;
       $('clear-selection').hidden=!selecting; $('clear-selection').disabled=!maskStrokes.length && !savedMaskPath;
       $('undo-stroke').disabled=!maskStrokes.length;
-      $('selection-info').textContent=selecting ? maskPainted() ? 'Painted areas will be edited; everything outside them is preserved at the output resolution. Paint more to add areas, or erase to trim.' : savedMaskPath ? 'The saved edit mask will be reused. Paint to start a new selection.' : 'Paint over the parts of the source photo you want to change. You can paint several separate areas.' : maskSupported() ? 'Whole-photo edit. Paint on the photo to select areas instead.' : 'Whole-photo edit. Only requested changes are prompted; unchanged pixels are not guaranteed without an area mask.';
+      $('selection-info').textContent=selecting ? maskPainted() ? 'Painted areas will be edited; everything outside them is preserved at the output resolution. Paint or drag rectangles to add areas, or erase to trim.' : savedMaskPath ? 'The saved edit mask will be reused. Paint to start a new selection.' : 'Paint over the parts of the source photo you want to change. You can paint several separate areas or drag rectangles.' : maskSupported() ? 'Whole-photo edit. Paint on the photo to select areas instead.' : 'Whole-photo edit. Only requested changes are prompted; unchanged pixels are not guaranteed without an area mask.';
       drawSourceCanvas();
     }
     function maskChanged() { maskUpload=null; savedMaskPath=null; updateSourceCanvas(); updateButton(); }
-    function setBrushMode(mode) { brushMode=mode; $('brush-paint').setAttribute('aria-pressed',String(mode==='paint')); $('brush-erase').setAttribute('aria-pressed',String(mode==='erase')); drawSourceCanvas(); }
+    function setBrushMode(mode) { brushMode=mode; for (const [id,value] of [['brush-paint','paint'],['brush-rect','rect'],['brush-erase','erase']]) $(id).setAttribute('aria-pressed',String(mode===value)); $('brush-size').disabled=mode==='rect'; drawSourceCanvas(); }
     function undoStroke() { if (!maskStrokes.length || generating) return; maskStrokes.pop(); maskChanged(); }
     $('reference-preview').addEventListener('load',updateSourceCanvas);
     $('edit-area').addEventListener('change',()=>{ maskStrokes=[]; maskChanged(); });
     $('clear-selection').addEventListener('click',()=>{ maskStrokes=[]; maskChanged(); });
     $('undo-stroke').addEventListener('click',undoStroke);
     $('brush-paint').addEventListener('click',()=>setBrushMode('paint'));
+    $('brush-rect').addEventListener('click',()=>setBrushMode('rect'));
     $('brush-erase').addEventListener('click',()=>setBrushMode('erase'));
     $('brush-size').addEventListener('input',()=>{ brushHover=brushHover || [.5,.5]; drawSourceCanvas(); });
     $('brush-size').addEventListener('change',()=>{ if (!sourceCanvas.matches(':hover')) { brushHover=null; drawSourceCanvas(); } });
@@ -326,13 +328,16 @@
       if (generating || workflow!=='edit' || !maskSupported() || event.button>0) return;
       event.preventDefault(); sourceCanvas.setPointerCapture(event.pointerId);
       if ($('edit-area').value!=='selected') { $('edit-area').value='selected'; maskStrokes=[]; }
-      activeStroke={mode:brushMode,size:brushSize(),points:[canvasPosition(event)]}; maskStrokes.push(activeStroke); brushHover=activeStroke.points[0];
+      const start=canvasPosition(event); activeStroke=brushMode==='rect' ? {mode:'rect',size:0,points:[start,start]} : {mode:brushMode,size:brushSize(),points:[start]}; maskStrokes.push(activeStroke); brushHover=activeStroke.points[0];
       maskChanged();
     });
     sourceCanvas.addEventListener('pointermove',event=>{
       if (workflow!=='edit' || !maskSupported()) return;
       brushHover=canvasPosition(event);
-      if (activeStroke) {
+      if (activeStroke?.mode==='rect') {
+        activeStroke.points[1]=brushHover;
+        maskContext.clearRect(0,0,maskLayer.width,maskLayer.height); drawStrokes(maskContext,maskStrokes,maskLayer.width,maskLayer.height);
+      } else if (activeStroke) {
         const previous=activeStroke.points.at(-1);
         if (Math.hypot(brushHover[0]-previous[0],brushHover[1]-previous[1])<.002) return;
         activeStroke.points.push(brushHover);
@@ -340,7 +345,12 @@
       }
       drawSourceCanvas();
     });
-    function endStroke() { if (!activeStroke) return; activeStroke=null; updateSourceCanvas(); updateButton(); }
+    function endStroke() {
+      if (!activeStroke) return;
+      const [[x,y],[a,b]=[x,y]]=activeStroke.points;
+      if (activeStroke.mode==='rect' && (Math.abs(a-x)<.005 || Math.abs(b-y)<.005)) maskStrokes.pop();
+      activeStroke=null; updateSourceCanvas(); updateButton();
+    }
     sourceCanvas.addEventListener('pointerup',endStroke);
     sourceCanvas.addEventListener('pointercancel',endStroke);
     sourceCanvas.addEventListener('pointerleave',()=>{ if (activeStroke) return; brushHover=null; drawSourceCanvas(); });
@@ -555,7 +565,7 @@
       if (referencePath) { payload.reference_image = referencePath; if (referenceMode !== 'edit') payload.image_strength = imageStrength; }
       generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
-      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-erase','brush-size']) $(id).disabled = true;
+      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = true;
       $('announcement').textContent = 'Saving your image request…';
       try {
         if (selectedFile) {
@@ -586,7 +596,7 @@
         $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
       } finally {
-        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-erase','brush-size']) $(id).disabled = false;
+        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = false;
         generating = false; updateButton(); await checkHealth();
       }
     });
