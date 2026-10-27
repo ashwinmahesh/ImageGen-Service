@@ -1,5 +1,5 @@
 /* Shared palette: Voice Studio greys, with ImageGen teal accents. */
-:root{color-scheme:dark;--bg:#151617;--panel:#1d1e21;--line:#36373d;--muted:#a7a7b3;--text:#edf5f0;--accent:#66d6db;--accent-solid:#13b2ba;--accent-ink:#082c30;--surface:var(--panel);--input:#17181b;--control:#25262b;--control-hover:#303239;--control-line:#45454e;--accent-subtle:#20383c;--selection-fill:rgba(19,178,186,.24);--output-gradient:linear-gradient(140deg,#1d3a3c,#1b1c20 65%);--accent-fill:linear-gradient(135deg,#3fcbd0,#13b2ba);--accent-hover:linear-gradient(135deg,#73dde1,#36c4cb)}
+:root{color-scheme:dark;--page-gap:28px;--bg:#151617;--panel:#1d1e21;--line:#36373d;--muted:#a7a7b3;--text:#edf5f0;--accent:#66d6db;--accent-solid:#13b2ba;--accent-ink:#082c30;--surface:var(--panel);--input:#17181b;--control:#25262b;--control-hover:#303239;--control-line:#45454e;--accent-subtle:#20383c;--selection-fill:rgba(19,178,186,.24);--output-gradient:linear-gradient(140deg,#1d3a3c,#1b1c20 65%);--accent-fill:linear-gradient(135deg,#3fcbd0,#13b2ba);--accent-hover:linear-gradient(135deg,#73dde1,#36c4cb)}
 /* One generator-style header and queue modal for every studio page. */
 .app-header{max-width:1400px;margin:auto;padding:25px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:15px;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text)}
 .app-header .brand{display:flex;align-items:center;gap:12px;color:inherit;text-decoration:none;flex-shrink:0}
@@ -24,13 +24,15 @@
 .queue-panel label{font-size:13px;font-weight:550}
 .queue-panel .error{margin:18px 0 0;padding:12px;border-radius:8px;border:1px solid #79514a;background:#332421;color:#f7c6bc;font-size:13px;overflow-wrap:anywhere}.queue-panel .error[hidden]{display:none}
 /* Match Voice Studio's frame and title rhythm across all image pages. */
-.studio-main{max-width:1400px;margin:auto;padding:34px 36px}
-.studio-main>.intro{display:flex;justify-content:space-between;align-items:baseline;gap:20px;margin-bottom:25px;padding:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.studio-main{max-width:1400px;margin:auto;padding:var(--page-gap) 36px 34px}
+.studio-main>.intro{display:flex;justify-content:space-between;align-items:baseline;gap:20px;margin-bottom:var(--page-gap);padding:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+/* The compact tab strip occupies the lower gap on the generator page. */
+.generator-main>.intro{margin-bottom:0}
 .studio-main>.intro h1{margin:0;font-size:30px;line-height:1.55;font-weight:550;letter-spacing:-1px}
 .studio-main>.intro p{margin:8px 0 0;color:var(--muted);font-size:14px;line-height:1.55}
 .studio-footer{max-width:1400px;margin-left:auto;margin-right:auto;padding-left:36px;padding-right:36px}
-@media(max-width:1000px){.app-header{padding:22px}.studio-main{padding:28px 22px}.studio-footer{padding-left:22px;padding-right:22px}.studio-main>.intro .tag,.studio-main>.intro .local{display:none}}
-@media(max-width:720px){.app-header{flex-wrap:wrap}.app-header .header-actions{gap:10px;flex-wrap:wrap}.studio-main{padding:25px 16px}.studio-main>.intro{display:block}.studio-main>.intro h1{font-size:27px}.studio-footer{padding-left:18px;padding-right:18px}}
+@media(max-width:1000px){:root{--page-gap:24px}.app-header{padding:22px}.studio-main{padding:var(--page-gap) 22px 28px}.studio-footer{padding-left:22px;padding-right:22px}.studio-main>.intro .tag,.studio-main>.intro .local{display:none}}
+@media(max-width:720px){:root{--page-gap:22px}.app-header{flex-wrap:wrap}.app-header .header-actions{gap:10px;flex-wrap:wrap}.studio-main{padding:var(--page-gap) 16px 25px}.studio-main>.intro{display:block}.studio-main>.intro h1{font-size:27px}.studio-footer{padding-left:18px;padding-right:18px}}
 
     .queue-panel{margin:auto;width:min(1180px,calc(100vw - 32px));height:80vh;max-height:80vh;height:80dvh;max-height:80dvh;color:var(--text);overflow:hidden;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
 
