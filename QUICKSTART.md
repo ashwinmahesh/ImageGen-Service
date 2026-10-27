@@ -133,13 +133,15 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 ### Edit an existing photo
 
 1. Set up an editing model, for example `make setup MODEL=qwen-image-2.1-turbo`, then run `make serve`.
-2. Select **Edit photo**, then choose an editing model. The tab is available whenever at least one setup model supports editing, even if the Generate tab currently uses Z-Image or Chroma. It opens with an empty model selector; choose a setup Klein or Qwen model before submitting. If none are setup, the tab stays disabled and its hover/focus tooltip names suitable models to set up.
+2. Select **Edit photo**, then choose an editing model. The tab is available whenever at least one setup model supports editing, even if the Generate tab currently uses Z-Image or Chroma. On the first visit it opens with an empty model selector; choose a setup Klein or Qwen model before submitting. Later visits restore your editing model. If none are setup, the tab stays disabled and its hover/focus tooltip names suitable models to set up.
 3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
 4. For Qwen, drag a rectangle over the source preview; **Selected area** is chosen automatically. **Whole photo** remains available; Klein supports whole-photo editing only.
 5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
 6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
 
 The Edit preview uses a single box: upload a photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.
+
+Generate and Edit keep separate drafts and previews while the page is open, including model/settings, source photo, selected area, expansion text and selected image option. Switching tabs never brings the other tab's photo across. Background jobs update their own tab, and both tabs can follow a job at the same time through the shared queue. Use **Edit image** or a gallery reuse action when you want to transfer a saved image intentionally. Reloading the page clears form drafts, but accepted jobs and images remain saved.
 
 The **Generate** view continues to offer Klein and Qwen for creating images from text, without requiring a source photo. Selected areas also work through both APIs: pass `mask_image` with `task:"edit"` in the generator's flat request, or inside the standalone queue's `request` envelope with `model:"qwen-image-2.1-turbo"`. White mask pixels edit; black pixels preserve. See the [photo-editing examples](docs/api.md#selected-area-qwen-edits).
 

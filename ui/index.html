@@ -131,14 +131,65 @@
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
-    let watchingJob = null, queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
+    const watchingJobs = {generate:null,edit:null};
+    let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
     let activeModel = null, defaultModel = null, loraRequestVersion = 0, defaultSteps = 9, maxSteps = 12, referenceMode = 'variation';
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
-    let workflow = 'generate', modelCatalog = [], serverCapabilities = {}, modePrompts = {generate:'', edit:''};
+    let workflow = 'generate', workflowVersion = 0, modelCatalog = [], serverCapabilities = {};
     let selectionRect = null, selectionStart = null, maskUpload = null, savedMaskPath = null;
     const sourceCanvas = $('source-canvas'), sourceContext = sourceCanvas.getContext('2d');
+    // The renderer mounts one independent workflow draft at a time. File/Blob
+    // references stay in memory; no photo data or form drafts go into storage.
+    function readWorkflowFields(){
+      return Object.fromEntries([...$('form').querySelectorAll('input[id]:not([type=file]),textarea[id],select[id]')].map(input=>[input.id,{value:input.value,checked:input.checked}]));
+    }
+    const initialWorkflowFields=readWorkflowFields();
+    [...$('form').querySelectorAll('details')].forEach((detail,index)=>detail.dataset.workflowDetail=String(index));
+    function newWorkflowState(owner){
+      const fields=structuredClone(initialWorkflowFields);fields['model-choice'].value='';
+      if(owner==='edit'){fields.lora.value='';fields['reference-size'].value='1024';fields.steps.value='';}
+      return {initialized:false,fields,details:{},referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,selectionRect:null,maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
+    }
+    const workflowStates={generate:newWorkflowState('generate'),edit:newWorkflowState('edit')};
+    function captureWorkflow(){
+      const state=workflowStates[workflow];state.initialized=true;state.fields=readWorkflowFields();
+      if(pendingLora){state.fields.lora.value=pendingLora.id;state.fields['lora-strength'].value=pendingLora.strength;}
+      state.details=Object.fromEntries([...$('form').querySelectorAll('details')].map(detail=>[detail.dataset.workflowDetail,detail.open]));
+      Object.assign(state,{referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,selectionRect:selectionRect?.slice() || null,maskUpload,savedMaskPath,batch:displayedBatch,selectedOption,lastSeed,expansionPreview,expansionHidden:$('expanded-details').hidden,expansionOpen:$('expanded-details').open,referenceSrc:$('reference-preview').getAttribute('src'),referenceHidden:$('reference-card').hidden,referenceName:$('reference-name').textContent,referenceInfo:$('reference-info').textContent});
+      for(const id of Object.keys(state.notices))state.notices[id]={text:$(id).textContent,hidden:$(id).hidden};
+    }
+    function restoreWorkflow(){
+      const state=workflowStates[workflow],owner=workflow,version=workflowVersion;
+      if(!state.initialized){state.fields['expand-prompt'].checked=!!expansionEnabled;state.initialized=true;}
+      ({referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,maskUpload,savedMaskPath}=state);
+      selectionStart=null;selectionRect=state.selectionRect?.slice() || null;pendingLora=null;
+      displayedBatch=state.batch;selectedOption=state.selectedOption;lastSeed=state.lastSeed;lastResult=null;
+      $('reference-file').value='';$('reference-card').hidden=state.referenceHidden;
+      $('reference-name').textContent=state.referenceName;$('reference-info').textContent=state.referenceInfo;
+      $('choose-photo').textContent=state.referenceHidden?'＋ Choose photo':'Change photo';
+      if(state.referenceSrc)$('reference-preview').src=state.referenceSrc;else $('reference-preview').removeAttribute('src');
+      $('result').removeAttribute('src');$('result').hidden=true;$('actions').hidden=true;$('image-options').replaceChildren();
+      populateModels(state.fields['model-choice'].value || null,workflow==='edit' && !state.fields['model-choice'].value);
+      const sameModel=$('model-choice').value===state.fields['model-choice'].value;
+      for(const [id,field] of Object.entries(state.fields)){
+        if(['model-choice','lora'].includes(id) || (id==='steps' && !sameModel))continue;
+        const input=$(id);
+        if(['size','reference-size'].includes(id) && ![...input.options].some(option=>option.value===field.value))input.add(new Option(field.value.replace('x',' × '),field.value));
+        input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;
+      }
+      if(maskSupported()){selectionRect=state.selectionRect?.slice() || null;maskUpload=state.maskUpload;savedMaskPath=state.savedMaskPath;}
+      else{selectionRect=null;maskUpload=null;savedMaskPath=null;$('edit-area').value='whole';}
+      for(const detail of $('form').querySelectorAll('details'))detail.open=state.details[detail.dataset.workflowDetail] || false;
+      for(const [id,notice] of Object.entries(state.notices)){$(id).textContent=notice.text;$(id).hidden=notice.hidden;}
+      expansionPreview=state.expansionPreview;$('expanded-details').hidden=true;$('expanded-details').open=state.expansionOpen;
+      if(expansionPreview && !state.expansionHidden){showExpansion(expansionPreview);$('expanded-details').open=state.expansionOpen;}
+      loadLoRAs({id:sameModel?state.fields.lora.value:'',strength:state.fields['lora-strength'].value});
+      updateReferenceSizing();updateVariationControls();updateSourceCanvas();updateWorkflowPreview();
+      if(displayedBatch){renderImageOptions();selectImageOption(Math.min(selectedOption,displayedBatch.result.data.length-1),true).catch(error=>{if(workflow===owner && workflowVersion===version)showError(error.message);});}
+    }
+
     function chosenModel() { return $('model-choice').value || (workflow==='generate' ? defaultModel : null); }
     function chosenProfile() { return modelCatalog.find(item => item.id === chosenModel()); }
     function editsSupported() { return modelCatalog.some(item => item.tasks?.includes('edit')); }
@@ -157,7 +208,7 @@
     function editingReady() { return workflow !== 'edit' || Boolean(referenceFile || $('reference').value.trim()); }
     function maskSupported() { return chosenProfile()?.mask_editing === true; }
     async function loadModels() {
-      try { const response=await fetch('/v1/models',{cache:'no-store'}); if (!response.ok) throw new Error('Unavailable'); const catalog=await response.json(), changed=JSON.stringify(catalog.data)!==JSON.stringify(modelCatalog); modelCatalog=catalog.data; if (changed) populateModels(); }
+      try { const response=await fetch('/v1/models',{cache:'no-store'}); if (!response.ok) throw new Error('Unavailable'); const catalog=await response.json(), changed=JSON.stringify(catalog.data)!==JSON.stringify(modelCatalog); modelCatalog=catalog.data; if (changed) { const model=chosenModel(),steps=$('steps').value;populateModels();if(chosenModel()===model && Number(steps)>=1 && Number(steps)<=maxSteps)$('steps').value=steps; } }
       catch { $('model-status').textContent='Could not load available models. Reload after checking the server.'; }
     }
     function populateModels(preferred, blank=false) {
@@ -201,9 +252,7 @@
     }
     function setWorkflow(next) {
       if (next===workflow || generating || previewingExpansion || (next==='edit' && !editsSupported())) return;
-      modePrompts[workflow]=$('prompt').value;
-      const preferred=chosenModel(); workflow=next;
-      $('prompt').value=modePrompts[next];
+      captureWorkflow(); workflow=next; workflowVersion++; selectingOption++; loraRequestVersion++;
       $('mode-generate').setAttribute('aria-pressed',String(next==='generate')); $('mode-edit').setAttribute('aria-pressed',String(next==='edit'));
       $('prompt-label').textContent=next==='edit' ? 'What would you like to change?' : 'Your prompt';
       $('prompt-hint').textContent=next==='edit' ? 'Describe only the requested change. Keep unrequested details as they are.' : 'Describe the subject, setting, light and style you want.';
@@ -223,13 +272,11 @@
       $('use-expansion').textContent=next==='edit' ? 'Use this instruction' : 'Use this description';
       $('image-count-hint').textContent=next==='edit' ? 'Alternate attempts at the same edit. The source framing and requested changes stay the same.' : 'Same prompt, different seeds. Options render one at a time and appear together for comparison.';
       $('lora-section').hidden=next==='edit' || !lorasEnabled; $('base-only-mode').hidden=next==='edit' || lorasEnabled;
-      $('expanded-details').hidden=true; expansionPreview=null;
-      if (next==='edit') { $('lora').value=''; $('reference-size').value='1024'; }
-      populateModels(next==='edit' ? null : preferred,next==='edit'); loadLoRAs(); updateReferenceSizing(); updateVariationControls(); updateSourceCanvas(); updateWorkflowPreview();
+      restoreWorkflow();
     }
     $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
     $('mode-edit').addEventListener('click',()=>setWorkflow('edit'));
-    $('model-choice').addEventListener('change',()=>{updateModelChoice();loadLoRAs();$('expanded-details').hidden=true;expansionPreview=null;});
+    $('model-choice').addEventListener('change',()=>{$('lora').value='';updateModelChoice();loadLoRAs();$('expanded-details').hidden=true;expansionPreview=null;});
     function updateSourceCanvas() {
       const image=$('reference-preview');
       updateWorkflowPreview();
@@ -268,6 +315,7 @@
     }
 
     let displayedBatch = null, selectedOption = 0, selectingOption = 0;
+    let pendingLora = null;
     let loraCatalog = [], lorasEnabled = true, expansionEnabled = null, previewingExpansion = false, expansionPreview = null;
     function setLoRAMode(enabled) {
       lorasEnabled = enabled;
@@ -282,15 +330,15 @@
       $('lora-hint').textContent = selected ? `${selected.trigger_prompt ? 'Added to prompt automatically: ' + selected.trigger_prompt + '.' : 'The selected LoRA is loaded directly. No prompt keyword is configured.'} ${selected.note || ''}` :
         loraCatalog.some(item => !item.available) ? 'Downloaded styles appear here. Import the compatible Z-Image weights first.' : 'Choose an installed style, or use the original model.';
     }
-    async function loadLoRAs() {
-      const selected=chosenModel(), version=++loraRequestVersion;
+    async function loadLoRAs(preferred={id:$('lora').value,strength:$('lora-strength').value}) {
+      const selected=chosenModel(), owner=workflow, version=++loraRequestVersion; pendingLora=preferred;
       $('lora').replaceChildren(new Option('None — original model','')); loraCatalog=[]; updateLoRA();
-      if (!selected) return;
+      if (!selected) { pendingLora=null; return; }
       try {
         const response = await fetch('/v1/loras?'+new URLSearchParams({model:selected}), {cache: 'no-store', signal: AbortSignal.timeout(5000)});
         if (!response.ok) throw new Error('Unavailable');
         const catalog = await response.json();
-        if (version!==loraRequestVersion || chosenModel()!==selected) return;
+        if (version!==loraRequestVersion || workflow!==owner || chosenModel()!==selected) return;
         setLoRAMode(catalog.enabled !== false);
         loraCatalog = catalog.data;
         $('lora').replaceChildren(new Option('None — original model', ''));
@@ -298,10 +346,12 @@
           const option = new Option(item.name + (item.available ? '' : ' (download required)'), item.id);
           option.disabled = !item.available; $('lora').append(option);
         }
-        updateLoRA();
-      } catch { $('lora-hint').textContent = 'Could not load styles. Reload after checking the server.'; }
+        if (loraCatalog.some(item=>item.id===preferred.id && item.available)) $('lora').value=preferred.id;
+        if (preferred.strength!==undefined) $('lora-strength').value=preferred.strength;
+        pendingLora=null;updateLoRA(false);
+      } catch { if(version===loraRequestVersion && workflow===owner){ pendingLora=null;$('lora-hint').textContent = 'Could not load styles. Reload after checking the server.'; } }
     }
-    $('lora').addEventListener('change', () => updateLoRA());
+    $('lora').addEventListener('change', () => {pendingLora=null;updateLoRA();});
     function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
     function updateButton() {
       updateWorkflowAvailability();
@@ -357,15 +407,25 @@
       if (file.size > 20 * 1024 * 1024) { $('reference-file').value = ''; showError('Choose a photo smaller than 20 MB.'); return; }
       clearPhoto(); referenceFile = file; $('reference').value = ''; $('error').hidden = true; updateReferenceSizing();
       referencePreviewURL = URL.createObjectURL(file);
-      const previewURL = referencePreviewURL, candidate = new Image();
+      const previewURL = referencePreviewURL, owner=workflow, candidate = new Image();
       candidate.onload = () => {
+        if (workflow!==owner) {
+          const state=workflowStates[owner];if(state.referenceFile!==file)return;
+          state.referenceDimensions=[candidate.naturalWidth,candidate.naturalHeight];state.referenceSrc=previewURL;
+          state.referenceHidden=false;state.referenceName=file.name;state.referenceInfo=`${(file.size/1024/1024).toFixed(1)} MB · ready to use`;
+          return;
+        }
         if (referenceFile !== file) return;
         referenceDimensions = [candidate.naturalWidth, candidate.naturalHeight]; updateReferenceSizing();
         $('reference-preview').src = previewURL;
         $('reference-name').textContent = file.name; $('reference-info').textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB · ready to use`;
         $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('choose-photo').textContent = 'Change photo';
       };
-      candidate.onerror = () => { if (referenceFile === file) { clearPhoto(); showError('This photo cannot be previewed. Choose a PNG, JPEG or WebP image.'); } };
+      candidate.onerror = () => {
+        const message='This photo cannot be previewed. Choose a PNG, JPEG or WebP image.';
+        if(workflow===owner && referenceFile===file){clearPhoto();showError(message);}
+        else if(workflowStates[owner].referenceFile===file){const state=workflowStates[owner];state.referenceFile=null;state.referenceSrc=null;state.referenceHidden=true;state.referencePreviewURL=null;state.notices.error={text:message,hidden:false};URL.revokeObjectURL(previewURL);}
+      };
       candidate.src = previewURL;
     });
     $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
@@ -384,7 +444,6 @@
         const cap=data.capabilities; serverCapabilities=cap || {};
         if (!cap || typeof cap.default_steps!=='number') throw new Error('Missing model capabilities');
         $('model-name').textContent='ImageGen'; document.title='ImageGen — Image Studio';
-        if (!watchingJob) watchingJob=localStorage.getItem('imagegen-watching');
         if (!lastResult) {
           const folder=chosenProfile() ? chosenProfile().output_dir : '';
           $('saved-path').textContent=folder || 'Each model’s images folder';
@@ -416,24 +475,22 @@
     $('reuse').addEventListener('click', () => { if (lastSeed !== null) { $('seed').value = lastSeed; $('seed').closest('details').open = true; $('seed').focus(); } });
     $('edit').addEventListener('click', async () => {
       if (!lastResult || generating) return;
-      if (lastResult.model && modelCatalog.some(item=>item.id===lastResult.model) && chosenModel()!==lastResult.model) {
-        if (workflow==='edit') setWorkflow('generate');
-        $('model-choice').value=lastResult.model;updateModelChoice();await loadLoRAs();
-      }
-      if (referenceMode==='edit') setWorkflow('edit');
-      clearPhoto(); $('reference').value = lastResult.file_path;
-      $('reference-preview').src = lastResult.url; $('reference-name').textContent = 'Your generated image';
-      $('reference-info').textContent = `${lastResult.size.replace('x', ' × ')} · selected for editing`;
-      $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('strength').value = '0.6';
-      $('choose-photo').textContent = 'Change photo'; $('prompt').value = workflow==='edit' ? '' : lastResult.prompt;
-      if (lastResult.expanded) $('expand-prompt').checked=false;
-      updateVariationControls();
-      referenceDimensions = lastResult.size.split('x').map(Number);
-      updateReferenceSizing(); $('reference-size').value = String(Math.max(...referenceDimensions)); updateReferenceSizing();
-      $('announcement').textContent = 'Image selected for editing. Update the prompt to describe your desired result, then generate a new version.';
-      $('lora').value = lastResult.lora; updateLoRA(false);
-      if (lastResult.lora) $('lora-strength').value = lastResult.lora_strength;
-      $('prompt').focus(); $('prompt').select();
+      const result=lastResult,profile=modelCatalog.find(item=>item.id===result.model);
+      if(profile?.tasks?.includes('edit'))setWorkflow('edit');
+      else if(workflow!=='generate')setWorkflow('generate');
+      const owner=workflow,version=workflowVersion;
+      if(profile && chosenModel()!==result.model){$('model-choice').value=result.model;updateModelChoice();await loadLoRAs();}
+      if(workflow!==owner || workflowVersion!==version)return;
+      clearPhoto(); $('reference').value=result.file_path;
+      referenceDimensions=result.size.split('x').map(Number);
+      $('reference-name').textContent='Your generated image';$('reference-info').textContent=`${result.size.replace('x',' × ')} · selected for editing`;
+      $('reference-card').hidden=false;$('reference-preview').src=result.url;$('choose-photo').textContent='Change photo';$('strength').value='0.6';
+      $('prompt').value=workflow==='edit' ? '' : result.prompt;
+      if(result.expanded)$('expand-prompt').checked=false;
+      $('lora').value=workflow==='generate' ? result.lora : '';updateLoRA(false);if(result.lora)$('lora-strength').value=result.lora_strength;
+      updateReferenceSizing();selectLongEdge(Math.max(...referenceDimensions));updateReferenceSizing();updateVariationControls();updateSourceCanvas();
+      $('announcement').textContent='Image selected for editing. Describe the changes, then create a new version.';
+      $('prompt').focus();$('prompt').select();
     });
     $('prompt').addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); if (!$('generate').disabled) $('form').requestSubmit(); } });
     $('form').addEventListener('submit', async event => {
@@ -471,13 +528,13 @@
           $('button-text').textContent = 'Generating…';
         }
         if (workflow==='edit' && $('edit-area').value==='selected') payload.mask_image=await uploadSelection();
-        const body = JSON.stringify(payload), remembered = JSON.parse(sessionStorage.getItem('imagegen-pending') || 'null');
+        const body = JSON.stringify(payload), remembered = JSON.parse(sessionStorage.getItem('imagegen-pending-'+workflow) || 'null');
         const key = remembered && remembered.body === body ? remembered.key : crypto.randomUUID();
-        sessionStorage.setItem('imagegen-pending', JSON.stringify({body, key}));
+        sessionStorage.setItem('imagegen-pending-'+workflow, JSON.stringify({body, key}));
         const response = await fetch('/v1/jobs', {method:'POST', headers:{'Content-Type':'application/json', 'Idempotency-Key':key}, body});
         const job = await response.json();
         if (!response.ok) { const detail = Array.isArray(job.detail) ? job.detail.map(item => item.msg).join('; ') : job.detail; throw new Error(detail || `Submission failed (${response.status}).`); }
-        sessionStorage.removeItem('imagegen-pending');
+        sessionStorage.removeItem('imagegen-pending-'+workflow);
         if (payload.generate_immediately) followJob(job.id);
         $('announcement').textContent = payload.generate_immediately ? 'Image request saved. It will run in the next immediate slot.' : 'Image added to the persisted queue.';
         $('import-note').textContent = $('announcement').textContent; $('import-note').hidden = false;
@@ -526,7 +583,16 @@
     $('image-count').addEventListener('change',() => {updateButton();updateVariationControls();});
     $('expand-prompt').addEventListener('change',updateVariationControls);
     $('vary-prompt').addEventListener('change',updateVariationControls);
-    function followJob(id) { watchingJob = id; localStorage.setItem('imagegen-watching', id); }
+    function jobWorkflow(job){return job.request?.task==='edit' ? 'edit' : 'generate';}
+    function persistWatchers(){if(Object.values(watchingJobs).some(Boolean))localStorage.setItem('imagegen-watching',JSON.stringify(watchingJobs));else localStorage.removeItem('imagegen-watching');}
+    function followJob(id,owner=workflow){watchingJobs[owner]=id;workflowStates[owner].pendingJob={id,status:'queued'};workflowStates[owner].progressText='';persistWatchers();if(owner===workflow)updateWorkflowPreview();}
+    async function restoreWatchers(){
+      const raw=localStorage.getItem('imagegen-watching');if(!raw)return;
+      try{
+        if(/^[0-9a-f]{32}$/.test(raw)){const job=await requestJSON('/v1/jobs/'+raw);followJob(job.id,jobWorkflow(job));}
+        else{const saved=JSON.parse(raw);for(const owner of ['generate','edit'])if(/^[0-9a-f]{32}$/.test(saved?.[owner]))followJob(saved[owner],owner);}
+      }catch{localStorage.removeItem('imagegen-watching');}
+    }
     function optionURL(item) {
       const identifier=String(item.file_path).split('/').pop().replace(/\.png$/,'');
       const url=new URL(item.url || (/^[0-9a-f]{32}$/.test(identifier) ? '/images/'+identifier+'.png' : ''),location.origin);
@@ -534,52 +600,63 @@
       return url;
     }
     function updateWorkflowPreview() {
-      const matching=!!displayedBatch && (displayedBatch.request.task || 'generate')===workflow;
+      const matching=!!displayedBatch && !!lastResult && jobWorkflow(displayedBatch)===workflow;
       const image=$('reference-preview'),source=workflow==='edit' && !matching && image.complete && image.naturalWidth>0 && !$('reference-card').hidden;
       $('source-editor').hidden=!source; sourceCanvas.hidden=!source; $('result').hidden=!matching; $('empty').hidden=matching || source;
       $('image-options').hidden=!matching || (displayedBatch.request.n || 1)===1;
       $('result-bar').hidden=!matching;
       $('saved-path').textContent=matching ? lastResult.file_path : chosenProfile()?.output_dir || 'Choose a model';
-      if (!matching) { $('working').hidden=true; $('preview').setAttribute('aria-busy','false'); }
+      const pending=workflowStates[workflow].pendingJob,busy=!!pending && !['succeeded','failed','cancelled'].includes(pending.status);
+      $('working').hidden=!busy; $('preview').setAttribute('aria-busy',String(busy));
+      $('elapsed').textContent=workflowStates[workflow].progressText || 'Saved · waiting for the next slot…';
     }
-    async function selectImageOption(index) {
-      const batch=displayedBatch, item=batch.result.data[index], payload=batch.request;
+    async function selectImageOption(index,preserveExpansion=false) {
+      const owner=workflow,batch=displayedBatch, item=batch.result.data[index], payload=batch.request;
       const url=optionURL(item), version=++selectingOption;
       const preloaded=new Image();
       await new Promise((resolve,reject) => { preloaded.onload=resolve; preloaded.onerror=() => reject(new Error('Image saved, but its preview could not load. Open it in the gallery.')); preloaded.src=url.href; });
-      if (displayedBatch!==batch || version!==selectingOption) return;
+      if (workflow!==owner || displayedBatch!==batch || version!==selectingOption) return;
       selectedOption=index;
       $('result').src=url.href; $('result').alt=payload.prompt; $('result').hidden=false; $('empty').hidden=true;
       for (const [position,card] of [...$('image-options').children].entries()) card.setAttribute('aria-pressed',String(position===index));
       lastSeed=item.seed;
       $('edit').textContent=modelCatalog.find(profile=>profile.id===item.model)?.reference_mode==='edit' ? 'Edit image' : 'Make a variation';
       lastResult={model:item.model,file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
-      if (item.prompt_expansion && (batch.request.task || 'generate')===workflow) showExpansion(item.prompt_expansion);
-      else { $('expanded-details').hidden=true; expansionPreview=null; }
+      if(!preserveExpansion){if(item.prompt_expansion)showExpansion(item.prompt_expansion);else{$('expanded-details').hidden=true;expansionPreview=null;}}
       const count=batch.request.n || 1;
       $('result-info').textContent=(count>1 ? `Option ${item.candidate_index || index+1} of ${count} · ` : '')+`${item.size.replace('x',' × ')} · ${batch.result.generation_seconds}s${count>1 ? ' total' : ''} · Seed ${lastSeed}`;
       $('download').href=url.href; $('download').download=`${lastResult?.model || chosenModel()}-${lastSeed}.png`; $('actions').hidden=false;
       $('saved-path').textContent=item.file_path; updateWorkflowPreview();
     }
-    async function displayJob(job) {
-      const result=job.result || job.partial_result;
-      if (!result?.data?.length) return;
-      displayedBatch={id:job.id,request:job.request,result}; selectedOption=0;
+    function renderImageOptions(){
+      const {result,request}=displayedBatch;
       const cards=result.data.map((item,index) => {
-        const card=document.createElement('button'); card.type='button'; card.className='option-card'; card.setAttribute('aria-pressed',String(index===0));
+        const card=document.createElement('button'); card.type='button'; card.className='option-card'; card.setAttribute('aria-pressed',String(index===selectedOption));
         const image=document.createElement('img'),url=optionURL(item); image.src=url.origin+url.pathname.replace('/images/','/thumbnails/').replace(/\.png$/,'.webp'); image.alt=''; image.loading='lazy';
         const title=document.createElement('strong'); title.textContent=`Option ${item.candidate_index || index+1}`;
         const seed=document.createElement('small'); seed.textContent=`Seed ${item.seed}`;
-        card.append(image,title,seed);card.addEventListener('click',() => selectImageOption(index).catch(error => showError(error.message)));return card;
+        card.append(image,title,seed);card.addEventListener('click',() => {const owner=workflow,version=workflowVersion;selectImageOption(index).catch(error=>{if(workflow===owner && workflowVersion===version)showError(error.message);});});return card;
       });
-      $('image-options').replaceChildren(...cards);$('image-options').hidden=(job.request.n || 1)===1;
+      $('image-options').replaceChildren(...cards);$('image-options').hidden=(request.n || 1)===1;
+    }
+    async function displayJob(job) {
+      const result=job.result || job.partial_result;if(!result?.data?.length)return;
+      const owner=jobWorkflow(job),batch={id:job.id,request:job.request,result};
+      const state=workflowStates[owner];state.batch=batch;state.selectedOption=0;
+      state.expansionPreview=result.data[0].prompt_expansion || null;state.expansionHidden=!state.expansionPreview;state.expansionOpen=true;
+      const announcement=job.status==='succeeded' ? `${result.data.length===1 ? 'Your image is' : result.data.length+' image options are'} ready and saved.` : `${result.data.length} completed options saved; the batch did not finish.`;
+      state.notices.announcement={text:announcement,hidden:false};
+      if(owner!==workflow)return;
+      displayedBatch=batch;selectedOption=0;lastResult=null;renderImageOptions();
+      expansionPreview=state.expansionPreview;$('expanded-details').hidden=state.expansionHidden;if(expansionPreview)showExpansion(expansionPreview);
       await selectImageOption(0);
-      $('announcement').textContent=job.status==='succeeded' ? `${result.data.length===1 ? 'Your image is' : result.data.length+' image options are'} ready and saved.` : `${result.data.length} completed options saved; the batch did not finish.`;
+      if(owner!==workflow || displayedBatch!==batch)return;
+      $('announcement').textContent=announcement;
     }
     async function requestJSON(url, options = {}) {
       const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
       const data=await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Queue request failed.');
+      if (!response.ok) {const error=new Error(typeof data.detail === 'string' ? data.detail : 'Queue request failed.');error.status=response.status;throw error;}
       return data;
     }
     async function queueAction(url, options) {
@@ -659,16 +736,16 @@
       inspect.addEventListener('click',async() => {
         $('queue-dialog').close();
         try {
-          const current=await requestJSON('/v1/jobs/'+job.id);
+          const current=await requestJSON('/v1/jobs/'+job.id);setWorkflow(jobWorkflow(current));
           if (current.status==='succeeded' || current.partial_result) await displayJob(current);
           if (['failed','cancelled'].includes(current.status)) showError(current.error || 'This job was cancelled.');
-          else if (current.status!=='succeeded') { followJob(job.id); await refreshQueue(); }
+          else if (current.status!=='succeeded') { followJob(job.id,jobWorkflow(current)); await refreshQueue(); }
         } catch(error) { showError(error.message); }
       }); actions.append(inspect);
       if (job.status==='queued') {
         const run=document.createElement('button'); run.type='button'; run.className='secondary queue-run-now'; run.textContent='Run Now';
         run.title='Run at the next free slot, even while paused; the active batch finishes first.';
-        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close(); followJob(job.id); refreshQueue(); } })); actions.append(run);
+        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close();setWorkflow(jobWorkflow(job));followJob(job.id,jobWorkflow(job));refreshQueue(); } })); actions.append(run);
         const remove=document.createElement('button'); remove.type='button'; remove.className='secondary queue-remove'; remove.textContent='Remove';
         remove.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); actions.append(remove);
       } else if (['failed','cancelled'].includes(job.status)) {
@@ -705,18 +782,21 @@
         queueNext=list.next_offset ?? null; queuePrevious=list.previous_offset ?? null;
         $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
         $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
-        if (watchingJob) {
-          const job=await requestJSON('/v1/jobs/'+watchingJob);
-          const finished=['succeeded','failed','cancelled'].includes(job.status);
-          const matching=(job.request.task || 'generate')===workflow;
-          $('working').hidden=finished || !matching; $('preview').setAttribute('aria-busy',String(!finished && matching));
+        for(const owner of ['generate','edit']){
+          const identifier=watchingJobs[owner];if(!identifier)continue;
+          let job;
+          try{job=await requestJSON('/v1/jobs/'+identifier);}catch(error){if(error.status===404){watchingJobs[owner]=null;workflowStates[owner].pendingJob=null;persistWatchers();if(owner===workflow)updateWorkflowPreview();continue;}throw error;}
+          if(watchingJobs[owner]!==identifier)continue;
+          const state=workflowStates[owner],finished=['succeeded','failed','cancelled'].includes(job.status);
+          state.pendingJob=job;
           const batchProgress=(job.total_images || 1)>1 ? ` · ${job.completed_images || 0}/${job.total_images} images saved` : '';
-          $('elapsed').textContent=job.status==='running' && summary.stage==='planning_variations' ? 'Planning distinct compositions with the local LLM…' : job.status==='running' && summary.stage==='expanding_prompt' ? 'Expanding your description with the local LLM…' : job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed${batchProgress}`) : 'Saved · waiting for the next slot…';
-          if (finished) {
-            if (job.status==='succeeded') await displayJob(job);
-            else { if (job.partial_result) await displayJob(job); showError(job.error || 'The followed job was cancelled.'); }
-            localStorage.removeItem('imagegen-watching'); watchingJob=null;
+          state.progressText=job.status==='running' && summary.stage==='planning_variations' ? 'Planning distinct compositions with the local LLM…' : job.status==='running' && summary.stage==='expanding_prompt' ? 'Expanding your description with the local LLM…' : job.status==='running' ? (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU…' : `${Math.max(0,Math.floor(Date.now()/1000-job.started))} seconds elapsed${batchProgress}`) : 'Saved · waiting for the next slot…';
+          if(finished){
+            watchingJobs[owner]=null;state.pendingJob=null;persistWatchers();
+            if(job.status==='succeeded' || job.partial_result)await displayJob(job);
+            if(job.status!=='succeeded'){const text=job.error || 'The followed job was cancelled.';state.notices.error={text,hidden:false};if(owner===workflow)showError(text);}
           }
+          if(owner===workflow)updateWorkflowPreview();
         }
       } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
       finally { pollingQueue=false; }
@@ -746,12 +826,18 @@
       const params = new URLSearchParams(location.search), id = params.get('generation'), mode = params.get('mode');
       if (!id) return;
       if (!/^[0-9a-f]{32}$/.test(id) || !['reference', 'settings'].includes(mode)) { showError('This gallery link is invalid. Open the image from the gallery again.'); return; }
+      const version=workflowVersion;let targetVersion=version;
       try {
         const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
+        if(version!==workflowVersion)return;
+        const profile=modelCatalog.find(entry=>entry.id===item.model);
+        if(metadata.task==='edit' || (mode==='reference' && profile?.reference_mode==='edit'))setWorkflow('edit');
+        targetVersion=workflowVersion;
         if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
-        if (metadata.task==='edit' || (mode==='reference' && referenceMode==='edit')) { setWorkflow('edit'); $('preserve').value=metadata.preserve || ''; }
+        if(targetVersion!==workflowVersion)return;
+        if(workflow==='edit')$('preserve').value=metadata.preserve || '';
         const sameModel = !item.model || item.model === chosenModel();
         if (!sameModel) warnings.push(modelCatalog.some(profile=>profile.id===item.model) ? `Select ${item.model} to restore model-specific settings.` : `This image used ${item.model}; that model is not set up here. Model-specific settings use current defaults.`);
         const url = new URL(item.url, location.origin);
@@ -780,6 +866,7 @@
           $('reference').value = metadata.reference_image; $('reference-options').hidden = referenceMode === 'edit';
           if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
           if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
+          if(targetVersion!==workflowVersion)return;
         if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
           warnings.push('This generation used a reference file; it must still exist at the saved path.');
         }
@@ -789,9 +876,9 @@
         $('import-note').hidden = false; $('announcement').textContent = $('import-note').textContent;
         params.delete('generation'); params.delete('mode'); history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''));
         $('prompt').focus();
-      } catch (error) { showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
+      } catch (error) { if(targetVersion===workflowVersion)showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await importSavedImage(); await refreshQueue(); }
+    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await importSavedImage(); await restoreWatchers(); await refreshQueue(); }
     initialize(); setInterval(async()=>{await checkHealth();if (!generating && !previewingExpansion) await loadModels();}, 15000); setInterval(refreshQueue, 2000);
   </script>
 </body>
