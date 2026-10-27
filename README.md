@@ -44,6 +44,8 @@ The effect of prompt expansion and composition planning depends on the scene and
 
 ## Generate or edit a photo
 
+The underlined **Generate** and **Edit photo** tabs share a compact workspace with Voice Studio’s charcoal panels and a soft teal output gradient.
+
 **Generate** offers every setup model, including Klein and Qwen, for text-to-image generation with an optional reference. **Edit photo** offers Klein 4B/9B and Qwen Turbo, requires an existing photo, and treats your prompt as an edit instruction. Each tab keeps its own prompt, model, settings, reference photo, area selection, expansion preview and image results while the page is open. Switching tabs restores that tab's work; a job finishing in the background updates only its own tab. To carry an image into another workflow, use **Edit image** or the gallery's reuse actions explicitly.
 
 Edit uses one preview box: empty before upload, a centered source photo after upload at the same display scale as generated images, and the edited result after completion. On the first visit, choose an editing model; later visits restore your selection. Reference resolution defaults to **Auto**: it detects the oriented photo dimensions, keeps the original resolution without upscaling, and caps large photos at a 2048px long edge. You can choose a different long edge when needed. Editing uses the model's distilled step count, and alternate attempts at the same edit rather than new compositions. Drafts and uploads held by the webpage are not saved across a page reload; accepted jobs and their generated files remain saved.
@@ -69,7 +71,7 @@ Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface
 
 ## Keep a searchable image library
 
-Generator, Gallery and Observability share the same header, navigation, live server status and **Queue** button. The 1400px page frame and header/title spacing match Voice Studio, with a wider generation form and responsive columns. Plain text navigation links highlight the current page in blue and keep the others gray; Command-click (Mac), Ctrl-click (Windows/Linux) or middle-click opens a destination in a new tab. Open and manage the queue from any page; **Monitor** or **Open image** takes you to the generator preview when needed.
+Generator, Gallery and Observability share the same header, navigation, live server status and **Queue** button. The 1400px page frame and header/title spacing match Voice Studio, with a wider generation form and responsive columns. Plain text navigation links highlight the current page in teal and keep the others gray; Command-click (Mac), Ctrl-click (Windows/Linux) or middle-click opens a destination in a new tab. Open and manage the queue from any page; **Monitor** or **Open image** takes you to the generator preview when needed.
 
 The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation. Choose **Edit photo** to open the selected image directly in the Edit preview, even when a different model created it. The action is available whenever a setup model supports editing. Choose an editor if prompted, describe the change and submit; your original file stays unchanged. **Make a variation** and **Reuse settings** remain separate actions.
 
