@@ -22,9 +22,28 @@ ifneq ($(filter-out 0 1,$(strip $(NO_LLM))),)
 $(error NO_LLM accepts only 0 or 1)
 endif
 SERVER_FLAGS := $(if $(filter 1,$(NO_LORAS)),--no-loras,) $(if $(filter 1,$(NO_LLM)),--no-llm,)
-LORA_ID ?= realism
+LORA_ID ?=
+# Pass user data through the environment, without shell interpolation or
+# recursive Make expansion of paths/trigger words containing $ or backticks.
+override LORA_ID := $(value LORA_ID)
+export LORA_ID
+override LORA_SOURCE := $(value LORA_SOURCE)
+export LORA_SOURCE
+override LORA_NAME := $(value LORA_NAME)
+export LORA_NAME
+override LORA_TRIGGER := $(value LORA_TRIGGER)
+export LORA_TRIGGER
+override LORA_STRENGTH := $(value LORA_STRENGTH)
+export LORA_STRENGTH
+override LORA_FILENAME := $(value LORA_FILENAME)
+export LORA_FILENAME
+override LORA_REVISION := $(value LORA_REVISION)
+export LORA_REVISION
+override LORA_SHA256 := $(value LORA_SHA256)
+export LORA_SHA256
+export NONINTERACTIVE
 
-.PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test install-lora download-loras download-realism download-llm queue stop-queue
+.PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test setup-lora install-lora download-loras download-realism download-llm queue stop-queue
 help:
 	@echo 'Setup reuses compatible Python, or installs it inside the project; serving stays offline'
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
@@ -41,6 +60,7 @@ help:
 	@echo 'make download  Download/resume the selected model'
 	@echo 'make setup     Choose a model, install dependencies and download image + prompt models (safe to rerun)'
 	@echo 'Setup: q cancels at the model menu; Ctrl-C cancels at any time and keeps existing downloads'
+	@echo 'make setup-lora  Add your own compatible LoRA from a file or Hugging Face; local catalog survives git pull'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
 	@echo 'Choose a default: make serve MODEL=chroma1-flash (all setup models remain available)'
 	@echo 'Photo editing models: flux2-klein-4b, flux2-klein-9b, qwen-image-2.1-turbo'
@@ -51,9 +71,13 @@ download-realism:
 download-loras:
 	"$(PYTHON)" download_loras.py
 
+setup-lora:
+	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }
+	"$(PYTHON)" lora_setup.py
+
 install-lora:
 	@test -n "$(FILE)" || (echo 'Usage: make install-lora FILE=/absolute/path/to/ZImage.safetensors'; exit 1)
-	"$(PYTHON)" install_lora.py "$(FILE)" --id "$(LORA_ID)"
+	"$(PYTHON)" install_lora.py "$(FILE)" --id "$(or $(LORA_ID),realism)"
 
 setup:
 	@$(BOOTSTRAP) setup setup.py

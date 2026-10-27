@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from storage_paths import require_storage
 import shutil
-import struct
 import tempfile
-from config import PROFILE, API_MODEL
+from config import API_MODEL
+from adapter_validation import inspect_adapter
 from lora_catalog import LORA_DIR, catalog
 
 
@@ -15,32 +15,13 @@ def install(source, identifier):
     source = Path(source).expanduser().resolve()
     # Keep other model entries in the shared local catalog when updating one adapter.
     local=LORA_DIR/'catalog.json'
-    entries=json.loads(local.read_text()) if local.is_file() else catalog()
+    entries=json.loads(local.read_text()) if local.is_file() else catalog(local=False)
     require_storage(LORA_DIR)
     LORA_DIR.mkdir(parents=True, exist_ok=True)
     entry = next((item for item in entries if item["id"] == identifier and API_MODEL in item["models"]), None)
     if entry is None:
-        raise ValueError("Unknown adapter ID; add a compatible entry to lora-catalog.json or loras/catalog.json first")
-    # Parse the data-only format, rejecting an incorrect variant before copying.
-    with source.open("rb") as stream:
-        length = struct.unpack("<Q", stream.read(8))[0]
-        if not 0 < length <= 16 * 1024**2:
-            raise ValueError("Invalid safetensors header")
-        header = json.loads(stream.read(length))
-    keys = [key.lower() for key in header if key != "__metadata__"]
-    info = header.get("__metadata__", {})
-    metadata = json.dumps({key: info.get(key) for key in [
-        "ss_base_model_version", "ss_model_type", "modelspec.architecture", "ss_output_name"
-    ]}).lower()
-    if not keys or not any("lora" in key for key in keys):
-        raise ValueError("This file does not contain LoRA tensors")
-    if PROFILE['backend']=='mflux':
-        if any(word in metadata for word in ['chroma','illustrious','sdxl','flux']):
-            raise ValueError('Wrong model family: import the Z-Image Turbo version')
-        if not any('layers.' in key and '.attention.' in key for key in keys):
-            raise ValueError('Unrecognized Z-Image transformer adapter tensors')
-    elif any(word in metadata for word in ['zimage','z_image','illustrious','sdxl']) or not any('double_blocks' in key or 'single_blocks' in key or 'transformer_blocks' in key for key in keys):
-        raise ValueError('Unrecognized Chroma transformer adapter tensors')
+        raise ValueError("Unknown preset ID; use make setup-lora to add a custom adapter")
+    inspect_adapter(source,API_MODEL)
     destination = LORA_DIR / entry["filename"]
     if source != destination.resolve():
         with tempfile.NamedTemporaryFile(dir=LORA_DIR, suffix=".partial", delete=False) as stream:

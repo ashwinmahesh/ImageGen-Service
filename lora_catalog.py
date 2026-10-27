@@ -32,7 +32,7 @@ def resolve_lora(identifier, strength=None, *, model=None):
         raise ValueError("Unknown LoRA for this model; see GET /v1/loras")
     path = catalog_adapter_path(directory,entry)
     if not path.is_file() or not entry.get("sha256"):
-        raise ValueError("LoRA is not installed. Import a compatible .safetensors file with make install-lora FILE=/absolute/path")
+        raise ValueError("LoRA is not installed. Rerun its setup-lora command, or use make install-lora FILE=/absolute/path for a known preset")
     stat = path.stat()
     key = (str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, entry["sha256"])
     if key not in _verified:

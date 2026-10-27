@@ -152,6 +152,37 @@ For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-imag
 Generator, Gallery and Observability use the same header, including navigation and live generator status. Open **Queue** in the header from any page. The modal keeps its header and pagination visible while entries scroll. **Monitor**, **Open image** and **Run Now** open the generator preview when used from Gallery or Observability. **Monitor** closes it and follows a job in the preview; waiting entries also have green **Run Now** and red **Remove** buttons. Close it with **Close**, Escape or the backdrop. In the modal, drag a waiting job by its left-hand grip to change its place. You can also focus the grip and press ↑ / ↓. **Run Now** moves a waiting job to the next free slot, even while the queue is paused; the active batch finishes first. Order is saved across restarts.
 
 
+### Add your own LoRA
+
+You can download a LoRA from Hugging Face or import one you already have. Your adapters and their settings are saved separately from project code, so `git pull` keeps them intact.
+
+1. Run `make setup` for the base model first. The custom importer currently supports **Z-Image Turbo, Chroma HD and Chroma Flash**; Klein/Qwen adapter formats are not supported by this installer.
+2. Find a **LoRA `.safetensors` file trained for that model**. Check the creator's license, trigger words and recommended strength. A LoRA for a different model family will not work just because it has the same file extension.
+3. In the project folder, run:
+
+   ```sh
+   make setup-lora
+   ```
+
+4. Choose the model (Enter defaults to Z-Image Turbo). Paste a local file path, a Hugging Face repository such as `owner/repository`, or the LoRA's Hugging Face file-page/download URL. If the repository has several weight files, choose the adapter file from the list.
+5. Enter a display name, a short ID, optional trigger words and a default strength (Enter defaults to `0.8`; allowed range `0–2`). The command adds `custom-` to the ID: `ink` becomes `custom-ink`.
+6. Reload the webpage, select that model and choose the new **Style adapter**. The service loads the weights and inserts configured trigger words automatically. For the API, discover it with `GET /v1/loras?model=z-image-turbo`, then use `"lora":"custom-ink"` and optionally `"lora_strength":0.8`. Do not put `<lora:...>` tags in the prompt.
+
+For example, to import a downloaded file without questions:
+
+```sh
+make setup-lora MODEL=z-image-turbo \
+  LORA_SOURCE="$HOME/Downloads/style.safetensors" \
+  LORA_ID=ink LORA_NAME="Ink illustration" \
+  LORA_TRIGGER="creator-trigger" LORA_STRENGTH=0.8 NONINTERACTIVE=1
+```
+
+Replace the example path and trigger with the creator's actual values; omit `LORA_TRIGGER` if none is required. See [download options](docs/setup.md#custom-lora-downloads-and-imports) for Hugging Face filenames, revisions, checksums and private repositories.
+
+Weights and `custom.json` live in the selected model's ignored `loras` folder, on your configured external drive or inside the project. The original source file is kept. Chroma HD/Flash share one adapter folder, with each adapter listed only for models you explicitly selected during installation. Rerunning the same ID, weights and settings verifies them and makes no changes; use a new ID for a different version or settings. Cancel with `q` at a question or Ctrl+C; existing registrations and resumable downloads are kept.
+
+The importer checks file format and model-family hints; it cannot guarantee exact compatibility or image quality. Installing an adapter does not set up its base model or start a server. An already running server normally needs only a page reload; if it was started with `NO_LORAS=1`, restart it with adapters enabled when convenient.
+
 ### Monitor resource use
 
 Choose **Observability** in the header, or open [http://localhost:5742/observability](http://localhost:5742/observability). Select 5m, 30m, 1h, 6h, 24h, 3 days or 7 days, and optionally filter by model. Hover a graph—or focus it and use the arrow keys—to inspect values and model names. Solid lines show sample means; dashed lines preserve sampled peaks in longer windows.

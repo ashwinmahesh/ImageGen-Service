@@ -14,6 +14,7 @@ class PublicAdaptersTest(unittest.TestCase):
     def test_shipped_catalog_contains_only_optional_realism(self):
         entries=json.loads((Path(__file__).resolve().parents[1]/'lora-catalog.json').read_text())
         self.assertEqual([entry['id'] for entry in entries], ['realism'])
+        self.assertFalse(any(entry['id'].startswith('custom-') for entry in entries))  # Reserved user namespace.
         self.assertEqual(entries[0]['repository'], 'suayptalha/Z-Image-Turbo-Realism-LoRA')
 
     def test_public_download_ignores_even_an_unreadable_local_catalog(self):

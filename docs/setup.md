@@ -180,7 +180,42 @@ make download-realism MODEL=z-image-turbo
 make install-lora MODEL=z-image-turbo FILE=/absolute/path/adapter.safetensors LORA_ID=realism
 ```
 
-Public downloads use only tracked `lora-catalog.json`, never personal catalogs. Compatible personal catalogs/checkpoints may live under ignored per-model `loras` folders; HD/Flash share `chroma1-hd/loras`. `GET /v1/loras?model=<id>` returns the requested setup model’s entries; omission uses the shared default. The loader applies an adapter directly; a configured trigger phrase is prepended once automatically. Do not add `<lora:...>` tags to prompts. `--no-loras` / `NO_LORAS=1` hides the selector, returns an empty disabled catalog and rejects adapter requests. Adapter files and personal presets are never included in Git/default setup.
+Public downloads use only tracked `lora-catalog.json`, never personal catalogs. `make install-lora` above replaces a known preset's weights; use **`make setup-lora`** below to add your own entry. HD/Flash share `chroma1-hd/loras`. `GET /v1/loras?model=<id>` returns the requested setup model's entries; omission uses the shared default. The loader applies an adapter directly; a configured trigger phrase is prepended once automatically. Do not add `<lora:...>` tags to prompts. `--no-loras` / `NO_LORAS=1` hides the selector, returns an empty disabled catalog and rejects adapter requests. Adapter files and personal presets are never included in Git/default setup.
+
+### Custom LoRA downloads and imports
+
+After `make setup`, run `make setup-lora` for a guided model/source/name/ID/trigger/strength flow. Enter selects Z-Image Turbo, or provide `MODEL`. Only Z-Image Turbo and Chroma HD/Flash adapter formats are supported by this importer. It checks the safetensors header, LoRA tensor names and available architecture metadata without loading tensors or image runtimes. Those checks do not prove exact tensor compatibility, image quality or licensing; choose weights trained for the selected base model and follow the creator's terms. Full model checkpoints, pickle files and HTML download pages are rejected.
+
+Accepted sources are a local `.safetensors` path, `owner/repository`, an HTTPS Hugging Face model repository URL, or its `blob`/`resolve` file URL. Only Hugging Face model repositories are downloaded; for another host, download the file yourself and import its local path. The source is copied and never moved/modified. In a terminal, choose a file if the repository contains several `.safetensors` files; automation must specify one with the full file URL or `LORA_FILENAME`.
+
+Example using a repository (replace the example repository, filename and trigger):
+
+```sh
+make setup-lora MODEL=z-image-turbo \
+  LORA_SOURCE="CREATOR/REPOSITORY" LORA_FILENAME="adapter.safetensors" \
+  LORA_ID=ink LORA_NAME="Ink illustration" LORA_TRIGGER="creator-trigger" \
+  LORA_STRENGTH=0.8 NONINTERACTIVE=1
+```
+
+| Make option | Meaning |
+| --- | --- |
+| `MODEL` | `z-image-turbo`, `chroma1-hd` or `chroma1-flash`; interactive choice, otherwise Z-Image default. |
+| `LORA_SOURCE` | Existing local file, repository ID or supported Hugging Face URL. Required without a terminal. |
+| `LORA_ID` | Lowercase letters, digits and hyphens; starts with a letter/digit, up to 73 characters before the automatic `custom-` prefix. Defaults to a slug of the display name. |
+| `LORA_NAME` | Display label, 1–120 printable characters; defaults to the source filename with spaces. |
+| `LORA_TRIGGER` | Creator's trigger words, up to 1000 printable characters; defaults to none. |
+| `LORA_STRENGTH` | Default strength, finite `0–2`, default `0.8`; requests may override it. |
+| `LORA_FILENAME` | Repository-relative `.safetensors` path when using a repository source. |
+| `LORA_REVISION` | Hugging Face branch, tag or full commit; default `main` for repository sources. A full file URL supplies its own revision. Conflicting URL/options are rejected. |
+| `LORA_SHA256` | Optional expected full SHA256; mismatch prevents registration. |
+| `NONINTERACTIVE=1` | Never ask questions; use provided/default values or fail with actionable guidance. |
+| `DATA_DIR`, `VENV` | Existing storage/environment overrides; keep consistent with setup/serving. Omit DATA_DIR to reuse saved storage. |
+
+Hugging Face branches/tags resolve to a full immutable commit before downloading. The entry records that commit, repository, filename, byte count and calculated SHA256. Downloads use the existing Hugging Face login or `HF_TOKEN` for repositories you can access; credentials are not stored in the catalog. Accept any required upstream access/license terms first. Downloads and resumable metadata stay under `<adapter-folder>/downloads/<owner--repo>/<commit>/`; downloaded cache files are copied rather than changed. This follows the [Hugging Face download/cache contract](https://huggingface.co/docs/huggingface_hub/guides/download). Only data-only [safetensors](https://huggingface.co/docs/safetensors/index) are imported; no repository code is executed.
+
+The command stores immutable, checksum-named weights and a separate **`<store>/<model>/loras/custom.json`**. Chroma uses `<store>/chroma1-hd/loras` for both variants; installing the same ID/file/settings for the other variant explicitly adds that compatibility without a second weight copy. Custom IDs occupy the reserved `custom-` namespace. Runtime discovery merges custom entries with the public catalog (or an existing legacy local `catalog.json` override); it does not edit either of those catalogs. Public/default downloads ignore all local additions. Per-model directories and external symlinks are already Git-ignored, so updates with `git pull` preserve personal weights/settings without tracked-file conflicts.
+
+Writes use an install lock, temporary copies and atomic catalog replacement. Rerunning identical ID/weights/settings verifies a no-op or repairs missing weights; a different version or settings requires a new ID and never overwrites the old registration. `q`, EOF or Ctrl+C cancels with a concise message, retaining existing data and download cache. The command neither sets up a base model nor starts inference/HTTP services. Reload the UI or rediscover `/v1/loras?model=<id>` to use the new entry; a restart is normally unnecessary. The model must pass setup readiness and the generator must have adapters enabled.
 
 ## Observability
 

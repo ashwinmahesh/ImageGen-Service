@@ -25,6 +25,23 @@ The generator/UI is `http://127.0.0.1:5742/`, with `/gallery`, `/docs` and `/hea
 
 `make queue` starts/reuses a detached API at `http://127.0.0.1:55302`, using the installed environment without model/LLM/SSD/GPU requirements. `make serve` ensures it is up too. `make stop-queue` stops only the verified queue process, preserving jobs. Use QUEUE_PORT overrides consistently. No OS autostart is installed.
 
+## Install a custom LoRA
+
+From the located checkout, use `make setup-lora` interactively or the following noninteractive form after base setup:
+
+```sh
+make setup-lora MODEL=z-image-turbo \
+  LORA_SOURCE="/absolute/path/style.safetensors" \
+  LORA_ID=ink LORA_NAME="Ink illustration" \
+  LORA_TRIGGER="creator-trigger" LORA_STRENGTH=0.8 NONINTERACTIVE=1
+```
+
+Use the creator's real trigger, or omit it when none is required. This importer supports Z-Image Turbo and Chroma HD/Flash only; do not claim Klein/Qwen adapter support. Choose a LoRA trained for that model, check its license, and distinguish header/family checks from proven runtime compatibility. Use an existing local `.safetensors`, a Hugging Face `owner/repo` plus `LORA_FILENAME`, or a full HTTPS `blob`/`resolve` file URL. `LORA_REVISION` optionally pins repository sources; otherwise branches/tags resolve to a recorded full commit. An optional `LORA_SHA256` rejects unexpected bytes. HF_TOKEN/existing Hub login supplies authorized access; never put tokens in URLs/catalogs. Keep VENV/DATA_DIR overrides consistent; omit DATA_DIR to reuse storage. See `docs/setup.md#custom-lora-downloads-and-imports` for exact options.
+
+The returned ID includes `custom-` (example: `custom-ink`). Discover it with GET `/v1/loras?model=z-image-turbo` and require `available:true`, then submit `lora:"custom-ink"` and optional `lora_strength`. Configured triggers are inserted once; do not add `<lora:...>` tags. One adapter per request, strength0–2. No server restart is normally needed; reload/reselect the UI model. A generator in NO_LORAS mode must be restarted with adapters enabled when requested; installation does not start it or set up base weights. Only setup models appear in discovery/UI.
+
+Weights, Hub cache and `custom.json` remain in ignored model-data `loras` folders, not tracked code. Chroma variants share the HD folder but require explicit compatibility registration for each. Shipped/legacy catalog files remain unchanged and public setup ignores custom entries; `git pull` preserves them. Rerunning identical ID/weights/settings is verified reuse; choose a new ID for changed settings/versions. Cancel with q/EOF/Ctrl+C, retaining prior registrations/cache. Preserve adapters required by queued work and back up user catalogs with their weights. Do not hand-edit the shipped catalog to install a personal adapter.
+
 ## Choose the API
 
 | API | Request and default model | Results |
