@@ -27,7 +27,7 @@
     .immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}
     .workflow-tabs{display:flex;gap:8px;margin:0 0 24px}.workflow-tabs button{border:1px solid var(--line);border-radius:8px;padding:11px 18px;background:transparent;color:var(--muted)}.workflow-tabs button[aria-pressed=true]{background:var(--accent-fill);color:#10243c;border-color:var(--accent)}
     .workflow-edit{position:relative;display:inline-flex}.workflow-edit[data-unavailable=true]{cursor:not-allowed}.workflow-edit button:disabled{pointer-events:none}.workflow-tooltip{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:10000;width:250px;max-width:calc(100vw - 60px);padding:11px 13px;border:1px solid #555555;border-radius:9px;background:#2c2c2c;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 8px 28px #0007}.workflow-edit[data-unavailable=true]:is(:hover,:focus-within) .workflow-tooltip{display:block}
-    .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{width:100%;min-width:0;margin-top:16px}.source-editor h2{font-size:16px;margin:0 0 6px}#source-canvas{cursor:crosshair;touch-action:none}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden]{display:none}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
+    .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{width:100%;min-width:0;margin-top:16px}.source-editor h2{font-size:16px;margin:0 0 6px}#source-canvas{cursor:crosshair;touch-action:none}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden],.brush-tools[hidden]{display:none}.brush-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:4px}.brush-modes{display:flex;gap:6px}.brush-tools label{display:flex;align-items:center;gap:8px;margin:0;font-size:12px;font-weight:500;color:var(--muted)}.brush-tools input[type=range]{width:120px;padding:0;border:0;background:none;accent-color:var(--accent)}.brush-modes .secondary[aria-pressed=true]{background:#1e3a5f;border-color:#93c5fd}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
 
     /* Subtle depth on charcoal surfaces; blue stays an accent. */
     .controls{box-shadow:inset 0 1px 0 #ffffff06,0 12px 32px #00000018}.preview{box-shadow:inset 0 1px 0 #ffffff05,0 16px 40px #0000001c}
@@ -97,7 +97,7 @@
           <img class="preview-media" id="result" alt="" hidden>
           <div class="working" id="working" hidden><span class="spinner" aria-hidden="true"></span><strong>Bringing your idea to life</strong><p id="elapsed">Generating…</p><p style="margin-top:10px">Your request is saved. You can close this page and return later.</p></div>
         </div>
-        <section class="source-editor" id="source-editor" hidden aria-label="Source photo editing controls"><div class="source-toolbar"><div><h2>Source photo</h2><p class="hint" id="source-caption">Your original stays unchanged.</p></div><button type="button" class="secondary" id="clear-selection">Clear selection</button></div><p class="hint" id="selection-info" role="status">Drag over the photo to select the area to edit.</p></section>
+        <section class="source-editor" id="source-editor" hidden aria-label="Source photo editing controls"><div class="source-toolbar"><div><h2>Source photo</h2><p class="hint" id="source-caption">Your original stays unchanged.</p></div><button type="button" class="secondary" id="clear-selection">Clear selection</button></div><div class="brush-tools" id="brush-tools" hidden><div class="brush-modes" role="group" aria-label="Brush mode"><button type="button" class="secondary" id="brush-paint" aria-pressed="true">Paint</button><button type="button" class="secondary" id="brush-erase" aria-pressed="false">Erase</button></div><label for="brush-size">Brush size<input type="range" id="brush-size" min="1" max="25" value="6"></label><button type="button" class="secondary" id="undo-stroke">Undo</button></div><p class="hint" id="selection-info" role="status">Paint over the photo to select the areas to edit.</p></section>
         <div id="image-options" class="options-grid" role="group" aria-label="Generated image options" hidden></div>
         <div class="result-bar" id="result-bar"><div class="result-info" id="result-info">Images are saved automatically to your selected folder.</div><div class="actions" id="actions" hidden><button type="button" class="secondary" id="edit">Make a variation</button><button type="button" class="secondary" id="reuse">Reuse seed</button><a class="secondary" id="download" download>Download PNG ↓</a></div></div>
       </section>
@@ -116,8 +116,11 @@
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
     let usingReferenceSizing = false;
     let workflow = 'generate', workflowVersion = 0, modelCatalog = [], serverCapabilities = {};
-    let selectionRect = null, selectionStart = null, maskUpload = null, savedMaskPath = null;
+    let maskStrokes = [], activeStroke = null, brushMode = 'paint', brushHover = null, maskUpload = null, savedMaskPath = null;
     const sourceCanvas = $('source-canvas'), sourceContext = sourceCanvas.getContext('2d');
+    // Painted strokes are kept as resolution-independent paths (normalized points,
+    // brush size relative to the long edge) and rendered at preview and upload size.
+    const maskLayer = document.createElement('canvas'), maskContext = maskLayer.getContext('2d'), maskTint = document.createElement('canvas'), maskTintContext = maskTint.getContext('2d');
     // The renderer mounts one independent workflow draft at a time. File/Blob
     // references stay in memory; no photo data or form drafts go into storage.
     function readWorkflowFields(){
@@ -128,21 +131,21 @@
     function newWorkflowState(owner){
       const fields=structuredClone(initialWorkflowFields);fields['model-choice'].value='';
       if(owner==='edit'){fields.lora.value='';fields['reference-size'].value='auto';fields.steps.value='';}
-      return {initialized:false,fields,details:{},referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,selectionRect:null,maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
+      return {initialized:false,fields,details:{},referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,maskStrokes:[],maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
     }
     const workflowStates={generate:newWorkflowState('generate'),edit:newWorkflowState('edit')};
     function captureWorkflow(){
       const state=workflowStates[workflow];state.initialized=true;state.fields=readWorkflowFields();
       if(pendingLora){state.fields.lora.value=pendingLora.id;state.fields['lora-strength'].value=pendingLora.strength;}
       state.details=Object.fromEntries([...$('form').querySelectorAll('details')].map(detail=>[detail.dataset.workflowDetail,detail.open]));
-      Object.assign(state,{referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,selectionRect:selectionRect?.slice() || null,maskUpload,savedMaskPath,batch:displayedBatch,selectedOption,lastSeed,expansionPreview,expansionHidden:$('expanded-details').hidden,expansionOpen:$('expanded-details').open,referenceSrc:$('reference-preview').getAttribute('src'),referenceHidden:$('reference-card').hidden,referenceName:$('reference-name').textContent,referenceInfo:$('reference-info').textContent});
+      Object.assign(state,{referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,maskStrokes:structuredClone(maskStrokes),maskUpload,savedMaskPath,batch:displayedBatch,selectedOption,lastSeed,expansionPreview,expansionHidden:$('expanded-details').hidden,expansionOpen:$('expanded-details').open,referenceSrc:$('reference-preview').getAttribute('src'),referenceHidden:$('reference-card').hidden,referenceName:$('reference-name').textContent,referenceInfo:$('reference-info').textContent});
       for(const id of Object.keys(state.notices))state.notices[id]={text:$(id).textContent,hidden:$(id).hidden};
     }
     function restoreWorkflow(){
       const state=workflowStates[workflow],owner=workflow,version=workflowVersion;
       if(!state.initialized){state.fields['expand-prompt'].checked=!!expansionEnabled;state.initialized=true;}
       ({referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,maskUpload,savedMaskPath}=state);
-      selectionStart=null;selectionRect=state.selectionRect?.slice() || null;pendingLora=null;
+      activeStroke=null;brushHover=null;maskStrokes=structuredClone(state.maskStrokes);pendingLora=null;
       displayedBatch=state.batch;selectedOption=state.selectedOption;lastSeed=state.lastSeed;lastResult=null;
       $('reference-file').value='';$('reference-card').hidden=state.referenceHidden;
       $('reference-name').textContent=state.referenceName;$('reference-info').textContent=state.referenceInfo;
@@ -157,8 +160,8 @@
         if(['size','reference-size'].includes(id) && ![...input.options].some(option=>option.value===field.value))input.add(new Option(field.value.replace('x',' × '),field.value));
         input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;
       }
-      if(maskSupported()){selectionRect=state.selectionRect?.slice() || null;maskUpload=state.maskUpload;savedMaskPath=state.savedMaskPath;}
-      else{selectionRect=null;maskUpload=null;savedMaskPath=null;$('edit-area').value='whole';}
+      if(maskSupported()){maskStrokes=structuredClone(state.maskStrokes);maskUpload=state.maskUpload;savedMaskPath=state.savedMaskPath;}
+      else{maskStrokes=[];maskUpload=null;savedMaskPath=null;$('edit-area').value='whole';}
       for(const detail of $('form').querySelectorAll('details'))detail.open=state.details[detail.dataset.workflowDetail] || false;
       for(const [id,notice] of Object.entries(state.notices)){$(id).textContent=notice.text;$(id).hidden=notice.hidden;}
       expansionPreview=state.expansionPreview;$('expanded-details').hidden=true;$('expanded-details').open=state.expansionOpen;
@@ -224,8 +227,8 @@
       $('model-status').textContent=workflow==='edit' ? 'Ready for photo editing. The server loads this model automatically when your job runs.' : 'Ready. The server loads this model automatically when your job runs.';
       $('steps-hint').textContent=`${defaultSteps} steps is recommended for ${profile.name}. ${workflow==='edit' ? 'More steps can change the source more; start here.' : 'Reuse a seed to compare settings.'}`;
       $('edit-area').options[1].disabled=!maskSupported();
-      if (!maskSupported()) { $('edit-area').value='whole'; selectionRect=null; maskUpload=null; savedMaskPath=null; }
-      $('edit-area-hint').textContent=maskSupported() ? 'Select an area on the source photo to edit it. Pixels outside the selection are copied from the resized original.' : 'This Klein runtime edits the whole photo. Choose Qwen-Image 2.1 Turbo for area selection.';
+      if (!maskSupported()) { $('edit-area').value='whole'; maskStrokes=[]; maskUpload=null; savedMaskPath=null; }
+      $('edit-area-hint').textContent=maskSupported() ? 'Paint over the parts of the source photo to edit. Pixels outside the painted areas are copied from the resized original.' : 'This Klein runtime edits the whole photo. Choose Qwen-Image 2.1 Turbo for area selection.';
       updateReferenceSizing(); updateSourceCanvas(); updateButton(); updateVariationControls(); updateExpansionGuidance();
     }
     function setWorkflow(next) {
@@ -255,38 +258,99 @@
     $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
     $('mode-edit').addEventListener('click',()=>setWorkflow('edit'));
     $('model-choice').addEventListener('change',()=>{$('lora').value='';updateModelChoice();loadLoRAs();$('expanded-details').hidden=true;expansionPreview=null;});
+    function maskPainted() { return maskStrokes.some(stroke=>stroke.mode==='paint'); }
+    function brushSize() { return Number($('brush-size').value)/100; }
+    function drawStrokes(context,strokes,width,height) {
+      const unit=Math.max(width,height);
+      context.lineCap='round'; context.lineJoin='round'; context.fillStyle=context.strokeStyle='#fff';
+      for (const stroke of strokes) {
+        context.globalCompositeOperation=stroke.mode==='erase' ? 'destination-out' : 'source-over';
+        const [[x,y],...rest]=stroke.points; context.beginPath();
+        if (!rest.length) { context.arc(x*width,y*height,stroke.size*unit/2,0,Math.PI*2); context.fill(); continue; }
+        context.lineWidth=stroke.size*unit; context.moveTo(x*width,y*height);
+        for (const [a,b] of rest) context.lineTo(a*width,b*height);
+        context.stroke();
+      }
+      context.globalCompositeOperation='source-over';
+    }
+    function drawSourceCanvas() {
+      if ($('source-editor').hidden || !sourceCanvas.width) return;
+      const {width,height}=sourceCanvas;
+      sourceContext.drawImage($('reference-preview'),0,0,width,height);
+      if ($('edit-area').value!=='selected' || !maskSupported()) return;
+      if (maskStrokes.length) {
+        maskTintContext.globalCompositeOperation='copy'; maskTintContext.drawImage(maskLayer,0,0);
+        maskTintContext.globalCompositeOperation='source-in'; maskTintContext.fillStyle='rgba(210,240,150,.45)'; maskTintContext.fillRect(0,0,width,height);
+        sourceContext.drawImage(maskTint,0,0);
+      }
+      if (brushHover && !generating) {
+        const radius=brushSize()*Math.max(width,height)/2;
+        sourceContext.beginPath(); sourceContext.arc(brushHover[0]*width,brushHover[1]*height,radius,0,Math.PI*2);
+        sourceContext.lineWidth=3; sourceContext.strokeStyle='#000a'; sourceContext.stroke();
+        sourceContext.lineWidth=1.5; sourceContext.strokeStyle=brushMode==='erase' ? '#fca5a5' : '#93c5fd'; sourceContext.stroke();
+      }
+    }
     function updateSourceCanvas() {
       const image=$('reference-preview');
       updateWorkflowPreview();
       if ($('source-editor').hidden) return;
       const scale=Math.min(1,900/Math.max(image.naturalWidth,image.naturalHeight));
-      sourceCanvas.width=Math.round(image.naturalWidth*scale); sourceCanvas.height=Math.round(image.naturalHeight*scale);
-      sourceContext.drawImage(image,0,0,sourceCanvas.width,sourceCanvas.height);
+      for (const canvas of [sourceCanvas,maskLayer,maskTint]) { canvas.width=Math.round(image.naturalWidth*scale); canvas.height=Math.round(image.naturalHeight*scale); }
+      drawStrokes(maskContext,maskStrokes,maskLayer.width,maskLayer.height);
       const selecting=$('edit-area').value==='selected' && maskSupported();
       sourceCanvas.style.cursor=maskSupported() ? 'crosshair' : 'default';
-      $('clear-selection').hidden=!selecting;
-      $('selection-info').textContent=selecting ? selectionRect ? 'Highlighted area will be edited; everything outside it is preserved at the output resolution.' : 'Drag over the source photo to select the area to edit.' : maskSupported() ? 'Whole-photo edit. Drag on the photo to select an area instead.' : 'Whole-photo edit. Only requested changes are prompted; unchanged pixels are not guaranteed without an area mask.';
-      if (selectionRect && selecting) {
-        const [x,y,w,h]=selectionRect;
-        sourceContext.fillStyle='rgba(210,240,150,.28)'; sourceContext.fillRect(x*sourceCanvas.width,y*sourceCanvas.height,w*sourceCanvas.width,h*sourceCanvas.height);
-        sourceContext.strokeStyle='#93c5fd'; sourceContext.lineWidth=2; sourceContext.strokeRect(x*sourceCanvas.width,y*sourceCanvas.height,w*sourceCanvas.width,h*sourceCanvas.height);
-      }
+      $('brush-tools').hidden=!maskSupported();
+      $('clear-selection').hidden=!selecting; $('clear-selection').disabled=!maskStrokes.length && !savedMaskPath;
+      $('undo-stroke').disabled=!maskStrokes.length;
+      $('selection-info').textContent=selecting ? maskPainted() ? 'Painted areas will be edited; everything outside them is preserved at the output resolution. Paint more to add areas, or erase to trim.' : savedMaskPath ? 'The saved edit mask will be reused. Paint to start a new selection.' : 'Paint over the parts of the source photo you want to change. You can paint several separate areas.' : maskSupported() ? 'Whole-photo edit. Paint on the photo to select areas instead.' : 'Whole-photo edit. Only requested changes are prompted; unchanged pixels are not guaranteed without an area mask.';
+      drawSourceCanvas();
     }
+    function maskChanged() { maskUpload=null; savedMaskPath=null; updateSourceCanvas(); updateButton(); }
+    function setBrushMode(mode) { brushMode=mode; $('brush-paint').setAttribute('aria-pressed',String(mode==='paint')); $('brush-erase').setAttribute('aria-pressed',String(mode==='erase')); drawSourceCanvas(); }
+    function undoStroke() { if (!maskStrokes.length || generating) return; maskStrokes.pop(); maskChanged(); }
     $('reference-preview').addEventListener('load',updateSourceCanvas);
-    $('edit-area').addEventListener('change',()=>{ selectionRect=null; maskUpload=null; savedMaskPath=null; updateSourceCanvas(); updateButton(); });
-    $('clear-selection').addEventListener('click',()=>{selectionRect=null;maskUpload=null;savedMaskPath=null;updateSourceCanvas();updateButton();});
+    $('edit-area').addEventListener('change',()=>{ maskStrokes=[]; maskChanged(); });
+    $('clear-selection').addEventListener('click',()=>{ maskStrokes=[]; maskChanged(); });
+    $('undo-stroke').addEventListener('click',undoStroke);
+    $('brush-paint').addEventListener('click',()=>setBrushMode('paint'));
+    $('brush-erase').addEventListener('click',()=>setBrushMode('erase'));
+    $('brush-size').addEventListener('input',()=>{ brushHover=brushHover || [.5,.5]; drawSourceCanvas(); });
+    $('brush-size').addEventListener('change',()=>{ if (!sourceCanvas.matches(':hover')) { brushHover=null; drawSourceCanvas(); } });
+    document.addEventListener('keydown',event=>{
+      if (workflow!=='edit' || !maskSupported() || $('source-editor').hidden || event.target.closest?.('input,textarea,select,[contenteditable]')) return;
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase()==='z' && maskStrokes.length) { event.preventDefault(); undoStroke(); }
+      else if (!event.metaKey && !event.ctrlKey && !event.altKey && (event.key==='[' || event.key===']')) { $('brush-size').value=Number($('brush-size').value)+(event.key===']' ? 1 : -1); drawSourceCanvas(); }
+    });
     function canvasPosition(event) { const bounds=sourceCanvas.getBoundingClientRect(); return [Math.max(0,Math.min(1,(event.clientX-bounds.left)/bounds.width)),Math.max(0,Math.min(1,(event.clientY-bounds.top)/bounds.height))]; }
-    sourceCanvas.addEventListener('pointerdown',event=>{ if (generating || workflow!=='edit' || !maskSupported()) return; selectionStart=canvasPosition(event); sourceCanvas.setPointerCapture(event.pointerId); });
-    sourceCanvas.addEventListener('pointermove',event=>{if (!selectionStart) return; const [x,y]=canvasPosition(event),[a,b]=selectionStart; if (Math.abs(x-a)<.005 && Math.abs(y-b)<.005 && !selectionRect) return; $('edit-area').value='selected'; selectionRect=[Math.min(x,a),Math.min(y,b),Math.abs(x-a),Math.abs(y-b)];maskUpload=null;savedMaskPath=null;updateSourceCanvas();});
-    sourceCanvas.addEventListener('pointerup',()=>{selectionStart=null;if (selectionRect && (selectionRect[2]<.005 || selectionRect[3]<.005)) selectionRect=null;updateSourceCanvas();updateButton();});
-    sourceCanvas.addEventListener('pointercancel',()=>{selectionStart=null;});
+    sourceCanvas.addEventListener('pointerdown',event=>{
+      if (generating || workflow!=='edit' || !maskSupported() || event.button>0) return;
+      event.preventDefault(); sourceCanvas.setPointerCapture(event.pointerId);
+      if ($('edit-area').value!=='selected') { $('edit-area').value='selected'; maskStrokes=[]; }
+      activeStroke={mode:brushMode,size:brushSize(),points:[canvasPosition(event)]}; maskStrokes.push(activeStroke); brushHover=activeStroke.points[0];
+      maskChanged();
+    });
+    sourceCanvas.addEventListener('pointermove',event=>{
+      if (workflow!=='edit' || !maskSupported()) return;
+      brushHover=canvasPosition(event);
+      if (activeStroke) {
+        const previous=activeStroke.points.at(-1);
+        if (Math.hypot(brushHover[0]-previous[0],brushHover[1]-previous[1])<.002) return;
+        activeStroke.points.push(brushHover);
+        drawStrokes(maskContext,[{...activeStroke,points:[previous,brushHover]}],maskLayer.width,maskLayer.height);
+      }
+      drawSourceCanvas();
+    });
+    function endStroke() { if (!activeStroke) return; activeStroke=null; updateSourceCanvas(); updateButton(); }
+    sourceCanvas.addEventListener('pointerup',endStroke);
+    sourceCanvas.addEventListener('pointercancel',endStroke);
+    sourceCanvas.addEventListener('pointerleave',()=>{ if (activeStroke) return; brushHover=null; drawSourceCanvas(); });
     async function uploadSelection() {
       if (maskUpload) return maskUpload.file_path;
       if (savedMaskPath) return savedMaskPath;
-      if (!selectionRect || !referenceDimensions) throw new Error('Select an area on the source photo first.');
+      if (!maskPainted() || !referenceDimensions) throw new Error('Paint over the area of the source photo you want to edit first.');
       const canvas=document.createElement('canvas'); [canvas.width,canvas.height]=referenceDimensions;
-      const context=canvas.getContext('2d'); context.fillStyle='#000';context.fillRect(0,0,canvas.width,canvas.height);context.fillStyle='#fff';
-      const [x,y,w,h]=selectionRect; context.fillRect(Math.floor(x*canvas.width),Math.floor(y*canvas.height),Math.ceil(w*canvas.width),Math.ceil(h*canvas.height));
+      const context=canvas.getContext('2d'); drawStrokes(context,maskStrokes,canvas.width,canvas.height);
+      context.globalCompositeOperation='destination-over'; context.fillStyle='#000'; context.fillRect(0,0,canvas.width,canvas.height);
       const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')); if (!blob) throw new Error('Could not prepare the selection mask.');
       const response=await fetch('/v1/reference-images',{method:'POST',headers:{'Content-Type':'image/png'},body:blob});
       const result=await response.json();if (!response.ok) throw new Error(result.detail || 'Could not save the selection.');maskUpload=result;return result.file_path;
@@ -334,7 +398,7 @@
     function updateButton() {
       updateWorkflowAvailability();
       const selectedArea=workflow==='edit' && $('edit-area').value==='selected';
-      $('generate').disabled=generating || previewingExpansion || !ready || !chosenProfile() || !editingReady() || (selectedArea && !selectionRect && !savedMaskPath);
+      $('generate').disabled=generating || previewingExpansion || !ready || !chosenProfile() || !editingReady() || (selectedArea && !maskPainted() && !savedMaskPath);
       if (!generating) { const count=Number($('image-count').value); $('button-text').textContent=$('generate-immediately').checked ? (workflow==='edit' ? count===1 ? 'Edit photo' : `Create ${count} edit options` : count===1 ? 'Generate image' : `Generate ${count} images`) : count===1 ? 'Add to queue' : `Queue ${count} images`; }
     }
     function varyingCompositions() { return workflow !== 'edit' && Number($('image-count').value)>1 && expansionEnabled && $('expand-prompt').checked && $('vary-prompt').checked; }
@@ -378,7 +442,7 @@
     function clearPhoto() {
       if (workflow==='edit' && displayedBatch?.request.task==='edit') displayedBatch=null;
       $('reference-size').value='auto';
-      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; selectionRect=null; maskUpload=null; savedMaskPath=null; $('source-editor').hidden=true;
+      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; maskStrokes=[]; maskUpload=null; savedMaskPath=null; $('source-editor').hidden=true;
       if (referencePreviewURL) URL.revokeObjectURL(referencePreviewURL);
       referencePreviewURL = null; $('reference-preview').removeAttribute('src');
       $('reference-card').hidden = true; $('choose-photo').textContent = '＋ Choose photo';
@@ -491,7 +555,7 @@
       if (referencePath) { payload.reference_image = referencePath; if (referenceMode !== 'edit') payload.image_strength = imageStrength; }
       generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
-      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area']) $(id).disabled = true;
+      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-erase','brush-size']) $(id).disabled = true;
       $('announcement').textContent = 'Saving your image request…';
       try {
         if (selectedFile) {
@@ -522,7 +586,7 @@
         $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
       } finally {
-        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area']) $(id).disabled = false;
+        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-erase','brush-size']) $(id).disabled = false;
         generating = false; updateButton(); await checkHealth();
       }
     });
@@ -744,7 +808,7 @@
           if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
           if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
           if(targetVersion!==workflowVersion)return;
-        if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
+        if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; paint or clear the selection to start a new one.'); }
           warnings.push('This generation used a reference file; it must still exist at the saved path.');
         }
         if(mode==='settings' && $('reference').value.trim() && metadata.requested_size && metadata.requested_size!=='auto')selectLongEdge(Math.max(...metadata.requested_size.split('x').map(Number)));
