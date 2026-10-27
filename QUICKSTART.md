@@ -139,7 +139,7 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
 6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
 
-The Edit preview uses a single box: upload a photo to show it centered, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.
+The Edit preview uses a single box: upload a photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.
 
 The **Generate** view continues to offer Klein and Qwen for creating images from text, without requiring a source photo. Selected areas also work through both APIs: pass `mask_image` with `task:"edit"` in the generator's flat request, or inside the standalone queue's `request` envelope with `model:"qwen-image-2.1-turbo"`. White mask pixels edit; black pixels preserve. See the [photo-editing examples](docs/api.md#selected-area-qwen-edits).
 
