@@ -9,7 +9,7 @@ from enhancer_profile import REPOSITORY, REVISION, check_assets
 
 import hashlib
 import re
-from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, guidance_for, public_guidance, style_context, style_anchor, example_for
+from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, GENERATION_JSON_INSTRUCTION, GENERATION_JSON_REPAIR, guidance_for, public_guidance, style_context, style_anchor, example_for
 from prompt_policy import EDIT_POLICY_VERSION, EDIT_SYSTEM_PROMPT, EDIT_EXAMPLE_USER, EDIT_EXAMPLE_ASSISTANT, edit_guidance_for
 from model_profiles import PROFILES
 from photo_workflows import supported_tasks, edit_prompt
@@ -18,6 +18,21 @@ from photo_workflows import supported_tasks, edit_prompt
 
 class ExpansionError(Exception):
     http_status = 422
+
+
+class GenerationFormatError(ExpansionError):
+    """Recoverable output-shape error; never contains raw model/user text."""
+    def __init__(self,reason,message):
+        self.reason=reason
+        super().__init__(message)
+
+
+def _unique_fields(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result:raise ValueError('Duplicate JSON fields')
+        result[key]=value
+    return result
 
 
 def expansion_capability(enabled, image_model=None):
@@ -106,23 +121,26 @@ def validate_variations(original, candidates, count):
 
 def parse_details(text, original):
     text = text.strip()
-    fenced = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```',text,re.S)
+    fenced = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```',text,re.S|re.I)
     if fenced: text = fenced.group(1)
     try:
-        details = json.loads(text)
-        if not isinstance(details,dict) or set(details) != {'style_details','additional_composition'}:
-            raise ValueError('Wrong fields')
-        for key,value in details.items():
-            if not isinstance(value,str): raise ValueError('Detail fields must be strings')
-            value = value.strip()
-            # Remove only an exact input echo, never any of the authoritative original.
-            if value.startswith(original): value = value[len(original):].strip()
-            if '<think>' in value or '</think>' in value: raise ValueError('Reasoning in output')
-            details[key] = value
-        if not details['style_details'] and not details['additional_composition']: raise ValueError('No added detail')
-        return {key:details[key] for key in ('style_details','additional_composition')}
+        details = json.loads(text,object_pairs_hook=_unique_fields)
     except (ValueError,TypeError) as error:
-        raise ExpansionError('Prompt expansion did not return usable structured visual details; preview again or disable expansion.') from error
+        raise GenerationFormatError('invalid_json','The local prompt LLM returned invalid JSON.') from error
+    if not isinstance(details,dict) or set(details) != {'style_details','additional_composition'}:
+        raise GenerationFormatError('invalid_fields','The local prompt LLM did not return the required style_details/additional_composition fields.')
+    for key,value in details.items():
+        if not isinstance(value,str):
+            raise GenerationFormatError('invalid_values','The local prompt LLM returned non-text visual detail fields.')
+        value=value.strip()
+        # Remove only an exact input echo, never any of the authoritative original.
+        if value.startswith(original):value=value[len(original):].strip()
+        if '<think>' in value or '</think>' in value:
+            raise GenerationFormatError('invalid_values','The local prompt LLM included reasoning in its detail fields.')
+        details[key]=value
+    if not details['style_details'] and not details['additional_composition']:
+        raise GenerationFormatError('empty_details','The local prompt LLM returned no new visual detail.')
+    return {key:details[key] for key in ('style_details','additional_composition')}
 
 
 def check_added_details(original, addition):
@@ -183,19 +201,30 @@ def run_worker(request):
             if candidates:
                 direction+='Earlier compositions to differ from: '+json.dumps([item['details']['additional_composition'] for item in candidates])+'\n'
         messages.append({'role': 'user', 'content': direction+f'Expand this image description with at most {allowance} NEW words. Return the two-field JSON with new rendering detail:\n\n{original}'})
-        formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
-        text, final = '', None
-        if SAMPLING['temperature']:
-            import mlx.core as mx
-            mx.random.seed(SAMPLING['seed'])
-        for response in stream_generate(model, tokenizer, prompt=formatted, max_tokens=320,
-              sampler=make_sampler(temp=SAMPLING['temperature'],top_p=SAMPLING['top_p'],top_k=SAMPLING['top_k']),
-              logits_processors=make_logits_processors(presence_penalty=SAMPLING['presence_penalty'],presence_context_size=512)):
-            text += response.text
-            final = response
-        if final is None or final.finish_reason == 'length':
-            raise ExpansionError('Expansion reached its output limit; retry or disable expansion. No truncated text was used.')
-        details = parse_details(text, original)
+        retry_reason=None;peak_mlx_memory=0.0
+        for attempt in range(2):
+            formatted=tokenizer.apply_chat_template(messages,tokenize=False,add_generation_prompt=True,enable_thinking=False)
+            text,final='',None
+            if SAMPLING['temperature']:
+                import mlx.core as mx
+                mx.random.seed(SAMPLING['seed'])
+            for response in stream_generate(model,tokenizer,prompt=formatted,max_tokens=320,
+                  sampler=make_sampler(temp=SAMPLING['temperature'],top_p=SAMPLING['top_p'],top_k=SAMPLING['top_k']),
+                  logits_processors=make_logits_processors(presence_penalty=SAMPLING['presence_penalty'],presence_context_size=512)):
+                text+=response.text
+                final=response
+            if final is None or final.finish_reason=='length':
+                raise ExpansionError('Expansion reached its output limit; retry or disable expansion. No truncated text was used.')
+            peak_mlx_memory=max(peak_mlx_memory,final.peak_memory)
+            try:
+                details=parse_details(text,original)
+                break
+            except GenerationFormatError as error:
+                if attempt:
+                    raise ExpansionError('Prompt expansion could not produce usable visual details after one formatting retry. '+str(error)+' Preview again or disable Prompt expansion; no image was rendered.') from error
+                retry_reason=error.reason
+                messages.extend([{'role':'assistant','content':text},
+                                 {'role':'user','content':GENERATION_JSON_REPAIR.format(reason=error.reason)+GENERATION_JSON_INSTRUCTION}])
         anchor = style_anchor(original)
         if not anchor:
             details['style_details'] = ''
@@ -209,10 +238,11 @@ def run_worker(request):
                 'original_image_tokens': original_tokens, 'image_token_limit': 512 if original_tokens is not None else None}
         validate_expansion(original, data)
         data.update(style_anchor=anchor,details=details,image_model=request['image_model'],
-                    guidance_profile=guidance['id'],guidance_version=guidance['version'],sampling=dict(SAMPLING))
-        data['policy_sha256'] = hashlib.sha256(json.dumps([system, guidance, style_context(original), example, direction],sort_keys=True).encode()).hexdigest()
+                    guidance_profile=guidance['id'],guidance_version=guidance['version'],sampling=dict(SAMPLING),
+                    structured_output_attempts=attempt+1,structured_output_retry_reason=retry_reason)
+        data['policy_sha256'] = hashlib.sha256(json.dumps([messages,guidance],sort_keys=True).encode()).hexdigest()
         import resource
-        data['peak_mlx_memory_gb'] = round(final.peak_memory, 3)
+        data['peak_mlx_memory_gb'] = round(peak_mlx_memory, 3)
         data['peak_process_rss_gb'] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1e9 if sys.platform == 'darwin' else 1e6), 3)
         data['expanded_image_tokens'] = image_token_count(data['expanded_prompt'], request)
         if data['expanded_image_tokens'] is not None and data['expanded_image_tokens'] > 512:

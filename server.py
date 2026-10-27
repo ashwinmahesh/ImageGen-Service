@@ -337,6 +337,8 @@ class PromptExpansion(BaseModel):
     details: dict[str,str] | None = None
     sampling: dict | None = None
     policy_sha256: str | None = None
+    structured_output_attempts: int | None = Field(default=None,ge=1,le=2,description="Generation JSON attempts: one normally, two after a formatting retry. Null for older records or edit refinement.")
+    structured_output_retry_reason: Literal['invalid_json','invalid_fields','invalid_values','empty_details'] | None = Field(default=None,description="Reason for the one generation-format retry, without raw LLM output.")
     variation_index: int | None = None
     variation_count: int | None = None
     variation_goal: str | None = None

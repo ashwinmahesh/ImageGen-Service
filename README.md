@@ -20,7 +20,7 @@ A local **Qwen3.5-2B model with 4-bit weights** can expand a short description w
 
 The expansion is guided by the requested medium and aesthetic. A watercolor prompt can gain translucent washes and soft edge variation; a cel-animation prompt can gain clean ink contours, flat color shapes and limited shadow tones. The goal is to develop the look you asked for through visible rendering choices.
 
-Guidance also follows the selected image model. For Z-Image, expansions are checked against its actual tokenizer budget before rendering. You can preview the expanded description, edit and adopt it, or turn expansion off. Original and expanded prompts are saved with the image so you can see what was used. The expander reads text only; it does not inspect reference photos.
+Guidance also follows the selected image model. For Z-Image, expansions are checked against its actual tokenizer budget before rendering. You can preview the expanded description, edit and adopt it, or turn expansion off. Original and expanded prompts are saved with the image so you can see what was used. The expander reads text only; it does not inspect reference photos. An unusable structured response gets one automatic formatting retry. If that still fails, the request reports the reason before image rendering.
 
 ### Explore multiple options
 

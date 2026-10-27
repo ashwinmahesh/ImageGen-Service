@@ -99,7 +99,7 @@ Each setup downloads only its selected pre-quantized checkpoint and the shared p
 1. Open **[http://localhost:5742](http://localhost:5742/)**. Grey question-mark icons beside settings explain them on hover, keyboard focus or tap; press Escape or click elsewhere to dismiss the help.
 2. Enter a prompt, such as **A watercolor fox in a snowy forest, soft morning light**.
 3. For a first image, choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the default steps alone.
-4. Keep **Prompt expansion** switched on if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice.
+4. Keep **Prompt expansion** switched on if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice. Malformed LLM responses get one automatic formatting retry; if it still fails, preview again or turn Prompt expansion off to use your original description.
 5. Click **Generate image**. **Generate immediately** is switched on by default: your request gets the next free slot ahead of ordinary queued work, after the active batch finishes.
 6. View or download the result. With multiple options, select a thumbnail to choose the image you want.
 
@@ -248,7 +248,7 @@ curl --fail-with-body http://localhost:55302/v1/jobs \
   }'
 ```
 
-On this standalone API, omitted `model` **always defaults to Z-Image Turbo**, regardless of which generator you last ran. Ordinary work joins the end of the queue; you can reorder it later. The queue accepts settings for later validation; a saved job may still fail when the generator processes it.
+On this standalone API, omitted `model` uses the **shared saved default**, just like the generator API. A fresh setup prefers ready Z-Image Turbo, otherwise the first ready model; the resolved model is saved with the job. Ordinary work joins the end of the queue; you can reorder it later. The queue accepts settings for later validation; a saved job may still fail when the generator processes it.
 
 List or inspect queued work with:
 

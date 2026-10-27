@@ -5,7 +5,8 @@ import sqlite3
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch,Mock
+from contextlib import contextmanager
 import prompt_expander
 import server
 import launch
@@ -45,6 +46,15 @@ class ExpansionAPI(unittest.TestCase):
             self.assertEqual(metadata['effective_prompt'],expansion['expanded_prompt'])
             self.assertEqual(self.store.get(metadata['job_id'])['prompt_expansion'],expansion)
             expander.assert_called_once()
+
+    def test_preview_exposes_safe_format_retry_provenance_without_creating_a_job(self):
+        def repaired(prompt,**kwargs):return {**fake_expand(prompt),'structured_output_attempts':2,'structured_output_retry_reason':'invalid_json'}
+        with patch.object(server.app.state,'llm_enabled',True),patch.object(server,'GPU_LOCK_FILE',self.root/'gpu.lock'),patch.object(prompt_expander,'expand',side_effect=repaired):
+            response=self.client.post('/v1/prompts/expand',json={'prompt':'A fox'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()['structured_output_attempts'],2)
+        self.assertEqual(response.json()['structured_output_retry_reason'],'invalid_json')
+        self.assertEqual(self.store.listing()[1],0)
 
     def test_failed_expansion_does_not_render(self):
         with patch.object(server.app.state,'llm_enabled',True),patch.object(prompt_expander,'expand',side_effect=prompt_expander.ExpansionError('Too long; not compressed')):
@@ -125,6 +135,67 @@ class ExpansionLauncher(unittest.TestCase):
 
 
 class ExpansionContract(unittest.TestCase):
+    @contextmanager
+    def simulated_llm(self,outputs):
+        messages=[];responses=iter(outputs)
+        tokenizer=types.SimpleNamespace(apply_chat_template=lambda value,**kwargs:messages.append(json.loads(json.dumps(value))) or 'formatted')
+        fake=types.ModuleType('mlx_lm');fake.load=Mock(return_value=('model',tokenizer))
+        def generate(*args,**kwargs):
+            text=next(responses)
+            return iter([types.SimpleNamespace(text=text,finish_reason='stop',peak_memory=1.6)])
+        fake.stream_generate=Mock(side_effect=generate)
+        sampling=types.ModuleType('mlx_lm.sample_utils');sampling.make_sampler=lambda **kwargs:'greedy';sampling.make_logits_processors=lambda **kwargs:[]
+        with patch.dict(sys.modules,{'mlx_lm':fake,'mlx_lm.sample_utils':sampling}),patch.object(prompt_expander,'image_token_count',return_value=40):
+            yield fake,messages
+
+    def test_malformed_generation_is_retried_once_without_reloading_or_rewriting_original(self):
+        original='A fox in flat cel animation. No text.'
+        valid=json.dumps({'style_details':'Clean ink contours enclose flat two-tone colors.','additional_composition':'Soft evening light separates the existing shapes.'})
+        for invalid in ['plain prose', '{"style_details":"Flat colors."}',
+                        '{"style_details":[],"additional_composition":""}',
+                        '{"style_details":"","additional_composition":""}']:
+            with self.subTest(invalid=invalid),self.simulated_llm([invalid,valid]) as (fake,messages):
+                data=prompt_expander.run_worker({'prompt':original,'weights':'unused','image_weights':'unused','image_model':'z-image-turbo'})
+                fake.load.assert_called_once();self.assertEqual(fake.stream_generate.call_count,2)
+                self.assertEqual(data['structured_output_attempts'],2)
+                self.assertIn(data['structured_output_retry_reason'],['invalid_json','invalid_fields','invalid_values','empty_details'])
+                self.assertEqual(data['original_prompt'],original);self.assertTrue(data['expanded_prompt'].startswith(original+'\n'))
+                self.assertEqual(data['expanded_prompt'].count(original),1)
+                self.assertTrue(any(original in item['content'] for item in messages[1] if item['role']=='user'))
+                self.assertIn('style_details',messages[1][-1]['content']);self.assertIn('same new-word allowance',messages[1][-1]['content'])
+                self.assertEqual([call.kwargs['max_tokens'] for call in fake.stream_generate.call_args_list],[320,320])
+
+    def test_repeated_bad_format_has_a_bounded_actionable_private_error(self):
+        with self.simulated_llm(['private raw response','private raw response']) as (fake,_):
+            with self.assertRaisesRegex(prompt_expander.ExpansionError,'one formatting retry') as result:
+                prompt_expander.run_worker({'prompt':'A fox','weights':'unused','image_model':'z-image-turbo'})
+        self.assertEqual(fake.stream_generate.call_count,2)
+        self.assertIn('invalid JSON',str(result.exception));self.assertNotIn('private raw response',str(result.exception))
+
+    def test_format_retry_applies_per_candidate_and_keeps_prior_compositions(self):
+        wide='A wide view keeps the fox small against the snowy forest.'
+        close='A close view lets the fox fill most of the frame.'
+        valid=lambda composition:json.dumps({'style_details':'Translucent washes have soft pigment edges.','additional_composition':composition})
+        with self.simulated_llm(['{}',valid(wide),valid(close)]) as (fake,messages):
+            data=prompt_expander.run_worker({'prompt':'A watercolor fox in a snowy forest.','weights':'unused','image_model':'z-image-turbo','variation_count':2})
+        fake.load.assert_called_once();self.assertEqual(fake.stream_generate.call_count,3)
+        self.assertEqual([item['structured_output_attempts'] for item in data['candidates']],[2,1])
+        self.assertEqual([item['variation_index'] for item in data['candidates']],[1,2]);self.assertIn(wide,messages[2][-1]['content'])
+
+    def test_fidelity_errors_do_not_trigger_format_repair(self):
+        invalid=json.dumps({'style_details':'Warm light illuminates their faces.','additional_composition':''})
+        with self.simulated_llm([invalid]) as (fake,_):
+            with self.assertRaisesRegex(prompt_expander.ExpansionError,'facial detail'):
+                prompt_expander.run_worker({'prompt':'Two adults seen strictly from behind, flat cel cartoon.','weights':'unused','image_model':'z-image-turbo'})
+        self.assertEqual(fake.stream_generate.call_count,1)
+
+    def test_format_parser_accepts_complete_json_fences_and_rejects_ambiguous_fields(self):
+        valid='{"style_details":"Flat color blocks.","additional_composition":""}'
+        self.assertEqual(prompt_expander.parse_details('```JSON\n'+valid+'\n```','A fox')['style_details'],'Flat color blocks.')
+        duplicate='{"style_details":"First.","style_details":"Second.","additional_composition":""}'
+        with self.assertRaises(prompt_expander.GenerationFormatError) as result:prompt_expander.parse_details(duplicate,'A fox')
+        self.assertEqual(result.exception.reason,'invalid_json')
+
     def test_varied_worker_reuses_one_loaded_llm_and_conditions_each_composition(self):
         original='Two adult women seen strictly from behind, a flat cel cartoon. No text.'
         messages=[]
