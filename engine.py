@@ -1,5 +1,6 @@
 """Keep one MLX model resident; reload clean weights when adapter selection changes."""
 import gc
+from model_lifecycle import operation
 from config import MODEL_DIR
 from lora_catalog import effective_prompt
 
@@ -30,12 +31,19 @@ class ZImageEngine:
         if self._model is not None and self._selection_key == key:
             return
         # Release the old model before creating the replacement on this 24 GB Mac.
-        self._model = None
-        self._selection_key = None
-        gc.collect()
-        self._clear_cache()
-        self._model = self._factory(selection)
-        self._selection_key = key
+        previous=self._model is not None
+        if previous:
+            with operation('unload','weights','adapter_change'):
+                self._model = None
+                self._selection_key = None
+                gc.collect()
+                self._clear_cache()
+        else:
+            gc.collect()
+            self._clear_cache()
+        with operation('load','weights','adapter_change' if previous else 'initial_load'):
+            self._model = self._factory(selection)
+            self._selection_key = key
 
     def generate_image(self, *, lora=None, **settings):
         self._ensure_model(lora)

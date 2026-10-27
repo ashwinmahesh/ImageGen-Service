@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Observability · Image Studio</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2393c5fd%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2310243c%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%2310243c%22%2F%3E%3C%2Fsvg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2313b2ba%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23082c30%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%23082c30%22%2F%3E%3C%2Fsvg%3E">
   <link rel="stylesheet" href="/assets/observability.css"><link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script><script src="/assets/observability.js" defer></script>
   <link rel="stylesheet" href="/assets/shell.css">
 </head>
 <body>
   <!-- IMAGEGEN_HEADER -->
-  <main>
-    <div class="intro"><div><p class="eyebrow">On this Mac</p><h1>See what generation takes.</h1><p>CPU, memory and GPU history, across models and individual jobs.</p></div><span class="connection" id="connection" role="status">Connecting…</span></div>
+  <main class="studio-main">
+    <div class="intro"><div><h1>See what generation takes.</h1><p>CPU, memory, GPU and model lifecycle history, across models and individual jobs.</p></div><span class="connection" id="connection" role="status">Connecting…</span></div>
     <div class="toolbar">
       <div class="control"><label for="time-window">Time window</label><select id="time-window"><option value="5m">5 minutes</option><option value="30m">30 minutes</option><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option><option value="3d">3 days</option><option value="7d">7 days</option></select></div>
       <div class="control"><label for="model-filter">Model</label><select id="model-filter"><option value="">All models</option></select></div>
@@ -32,13 +32,24 @@
       <article class="chart-card memory"><div class="chart-heading"><h2>Memory</h2><button class="help-button" type="button" aria-label="Help with memory measurements" data-help="Service RAM is the sum of resident memory (RSS) across the generator and its children; shared pages may be counted twice. System RAM is total minus available memory. GPU driver memory shares the Mac’s unified RAM, so these lines overlap and must not be added together. Peaks are sampled estimates."><span aria-hidden="true">?</span></button></div><div class="legend"><span class="service">Service RSS</span><span class="system">System RAM used</span><span class="gpu">GPU driver memory in use</span><span class="peak">Dashed: sampled peak</span></div><div class="chart" id="memory-chart"></div></article>
     </section>
     <p class="footnote" id="coverage">History is recorded while the generator runs. Stopped periods are gaps.</p><p class="footnote" id="sources"></p>
+    <section class="lifecycle-panel" id="lifecycle-panel" aria-labelledby="lifecycle-title">
+      <div class="lifecycle-heading"><div><div class="chart-heading"><h2 id="lifecycle-title">Model load &amp; unload</h2><button class="help-button" type="button" aria-label="Help with model lifecycle timings" data-help="Discrete boundary timers use a monotonic clock. Runtime start measures child startup/imports; runtime stop measures confirmed process-group exit and cleanup. Weights measures resident Z-Image loading or adapter replacement. CLI backends load weights per image and do not expose separate weight timings. Scopes can overlap: do not add them. Failed and interrupted operations are excluded from average/maximum durations."><span aria-hidden="true">?</span></button></div><p class="footnote">Individual events and successful-operation timings, independent of the resource graph window.</p></div>
+        <div class="lifecycle-filters"><div class="control"><label for="lifecycle-window">Event history</label><select id="lifecycle-window"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d" selected>Last 30 days</option><option value="90d">Last 90 days</option><option value="all">All recorded history</option></select></div><div class="control"><label for="lifecycle-action">Operation</label><select id="lifecycle-action"><option value="">Load &amp; unload</option><option value="load">Load only</option><option value="unload">Unload only</option></select></div></div>
+      </div>
+      <p class="footnote" id="lifecycle-context"></p><p class="notice" id="lifecycle-error" role="alert" hidden></p>
+      <div class="lifecycle-summary" id="lifecycle-summary"></div>
+      <div class="lifecycle-timeline" id="lifecycle-timeline"></div>
+      <div class="table-scroll"><table><thead><tr><th>Started</th><th>Model</th><th>Operation</th><th>Duration</th><th>Status / reason</th><th>Triggered by</th></tr></thead><tbody id="lifecycle-events"></tbody></table></div>
+      <p class="empty" id="no-lifecycle" hidden>No recorded events match this selection. Events are captured after upgrading; warm runtime reuse does not add another load.</p>
+      <nav class="pagination" aria-label="Model lifecycle pages"><button class="button" id="lifecycle-previous" disabled>← Previous</button><span id="lifecycle-page"></span><button class="button" id="lifecycle-next" disabled>Next →</button></nav>
+    </section>
     <section class="jobs-panel"><div class="jobs-heading"><div><h2 id="jobs-title">Measured jobs</h2><p>Open a job for its full execution timeline or a shorter window. Retries appear as separate attempts.</p></div><span id="job-count"></span></div>
       <div class="table-scroll"><table><thead><tr><th>Started</th><th>Model</th><th>Job / attempt</th><th>Status</th><th>CPU mean</th><th>RAM peak</th><th>GPU peak</th><th><span class="sr-only">Details</span></th></tr></thead><tbody id="jobs"></tbody></table></div>
       <p class="empty" id="no-jobs" hidden>No measured jobs yet. New executions will appear here; older jobs cannot be measured retroactively.</p>
       <nav class="pagination" aria-label="Measured job pages"><button class="button" id="previous" disabled>← Previous</button><span id="page-label"></span><button class="button" id="next" disabled>Next →</button></nav>
     </section>
   </main>
-  <footer>Local history · 1s during jobs / 5s idle · 8 days of raw samples · completed job summaries retained</footer>
+  <footer class="studio-footer">Local history · 1s during jobs / 5s idle · 8 days of raw samples · job summaries and model lifecycle events retained</footer>
 <!-- IMAGEGEN_QUEUE -->
   <script src="/assets/shell.js"></script>
 </body>

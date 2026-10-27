@@ -13,6 +13,7 @@ def main():
     from job_logs import capture_runtime,event
     from job_queue import JobStore
     from queue_storage import queue_database
+    from model_lifecycle import configure
     original_load=server.load_model
     def load():
         previous=server.job_worker.stage
@@ -27,12 +28,19 @@ def main():
             self.value=value;event('Stage: '+value);send(channel,{'event':'stage','stage':value})
     server.job_worker=Stage()
     lifetime_lease=None
+    ready_sent=False
     while True:
         try:message,fds=receive(channel)
         except EOFError:break
         try:
             if message['action']=='stop':break
             if message['action']!='execute':raise ValueError('Unknown model command')
+            # Existing running parents may spawn this updated child after a pull.
+            # Emit new private events only when the parent advertises support.
+            enabled=message.get('lifecycle_events',False)
+            configure((lambda event:send(channel,{'event':'lifecycle','data':event})) if enabled else (lambda event:None))
+            if enabled and not ready_sent:
+                send(channel,{'event':'ready'});ready_sent=True
             server.app.state.llm_enabled=message['llm_enabled'];server.app.state.loras_enabled=message['loras_enabled']
             job=message['job'];job['_inherited_fds']=tuple(fds)
             # Warm weights must retain the global consumer lease even while idle.
