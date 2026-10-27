@@ -868,13 +868,36 @@ function queueLabel(control,icon,label){
     async function importSavedImage() {
       const params = new URLSearchParams(location.search), id = params.get('generation'), mode = params.get('mode');
       if (!id) return;
-      if (!/^[0-9a-f]{32}$/.test(id) || !['reference', 'settings'].includes(mode)) { showError('This gallery link is invalid. Open the image from the gallery again.'); return; }
+      if (!/^[0-9a-f]{32}$/.test(id) || !['edit','reference', 'settings'].includes(mode)) { showError('This gallery link is invalid. Open the image from the gallery again.'); return; }
       const version=workflowVersion;let targetVersion=version;
       try {
         const response = await fetch('/v1/images/' + id, {cache:'no-store', signal:AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error('This saved image is no longer available. Check its storage folder.');
         const item = await response.json(), metadata = item.metadata || {}, warnings = [];
-        if(version!==workflowVersion)return;
+        if(version!==workflowVersion || generating || previewingExpansion)return;
+        const url = new URL(item.url, location.origin);
+        if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
+        if(mode==='edit'){
+          const editors=modelCatalog.filter(profile=>profile.tasks?.includes('edit'));
+          if(!editors.length)throw new Error('No setup model supports photo editing. Run make setup for FLUX.2 Klein or Qwen-Image 2.1 Turbo, then reopen this photo from the gallery.');
+          const editor=editors.find(profile=>profile.id===item.model) || editors.find(profile=>profile.id===defaultModel) || (editors.length===1 ? editors[0] : null);
+          setWorkflow('edit');targetVersion=workflowVersion;
+          watchingJobs.edit=null;workflowStates.edit.pendingJob=null;workflowStates.edit.progressText='';persistWatchers();
+          populateModels(editor?.id || null,!editor);await loadLoRAs();
+          if(targetVersion!==workflowVersion || workflow!=='edit' || chosenModel()!==(editor?.id || null))return;
+          clearPhoto();$('reference').value=item.file_path;
+          referenceDimensions=[item.width,item.height].every(value=>Number.isFinite(value) && value>0) ? [item.width,item.height] : null;
+          $('reference-name').textContent='Gallery photo';$('reference-info').textContent=(item.size || 'PNG')+' · ready for editing';
+          $('reference-card').hidden=false;$('reference-preview').src=url.href;$('choose-photo').textContent='Change photo';
+          $('prompt').value='';$('preserve').value='';$('seed').value='';$('image-count').value='1';$('edit-area').value='whole';$('lora').value='';
+          $('tags').value=(item.tags || []).join(', ');$('reference-size').value='auto';
+          expansionPreview=null;$('expanded-details').hidden=true;
+          updateReferenceSizing();updateVariationControls();updateSourceCanvas();updateWorkflowPreview();
+          $('import-note').textContent=editor ? 'Gallery photo opened for editing. Describe the changes, then select Edit photo. The original file stays unchanged.' : 'Gallery photo opened for editing. Choose an editing model, then describe the changes. The original file stays unchanged.';
+          $('import-note').hidden=false;$('announcement').textContent=$('import-note').textContent;
+          params.delete('generation');params.delete('mode');history.replaceState(null,'',location.pathname+(params.size ? '?'+params : ''));
+          (editor ? $('prompt') : $('model-choice')).focus();return;
+        }
         const profile=modelCatalog.find(entry=>entry.id===item.model);
         if(metadata.task==='edit' || (mode==='reference' && profile?.reference_mode==='edit'))setWorkflow('edit');
         targetVersion=workflowVersion;
@@ -883,8 +906,6 @@ function queueLabel(control,icon,label){
         if(workflow==='edit')$('preserve').value=metadata.preserve || '';
         const sameModel = !item.model || item.model === chosenModel();
         if (!sameModel) warnings.push(modelCatalog.some(profile=>profile.id===item.model) ? `Select ${item.model} to restore model-specific settings.` : `This image used ${item.model}; that model is not set up here. Model-specific settings use current defaults.`);
-        const url = new URL(item.url, location.origin);
-        if (url.origin !== location.origin) throw new Error('Unexpected image URL.');
         $('prompt').value = metadata.expanded_prompt || item.prompt || '';
         if (metadata.prompt_expansion) { showExpansion(metadata.prompt_expansion); $('expand-prompt').checked=false; updateVariationControls(); } $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
@@ -923,7 +944,7 @@ function queueLabel(control,icon,label){
         $('prompt').focus();
       } catch (error) { if(targetVersion===workflowVersion)showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await importSavedImage(); await restoreWatchers(); await refreshQueue(); }
+    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await restoreWatchers(); await importSavedImage(); await refreshQueue(); }
     initialize(); setInterval(async()=>{await checkHealth();if (!generating && !previewingExpansion) await loadModels();}, 15000); setInterval(refreshQueue, 2000);
   </script>
 </body>

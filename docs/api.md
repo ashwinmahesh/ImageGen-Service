@@ -483,6 +483,8 @@ Automatic expansion is part of the durable image job. Shared plans appear in `pr
 
 ## Searchable gallery, tags and pagination
 
+The gallery's **Edit photo** action opens the generator webpage at `/?generation=<image-id>&mode=edit`. This is a UI link, not a generation endpoint: it loads the saved PNG into the Edit preview, leaves the edit instruction blank and defaults reference resolution to Auto without submitting a job. It uses any setup editing model, independently of the model that created the PNG. It prefers an eligible original model, then an eligible saved default, then the sole setup editor; multiple remaining choices leave the selector empty. With no setup editor, the action is disabled with setup guidance, and direct links report the missing capability. Existing `mode=reference` and `mode=settings` links retain variation/settings reuse. Submission then uses the normal generator job API with `task:"edit"`, the selected editor's `model` and the PNG's `file_path` as `reference_image`.
+
 | Endpoint | Service | Success | Purpose |
 | --- | --- | --- | --- |
 | GET `/v1/images` | Generator | 200 | Search/list saved images across model roots and indexed custom locations. |

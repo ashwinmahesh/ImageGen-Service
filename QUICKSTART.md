@@ -139,7 +139,9 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 5. Leave reference resolution on **Auto** to detect the photo size (up to a 2048px long edge), or choose a different long edge. Keep the model's default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
 6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
 
-The Edit preview uses a single box: upload a photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.
+To edit a saved result, open **Gallery**, select the image and choose **Edit photo** at the top of its details. The photo opens directly in the Edit preview with a blank edit instruction and **Auto** resolution. This works even if Z-Image or Chroma created it: the service selects an eligible original/default editor or the sole setup editor; otherwise choose an editing model. Describe your change and submit when ready. Nothing is submitted automatically. With no setup editor, the disabled action's help names models you can install.
+
+The Edit preview uses a single box: upload or select a gallery photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state. The source file stays unchanged.
 
 Generate and Edit keep separate drafts and previews while the page is open, including model/settings, source photo, selected area, expansion text and selected image option. Switching tabs never brings the other tab's photo across. Background jobs update their own tab, and both tabs can follow a job at the same time through the shared queue. Use **Edit image** or a gallery reuse action when you want to transfer a saved image intentionally. Reloading the page clears form drafts, but accepted jobs and images remain saved.
 

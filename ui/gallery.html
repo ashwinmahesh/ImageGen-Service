@@ -19,6 +19,7 @@
 
     /* Match the generator’s charcoal depth without tinting saved images. */
     .empty{background:linear-gradient(140deg,#2a405b 0%,#202226 38%,#191919 80%)}.card{box-shadow:inset 0 1px 0 #ffffff06,0 10px 26px #00000018}
+    .edit-action{display:flex;align-items:center;gap:8px;margin-bottom:20px}.edit-action .primary{flex:1}.edit-action [aria-disabled=true]{opacity:.5;cursor:not-allowed}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
@@ -48,10 +49,11 @@
     <div class="viewer-grid">
       <div class="full-image"><p id="preview-state">Loading preview…</p><img id="full-image" alt="" hidden></div>
       <div class="details">
+        <div class="edit-action"><a id="edit-photo" class="button primary" aria-disabled="true">Edit photo ↗</a><button type="button" class="help-button" id="edit-photo-help" aria-label="Help with Edit photo" data-help="Checking setup editing models…"><span aria-hidden="true">?</span></button></div>
         <p class="eyebrow">Prompt</p><p class="full-prompt" id="full-prompt"></p><button id="copy-prompt" class="button">Copy prompt</button>
         <form id="tag-form" class="tag-form"><div class="help-label"><label for="tags">Image tags</label><button type="button" class="help-button" aria-label="Help with image tags" data-help="Replace this image’s searchable tags using comma-separated labels; leave blank to clear them. The original image and generation settings stay unchanged."><span aria-hidden="true">?</span></button></div><input id="tags" type="text" maxlength="2110" placeholder="e.g. gothic, village, campaign" autocomplete="off" aria-describedby="tags-hint"><p class="hint" id="tags-hint">Separate tags with commas. Up to 32 tags, 64 characters each. Leave blank to clear.</p><button class="button" id="save-tags" type="submit">Save tags</button><p class="error" id="tag-error" role="alert" hidden></p></form>
         <dl class="settings" id="settings"></dl>
-        <div class="detail-actions"><a id="variation" class="button primary">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
+        <div class="detail-actions"><a id="variation" class="button">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
         <p class="eyebrow file-label">Saved file</p><code class="file-path" id="file-path"></code><button id="copy-path" class="button">Copy file path</button>
       </div>
     </div>
@@ -59,6 +61,23 @@
   <p class="toast" id="toast" role="status" hidden></p>
   <script>
     const $ = id => document.getElementById(id);
+    let editingModels=[], editingState='loading', editingSetupHint='Set up FLUX.2 Klein 4B, FLUX.2 Klein 9B or Qwen-Image 2.1 Turbo with make setup.';
+    function updateEditAction(){
+      const item=images[activeIndex],enabled=editingState==='ready' && editingModels.length>0 && !!item;
+      $('edit-photo').setAttribute('aria-disabled',String(!enabled));
+      if(enabled)$('edit-photo').href='/?generation='+item.id+'&mode=edit';else $('edit-photo').removeAttribute('href');
+      $('edit-photo-help').dataset.help=editingState==='loading' ? 'Checking setup editing models…' : editingState==='error' ? 'Could not check editing models. Refresh the gallery after checking the server.' : enabled ? 'Open this photo in Edit, then describe the change. Available editors: '+editingModels.map(model=>model.name).join(', ')+'. The original file stays unchanged.' : 'No setup model supports photo editing. '+editingSetupHint;
+    }
+    async function loadEditingModels(){
+      try{
+        const response=await fetch('/v1/models',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+        if(!response.ok)throw new Error('Models unavailable');
+        const catalog=await response.json();editingModels=catalog.data.filter(model=>model.tasks?.includes('edit'));editingState='ready';
+        editingSetupHint=catalog.data.find(model=>model.photo_editing?.setup_hint)?.photo_editing.setup_hint || editingSetupHint;
+      }catch{editingModels=[];editingState='error';}
+      updateEditAction();
+    }
+    $('edit-photo').addEventListener('click',event=>{if($('edit-photo').getAttribute('aria-disabled')==='true')event.preventDefault();});
     let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
     function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
     function localURL(value) { const url = new URL(value, location.origin); if (url.origin !== location.origin) throw new Error('Unexpected image URL.'); return url.href; }
@@ -136,6 +155,7 @@
       addSetting('Style', item.lora ? item.lora.name + (item.lora.strength == null ? '' : ` · ${item.lora.strength}`) : 'Original model'); addSetting('Saved', dateLabel(item.created));
       $('file-path').textContent = item.file_path;
       $('variation').href = '/?generation=' + item.id + '&mode=reference'; $('reuse').href = '/?generation=' + item.id + '&mode=settings'; $('reuse').hidden = !item.prompt;
+      updateEditAction();
       $('download').href = localURL(item.url); $('download').download = item.id + '.png';
       $('metadata').hidden = !item.metadata_url; if (item.metadata_url) { $('metadata').href = localURL(item.metadata_url); $('metadata').download = item.id + '.json'; }
       $('previous').disabled = index <= 0; $('next').disabled = index >= images.length - 1;
@@ -147,7 +167,7 @@
     }
     $('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadImages(0), 250); });
     $('sort').addEventListener('change', () => loadImages(0)); $('page-size').addEventListener('change', () => loadImages(0));
-    $('refresh').addEventListener('click', () => loadImages(currentOffset));
+    $('refresh').addEventListener('click', () => {loadImages(currentOffset);loadEditingModels();});
     $('page-previous').addEventListener('click', () => { if (previousOffset !== null) loadImages(previousOffset); });
     $('page-next').addEventListener('click', () => { if (nextOffset !== null) loadImages(nextOffset); });
     $('clear-filter').addEventListener('click', () => { activeTags = []; loadImages(0); });
@@ -175,6 +195,7 @@
     if (['12','24','48','96'].includes(initial.get('limit'))) $('page-size').value = initial.get('limit');
     activeTags = initial.getAll('tag').slice(0,32);
     const initialOffset = Number(initial.get('offset') || 0);
+    loadEditingModels();
     loadImages(Number.isSafeInteger(initialOffset) && initialOffset >= 0 ? initialOffset : 0);
   </script>
 </body>

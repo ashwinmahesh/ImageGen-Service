@@ -69,7 +69,7 @@ Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface
 
 ## Keep a searchable image library
 
-The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation.
+The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation. Choose **Edit photo** to open the selected image directly in the Edit preview, even when a different model created it. The action is available whenever a setup model supports editing. Choose an editor if prompted, describe the change and submit; your original file stays unchanged. **Make a variation** and **Reuse settings** remain separate actions.
 
 ![Searchable image gallery with editable tags](docs/screenshots/gallery.png)
 
