@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from ui_shell import render_page
 from pydantic import BaseModel,Field
 from model_profiles import PROFILES
-from observability import WINDOWS
+from observability import WINDOWS,LIFECYCLE_WINDOWS
 from job_logs import read_job_logs
 
 
@@ -68,6 +68,47 @@ class ObservedJobs(BaseModel):
 class ObservedJob(ResourceSeries):
     job_id:str
     runs:list[ObservedRun]
+
+
+class LifecycleEvent(BaseModel):
+    id:str
+    session:str
+    model:str
+    action:Literal['load','unload']
+    scope:Literal['process','weights']
+    reason:str
+    job_id:str|None
+    attempt:int|None
+    started:float
+    finished:float|None
+    status:Literal['running','succeeded','failed','interrupted']
+    duration_seconds:float|None=Field(description='Monotonic elapsed seconds; null for an interrupted operation without a finish boundary. Never inferred from sample intervals or restart time.')
+
+
+class LifecycleSummary(BaseModel):
+    model:str
+    action:Literal['load','unload']
+    scope:Literal['process','weights']
+    total:int
+    running:int
+    succeeded:int
+    failed:int
+    interrupted:int
+    mean_seconds:float|None
+    peak_seconds:float|None
+
+
+class LifecycleHistory(BaseModel):
+    window:str
+    start:float|None
+    end:float
+    first_started:float|None
+    data:list[LifecycleEvent]
+    summary:list[LifecycleSummary]
+    total:int
+    limit:int
+    offset:int
+    has_more:bool
 
 
 class JobLogSource(BaseModel):
@@ -130,7 +171,7 @@ def create_router(get_monitor,project):
     def status():
         value=monitor()
         return {**value.status(),'models':[{'id':key,'name':profile['name']} for key,profile in PROFILES.items()],
-                'windows':list(WINDOWS),'scopes':{
+                'windows':list(WINDOWS),'lifecycle_windows':list(LIFECYCLE_WINDOWS),'lifecycle_scopes':{'process':'Runtime process startup/imports and confirmed process-group shutdown; includes cleanup/reaping. Does not time CLI weights.','weights':'Resident Z-Image constructor or adapter replacement and Python/cache release; excludes first-inference compilation. CLI backends do not expose separate weight boundaries. Timings may overlap process events; do not sum them.'},'scopes':{
                     'service_cpu_percent':'Generator and child processes, normalized to total logical CPU capacity (0–100%). Independent queue API excluded.',
                     'service_rss_bytes':'Summed resident memory of the generator and its child processes; shared pages can be counted more than once.',
                     'system_cpu_percent':'Whole-machine CPU utilization.',
@@ -145,6 +186,18 @@ def create_router(get_monitor,project):
         checked_model(model);end=time.time() if end is None else end
         if not math.isfinite(end) or end>time.time()+5:raise HTTPException(422,'end must be a finite current or past Unix timestamp')
         return read(lambda:monitor().store.series(end-WINDOWS[window],end,model=model,max_points=max_points))
+
+    @router.get('/v1/observability/lifecycle',response_model=LifecycleHistory,summary='Model load and unload events',
+                description='Discrete monotonic timers, not sampled CPU/GPU values. Independent long range and pagination; summaries cover all matching events, not just the page. Process and resident-weight scopes can overlap and must not be added together. History is retained until locally removed. Missing old data is not backfilled. Only the leased generator reconciles interrupted events.')
+    def lifecycle(window:Literal['24h','7d','30d','90d','all']='30d',model:str|None=None,
+                  job_id:str|None=Query(None,pattern=r'^[0-9a-f]{32}$'),action:Literal['load','unload']|None=None,
+                  scope:Literal['process','weights']|None=None,end:float|None=Query(None,gt=0),
+                  limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0)):
+        checked_model(model);end=time.time() if end is None else end
+        if not math.isfinite(end) or end>time.time()+5:raise HTTPException(422,'end must be a finite current or past Unix timestamp')
+        start=end-LIFECYCLE_WINDOWS[window] if LIFECYCLE_WINDOWS[window] is not None else None
+        return read(lambda:{'window':window,'start':start,'end':end,**monitor().store.lifecycle_history(
+            start=start,end=end,model=model,job_id=job_id,action=action,scope=scope,limit=limit,offset=offset)})
 
     @router.get('/v1/observability/jobs',response_model=ObservedJobs,summary='List measured job attempts',
                 description='Newest measured attempt first; includes model, job ID, session, attempt, execution status and sampled means/peaks. Does not include waiting jobs or prompts/media. Completed summaries persist after raw samples expire.')

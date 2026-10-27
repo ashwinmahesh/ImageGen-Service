@@ -4,7 +4,7 @@
   const windows=[['5m','5 minutes'],['30m','30 minutes'],['1h','1 hour'],['6h','6 hours'],['24h','24 hours'],['3d','3 days'],['7d','7 days']];
   const jobWindows=[['full','Entire job'],['1m','Last minute'],['5m','Last 5 minutes'],['15m','Last 15 minutes']];
   let params=new URLSearchParams(location.search),job=params.get('job'),jobModel=params.get('model')||'',offset=0,total=0;
-  let overviewWindow='5m',jobWindow='full',loadedModels=false,requestNumber=0,controller=null,lastData=null,refreshing=false;
+  let overviewWindow='5m',jobWindow='full',lifecycleWindow='30d',lifecycleOffset=0,lastLifecycle=null,loadedModels=false,requestNumber=0,controller=null,lastData=null,refreshing=false;
   const name=id=>modelNames.get(id)||id,modelNames=new Map();
   const percent=value=>value==null?'—':value.toFixed(1)+'%';
   const gib=value=>value==null?'—':(value/1024**3).toFixed(value<1024**3?2:1)+' GiB';
@@ -13,6 +13,7 @@
   function svg(tag,attributes,text){const node=document.createElementNS(NS,tag);for(const [key,value] of Object.entries(attributes||{}))node.setAttribute(key,value);if(text!=null)node.textContent=text;return node;}
   function configureWindow(){
     $('time-window').replaceChildren(...(job?jobWindows:windows).map(([value,label])=>{const option=el('option',label);option.value=value;return option;}));
+    $('lifecycle-window').disabled=!!job;$('lifecycle-window').value=job?'all':lifecycleWindow;
     $('time-window').value=job?jobWindow:overviewWindow;$('overview').hidden=!job;
     $('model-filter').disabled=!!job;
     if(job&&jobModel&&loadedModels)$('model-filter').value=jobModel;
@@ -101,6 +102,51 @@
     $('previous').disabled=offset===0;$('next').disabled=!result.has_more;$('page-label').textContent=`Page ${Math.floor(offset/20)+1} of ${Math.max(1,Math.ceil(total/20))}`;
   }
   let logsJob=null;
+  const duration=value=>value==null?'—':value<1?value.toFixed(3)+' s':value<60?value.toFixed(2)+' s':Math.floor(value/60)+'m '+(value%60).toFixed(1)+'s';
+  const operation=event=>event.scope==='process'?(event.action==='load'?'Runtime start':'Runtime stop'):(event.action==='load'?'Weights load':'Weights release');
+  function renderLifecycle(result){
+    lastLifecycle=result;$('lifecycle-summary').replaceChildren();$('lifecycle-events').replaceChildren();$('lifecycle-timeline').replaceChildren();
+    $('no-lifecycle').hidden=!!result.total;
+    $('lifecycle-context').textContent=(job?'Operations triggered by this job, including release of a previous model.':'Model filter applies here; event history has its own time range.')+' Summaries cover all matching events; the timeline and table show this page. Runtime start/stop and weight timers may overlap. CLI weight phases are not separately measured. History is retained until locally removed.';
+    for(const group of result.summary){
+      const card=el('article');card.append(el('strong',name(group.model)+' · '+operation(group)),el('p','Average '+duration(group.mean_seconds)+' · max '+duration(group.peak_seconds)),el('small',group.succeeded+' succeeded · '+group.running+' running · '+group.failed+' failed · '+group.interrupted+' interrupted'));$('lifecycle-summary').append(card);
+    }
+    for(const event of result.data){
+      const row=el('tr');row.append(el('td',time(event.started)),el('td',name(event.model)));
+      const action=el('td');action.append(el('span',operation(event),'lifecycle-operation'),el('span',event.scope==='process'?'Process boundary':'Resident Z-Image weights','lifecycle-scope'));row.append(action);
+      row.append(el('td',event.status==='running'?'In progress':duration(event.duration_seconds)));
+      const status=el('td',null,'lifecycle-status');status.append(el('span',event.status,'badge '+event.status),el('small',event.reason.replaceAll('_',' ')));row.append(status);
+      const trigger=el('td');if(event.job_id){const link=el('a',event.job_id.slice(0,10)+'…','lifecycle-job');link.href='/observability?'+new URLSearchParams({job:event.job_id});link.title=event.job_id+' · attempt '+event.attempt;trigger.append(link,el('small','Attempt '+event.attempt,'lifecycle-scope'));}else trigger.textContent='No job';row.append(trigger);$('lifecycle-events').append(row);
+    }
+    $('lifecycle-previous').disabled=!result.offset;$('lifecycle-next').disabled=!result.has_more;
+    $('lifecycle-page').textContent=`Page ${Math.floor(result.offset/result.limit)+1} of ${Math.max(1,Math.ceil(result.total/result.limit))} · ${result.total} events`;
+    if(!result.data.length)return;
+    const width=Math.max(280,$('lifecycle-timeline').clientWidth),left=70,right=20,spanStart=result.start ?? result.first_started ?? result.end-60,end=Math.max(spanStart+1,result.end),span=end-spanStart;
+    const root=svg('svg',{viewBox:`0 0 ${width} 135`,role:'img','aria-label':'Load and unload event timeline for the current page. Full event details are in the table.'});
+    const x=stamp=>left+Math.max(0,Math.min(1,(stamp-spanStart)/span))*(width-left-right);
+    for(const [action,y,color] of [['load',32,'#66d6db'],['unload',72,'#bda9e8']]){
+      root.append(svg('text',{x:0,y:y+4},action==='load'?'Load':'Unload'),svg('line',{x1:left,x2:width-right,y1:y,y2:y}));
+      for(const event of result.data.filter(event=>event.action===action)){
+        const point=svg('circle',{cx:x(event.started),cy:y,r:5,fill:['failed','interrupted'].includes(event.status)?'#edb49e':color,stroke:event.status==='running'?'#eeeeee':color,'stroke-width':event.status==='running'?2:1});
+        point.append(svg('title',{},time(event.started)+' · '+name(event.model)+' · '+operation(event)+' · '+event.status+' · '+duration(event.duration_seconds)));root.append(point);
+      }
+    }
+    const ticks=width<500?2:4;
+    for(let i=0;i<=ticks;i++){const stamp=spanStart+span*i/ticks,date=new Date(stamp*1000),label=span>=86400?date.toLocaleDateString(undefined,{month:'short',day:'numeric'}):date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});root.append(svg('text',{x:left+(width-left-right)*i/ticks,y:112,'text-anchor':i===0?'start':i===ticks?'end':'middle'},label));}
+    $('lifecycle-timeline').append(root);
+  }
+  async function refreshLifecycle(current,number){
+    const query=new URLSearchParams({window:job?'all':lifecycleWindow,limit:'20',offset:String(lifecycleOffset)});
+    if(job)query.set('job_id',job);else if($('model-filter').value)query.set('model',$('model-filter').value);
+    if($('lifecycle-action').value)query.set('action',$('lifecycle-action').value);
+    $('lifecycle-panel')?.setAttribute('aria-busy','true');
+    try{
+      const result=await json('/v1/observability/lifecycle?'+query,current.signal);if(number!==requestNumber)return;
+      if(lifecycleOffset && !result.data.length){lifecycleOffset=Math.max(0,Math.ceil(result.total/result.limit)-1)*result.limit;return refreshLifecycle(current,number);}
+      $('lifecycle-error').hidden=true;renderLifecycle(result);
+    }catch(error){if(number!==requestNumber)return;$('lifecycle-error').hidden=false;$('lifecycle-error').textContent=error.name==='AbortError'?'Lifecycle request timed out; refresh to retry.':error.message;lastLifecycle=null;for(const id of ['lifecycle-summary','lifecycle-events','lifecycle-timeline'])$(id).replaceChildren();$('lifecycle-page').textContent='Events unavailable';$('lifecycle-previous').disabled=true;$('lifecycle-next').disabled=true;$('no-lifecycle').hidden=true;}
+    finally{if(number===requestNumber)$('lifecycle-panel')?.setAttribute('aria-busy','false');}
+  }
   function configureLogs(){
     $('job-logs').hidden=!job;
     if(logsJob!==job){logsJob=job;$('log-sources').replaceChildren();$('logs-note').textContent='';$('logs-error').hidden=true;$('logs-status').textContent='Loading…';}
@@ -134,7 +180,7 @@
   }
   async function refresh(){
     if(controller)controller.abort();refreshing=true;controller=new AbortController();const current=controller,number=++requestNumber,timer=setTimeout(()=>current.abort(),12000);
-    configureLogs();const logsRequest=refreshLogs(current,number);
+    configureLogs();const logsRequest=refreshLogs(current,number),lifecycleRequest=refreshLifecycle(current,number);
     const selectedModel=job?jobModel:$('model-filter').value,query=new URLSearchParams({window:job?jobWindow:overviewWindow});if(selectedModel)query.set('model',selectedModel);
     const jobsQuery=new URLSearchParams({limit:'20',offset:String(offset)});if(selectedModel)jobsQuery.set('model',selectedModel);
     try{
@@ -144,17 +190,21 @@
       $('error').hidden=!data.unmeasured;if(data.unmeasured)$('error').textContent='No measurements for this job yet. It may still be waiting, or it ran before observability was added. Live updates will retry.';$('connection').textContent=status.error?'Sampling needs attention':status.recording?'Recording · '+name(status.model):'History · sampler stopped';$('connection').classList.toggle('offline',!!status.error||!status.recording);
       const messages=['GPU values cover the whole device; GPU memory and process RSS overlap in unified RAM.'];if(status.error)messages.push(status.error);for(const value of [status.sources.cpu_memory,status.sources.gpu])if(value!=='available')messages.push(value);if(status.sources.process_tree_partial)messages.push('Some child-process counters could not be read; service totals may be partial.');$('sources').textContent=messages.join(' ');
       $('selection').textContent=job?`Job ${job} · ${selectedModel?name(selectedModel):data.runs.map(run=>name(run.model)).join(', ')}`:selectedModel?name(selectedModel)+' · all measured sessions':'All models · all measured sessions';
-      render(data);renderJobs(result);
+      render(data);renderJobs(result);if(lastLifecycle)renderLifecycle(lastLifecycle);
     }catch(error){if(number!==requestNumber)return;if(error.name==='AbortError')error=new Error('History request timed out. Check that the generator is running.');$('error').textContent=job&&error.status===404?'No measurements for this job yet. It may still be waiting, or it ran before observability was added. This page will retry while live updates are enabled.':error.message;$('error').hidden=false;$('connection').textContent='History unavailable';$('connection').classList.add('offline');}
-    finally{await logsRequest;clearTimeout(timer);if(number===requestNumber)refreshing=false;}
+    finally{await Promise.all([logsRequest,lifecycleRequest]);clearTimeout(timer);if(number===requestNumber)refreshing=false;}
   }
   $('time-window').addEventListener('change',()=>{if(job)jobWindow=$('time-window').value;else overviewWindow=$('time-window').value;refresh();});
-  $('model-filter').addEventListener('change',()=>{offset=0;refresh();});$('refresh').addEventListener('click',refresh);
-  $('overview').addEventListener('click',()=>{job=null;jobModel='';offset=0;history.pushState(null,'','/observability');$('model-filter').value='';configureWindow();refresh();});
+  $('model-filter').addEventListener('change',()=>{offset=0;lifecycleOffset=0;refresh();});$('refresh').addEventListener('click',refresh);
+  $('overview').addEventListener('click',()=>{job=null;jobModel='';offset=0;lifecycleOffset=0;history.pushState(null,'','/observability');$('model-filter').value='';configureWindow();refresh();});
+  $('lifecycle-window').addEventListener('change',()=>{lifecycleWindow=$('lifecycle-window').value;lifecycleOffset=0;refresh();});
+  $('lifecycle-action').addEventListener('change',()=>{lifecycleOffset=0;refresh();});
+  $('lifecycle-previous').addEventListener('click',()=>{lifecycleOffset=Math.max(0,lifecycleOffset-20);refresh();});
+  $('lifecycle-next').addEventListener('click',()=>{if(lastLifecycle?.has_more){lifecycleOffset+=20;refresh();}});
   $('previous').addEventListener('click',()=>{offset=Math.max(0,offset-20);refresh();});$('next').addEventListener('click',()=>{if(offset+20<total){offset+=20;refresh();}});
-  window.addEventListener('popstate',()=>{params=new URLSearchParams(location.search);job=params.get('job');jobModel=params.get('model')||'';offset=0;configureWindow();refresh();});
+  window.addEventListener('popstate',()=>{params=new URLSearchParams(location.search);job=params.get('job');jobModel=params.get('model')||'';offset=0;lifecycleOffset=0;configureWindow();refresh();});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&$('live').checked)refresh();});
-  let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(lastData)render(lastData);},150);});
+  let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(lastData)render(lastData);if(lastLifecycle)renderLifecycle(lastLifecycle);},150);});
   setInterval(()=>{if(!document.hidden&&$('live').checked&&!refreshing)refresh();},5000);
   configureWindow();refresh();
 })();

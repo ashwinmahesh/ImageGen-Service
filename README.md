@@ -112,6 +112,8 @@ Open **Observability** in the webpage header to see CPU, memory and GPU line gra
 
 CPU and RAM include the generator and its child processes, including prompt expansion and native model tools. GPU readings cover the whole device, including other apps; GPU memory shares the Mac’s RAM. Sampling runs while the generator is on, with stopped periods shown as gaps. Eight days of raw history and durable job summaries live in project-local SQLite, independently of the queue. See the [API reference](docs/api.md#observability) for the exact measurement scopes.
 
+**Model load & unload** has its own event timeline, paginated history and per-model average/maximum durations over 24 hours, 7, 30 or 90 days, or all recorded history. Runtime start/stop is recorded across models; resident Z-Image weight loads and adapter replacements have separate timers. CLI weight phases are not exposed separately, and the two timing scopes should not be added together. Warm runtime reuse adds no new load. Event history survives restarts and the expiry of raw resource samples; old operations cannot be measured retroactively.
+
 ## Quick start
 
 Requires an **Apple Silicon Mac**, Git and Make. Setup reuses compatible Python already on your Mac, or downloads it into the project when needed; you do not need to install a specific Python version first. Your system Python and shell settings stay unchanged. See the [quick-start guide](QUICKSTART.md#1-check-the-prerequisites) for prerequisites and Chroma runtime compatibility.

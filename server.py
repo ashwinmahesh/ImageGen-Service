@@ -122,7 +122,7 @@ def initialize_service():
     check_model_assets(PROJECT_ROOT,API_MODEL)
     job_store=JobStore(QUEUE_DATABASE)
     model=ModelProcess(PROJECT_ROOT,loras_enabled=app.state.loras_enabled,llm_enabled=app.state.llm_enabled,
-                       stage=lambda value:setattr(job_worker,'stage',value))
+                       stage=lambda value:setattr(job_worker,'stage',value),observer=observability_monitor)
     job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,
         busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor,eligible_models=ready_models)
     job_worker.acquire(prepare=lambda:initialize_shared_queue(PROJECT_ROOT))
