@@ -36,8 +36,46 @@ def describe_mask_region(mask):
     return 'the '+', '.join(GRID_NAMES[r][c] for r,c in selected)+' of the image'
 
 
+def mask_boxes(mask, grid=64, max_boxes=8):
+    """Bounding boxes on Qwen3-VL's 0-1000 grounding scale, one per painted area.
+
+    Long thin areas (strokes along an edge) are split into pieces along their length,
+    so the boxes follow the stroke instead of claiming everything inside its curve.
+    """
+    small=mask.convert('L').resize((grid,grid)).point(lambda value:255 if value>40 else 0)
+    pixels=small.load()
+    painted={(x,y) for y in range(grid) for x in range(grid) if pixels[x,y]}
+    areas=[]
+    while painted:
+        stack=[painted.pop()]; area=[]
+        while stack:
+            x,y=stack.pop(); area.append((x,y))
+            for neighbour in ((x+1,y),(x-1,y),(x,y+1),(x,y-1),(x+1,y+1),(x-1,y-1),(x+1,y-1),(x-1,y+1)):
+                if neighbour in painted:
+                    painted.remove(neighbour); stack.append(neighbour)
+        areas.append(area)
+    areas.sort(key=len,reverse=True)
+    boxes=[]
+    for area in areas:
+        xs=[x for x,_ in area]; ys=[y for _,y in area]
+        width,height=max(xs)-min(xs)+1,max(ys)-min(ys)+1
+        pieces=1 if len(area)>=0.3*width*height else min(4,max(2,max(width,height)//12))
+        axis=0 if width>=height else 1
+        area.sort(key=lambda cell:cell[axis])
+        for index in range(pieces):
+            piece=area[index*len(area)//pieces:(index+1)*len(area)//pieces]
+            px=[x for x,_ in piece]; py=[y for _,y in piece]
+            boxes.append([round(min(px)*1000/grid),round(min(py)*1000/grid),round((max(px)+1)*1000/grid),round((max(py)+1)*1000/grid)])
+    return boxes[:max_boxes]
+
+
+def describe_mask_boxes(mask):
+    boxes=mask_boxes(mask)
+    return ', '.join('{"bbox_2d": [%d, %d, %d, %d]}'%tuple(box) for box in boxes) if boxes else None
+
+
 def edit_prompt(instruction, preserve=None, region=None):
     scope=EDIT_SCOPE+(' Explicit preservation requirements: '+preserve.strip() if preserve else '')
     if region:
-        scope=f'The selected area to edit is {region}. Make the requested change there.\n'+scope
+        scope=f'The selected area to edit is inside these boxes (x1, y1, x2, y2 on a 0-1000 scale of the image): {region}. Make the requested change only there.\n'+scope
     return instruction+'\n'+scope
