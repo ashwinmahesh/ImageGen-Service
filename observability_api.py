@@ -6,6 +6,7 @@ import time
 from typing import Literal
 from fastapi import APIRouter,HTTPException,Query
 from fastapi.responses import FileResponse
+from ui_shell import render_page
 from pydantic import BaseModel,Field
 from model_profiles import PROFILES
 from observability import WINDOWS
@@ -115,7 +116,7 @@ def create_router(get_monitor,project):
 
     @router.get('/observability',include_in_schema=False)
     def page():
-        return FileResponse(project/'ui/observability.html',media_type='text/html',headers={'Cache-Control':'no-store'})
+        return render_page(project,'observability.html')
 
     @router.get('/assets/observability.js',include_in_schema=False)
     def script():

@@ -1,0 +1,182 @@
+(() => {
+  'use strict';
+  const $=id=>document.getElementById(id),modelNames=new Map();
+  let callbacks={};
+  function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
+  function updateHealth(data){
+    const name=modelNames.get(data.active_model)||data.active_model||'queued image';
+    setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…` : data.status==='ready' ? 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : data.status==='error' ? 'offline' : 'checking');
+    callbacks.onHealth?.(data);
+  }
+  function queueError(message){$('queue-error').textContent=message;$('queue-error').hidden=false;}
+  async function inspectJob(job){
+    $('queue-dialog').close();
+    if(callbacks.onInspect){await callbacks.onInspect(job);return;}
+    location.assign('/?'+new URLSearchParams({job:job.id}));
+  }
+    const queueIconPaths={
+ queue:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+ monitor:'M4 4h16v12H4zM8 21h8M12 16v5',
+ play:'m8 5 11 7-11 7Z',
+ pause:'M8 5v14M16 5v14',
+ remove:'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6',
+ clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
+ close:'m6 6 12 12M18 6 6 18',
+ previous:'m14 6-6 6 6 6',next:'m10 6 6 6-6 6',
+ resources:'M4 3v18h17M8 16v-5M13 16V7M18 16v-8',
+ retry:'M3 10a9 9 0 1 1 1 8M3 4v6h6',
+ grip:'M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01'
+};
+function queueIcon(name){
+ const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+ for(const[key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':name==='grip'?'3':'1.6','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false',class:'queue-icon'}))icon.setAttribute(key,value);
+ const path=document.createElementNS(icon.namespaceURI,'path');path.setAttribute('d',queueIconPaths[name]);icon.append(path);return icon;
+}
+function queueLabel(control,icon,label){
+      const text=document.createElement('span');text.textContent=label;control.replaceChildren(queueIcon(icon),text);return control;
+    }
+    function queueControl(tag,label,icon,cls='secondary'){
+      const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
+    }
+    for(const[id,icon,label]of [['pause-queue','pause','Pause queue'],['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
+    $('open-queue').prepend(queueIcon('queue'));
+    let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
+    async function requestJSON(url, options = {}) {
+      const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
+      const data=await response.json();
+      if (!response.ok) {const error=new Error(typeof data.detail === 'string' ? data.detail : 'Queue request failed.');error.status=response.status;throw error;}
+      return data;
+    }
+    async function queueAction(url, options) {
+      if (queueMutating) return;
+      queueMutating=true; $('queue-error').hidden=true;
+      try { return await requestJSON(url,options); }
+      catch(error) { queueError(error.message); }
+      finally { queueMutating=false; await refreshQueue(); }
+    }
+    function moveQueueJob(identifier,position) {
+      return queueAction('/v1/jobs/'+identifier+'/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position})});
+    }
+    function clearQueueDrag() {
+      const drag=queueDrag; queueDrag=null;
+      $('queue-list').querySelectorAll('.queue-item').forEach(row => row.classList.remove('dragging','drop-before','drop-after'));
+      return drag;
+    }
+    function attachQueueDrag(handle,row,job) {
+      handle.addEventListener('keydown',event => {
+        if (!['ArrowUp','ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const position=job.queue_position+(event.key==='ArrowUp' ? -1 : 1);
+        if (position<1 || position>Number($('queue-list').dataset.waiting)) return;
+        moveQueueJob(job.id,position).then(() => {
+          $('queue-list').querySelector(`[data-job-id="${job.id}"] .queue-drag`)?.focus();
+        });
+      });
+      handle.addEventListener('pointerdown',event => {
+        if (event.button!==0 || queueMutating) return;
+        queueDrag={id:job.id,position:job.queue_position,startY:event.clientY,active:false};
+        handle.setPointerCapture(event.pointerId);
+      });
+      handle.addEventListener('pointermove',event => {
+        if (!queueDrag || queueDrag.id!==job.id) return;
+        if (!queueDrag.active && Math.abs(event.clientY-queueDrag.startY)<5) return;
+        queueDrag.active=true; row.classList.add('dragging');
+        const others=[...$('queue-list').querySelectorAll('[data-position]')].filter(item => item!==row);
+        others.forEach(item => item.classList.remove('drop-before','drop-after'));
+        if (!others.length) return;
+        const next=others.find(item => { const bounds=item.getBoundingClientRect(); return event.clientY<bounds.top+bounds.height/2; });
+        const target=next || others.at(-1),position=Number(target.dataset.position);
+        target.classList.add(next ? 'drop-before' : 'drop-after');
+        queueDrag.position=next ? position-(job.queue_position<position ? 1 : 0) : position+(job.queue_position>position ? 1 : 0);
+        const list=$('queue-list'),bounds=list.getBoundingClientRect();
+        if (event.clientY<bounds.top+35) list.scrollBy(0,-18);
+        else if (event.clientY>bounds.bottom-35) list.scrollBy(0,18);
+      });
+      handle.addEventListener('pointerup',() => {
+        const drag=clearQueueDrag();
+        if (drag?.active && drag.position!==job.queue_position) moveQueueJob(job.id,drag.position);
+        else refreshQueue();
+      });
+      handle.addEventListener('pointercancel',() => { clearQueueDrag(); refreshQueue(); });
+      handle.addEventListener('lostpointercapture',() => { if (queueDrag) { clearQueueDrag(); refreshQueue(); } });
+    }
+    window.addEventListener('blur',clearQueueDrag);
+    function renderQueueJob(job) {
+      const row=document.createElement('div'); row.className='queue-item';
+      const copy=document.createElement('div'); copy.className='queue-copy';
+      const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
+      const detail=document.createElement('small'); detail.textContent=`${modelNames.get(job.model) || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size==='auto' || (!job.request.size && job.request.reference_image) ? 'Auto resolution' : job.request.size || '1024x1024'} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
+      copy.append(title,detail);
+      if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
+      row.dataset.jobId=job.id;
+      if (job.status==='queued') {
+        row.dataset.position=job.queue_position;
+        const handle=document.createElement('button'); handle.type='button'; handle.className='queue-drag'; handle.append(queueIcon('grip'));
+        handle.setAttribute('aria-label',`Move waiting job ${job.queue_position}: ${job.request.prompt.slice(0,80)}`);
+        handle.setAttribute('aria-describedby','queue-drag-help');
+        attachQueueDrag(handle,row,job); row.append(handle);
+      } else {
+        const spacer=document.createElement('span'); spacer.className='queue-drag-spacer'; spacer.setAttribute('aria-hidden','true'); row.append(spacer);
+      }
+      row.append(copy);
+      const actions=document.createElement('div'); actions.className='queue-actions';
+      const inspect=queueControl('button',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'play' : 'monitor','secondary queue-monitor'); inspect.type='button';
+      inspect.addEventListener('click',() => inspectJob(job)); actions.append(inspect);
+      if (job.status==='queued') {
+        const run=queueControl('button','Run Now','play','secondary queue-run-now'); run.type='button';
+        run.title='Run at the next free slot, even while paused; the active batch finishes first.';
+        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close(); if(callbacks.onRunNow)callbacks.onRunNow(job);else inspectJob(job); } })); actions.append(run);
+        const remove=queueControl('button','Remove','remove','secondary queue-remove'); remove.type='button';
+        remove.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); actions.append(remove);
+      } else if (['failed','cancelled'].includes(job.status)) {
+        const retry=queueControl('button','Retry','retry'); retry.type='button';
+        retry.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); actions.append(retry);
+      }
+      if (job.attempts>0) { const metrics=queueControl('a','Metrics','resources','secondary queue-metrics'); metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model}); metrics.title='View resource measurements for this job'; actions.append(metrics); }
+      row.append(actions); return row;
+    }
+    async function refreshQueue() {
+      if (pollingQueue || queueDrag || queueMutating) return;
+      pollingQueue=true;
+      try {
+        const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
+        if ($('queue-filter').value) params.set('status',$('queue-filter').value);
+        const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health').catch(error=>{setStatus('Server offline','offline');throw error;})]);
+        updateHealth(health);
+        const summary=health.queue || {};
+        queuePaused=!!summary.paused;
+        const count=(summary.running || 0)+(summary.queued || 0); $('queue-badge').textContent=String(count); $('queue-badge').hidden=!count;
+        $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
+        queueLabel($('pause-queue'),queuePaused ? 'play' : 'pause',queuePaused ? 'Resume queue' : 'Pause queue');
+        $('clear-queue').disabled=!summary.queued;
+        $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
+        $('queue-notice').hidden=!$('queue-notice').textContent;
+        if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
+        if (queueDrag || queueMutating) return;
+        $('queue-list').dataset.waiting=String(summary.queued || 0);
+        const version=JSON.stringify(list.data);
+        if (version!==queueListVersion) {
+          $('queue-list').replaceChildren(...list.data.map(renderQueueJob)); queueListVersion=version;
+          if (!list.total) { const empty=document.createElement('p'); empty.className='queue-help'; empty.textContent='No jobs in this view.'; $('queue-list').append(empty); }
+        }
+        queueNext=list.next_offset ?? null; queuePrevious=list.previous_offset ?? null;
+        $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
+        $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
+        await callbacks.onRefresh?.(summary,health);
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
+      finally { pollingQueue=false; }
+    }
+    $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
+    $('close-queue').addEventListener('click',() => $('queue-dialog').close());
+    $('queue-dialog').addEventListener('close',clearQueueDrag);
+    $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
+    $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
+    $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
+    $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
+    $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });
+    $('queue-previous').addEventListener('click',() => { if (queuePrevious!==null) { queueOffset=queuePrevious; refreshQueue(); } });
+
+  async function loadNames(){try{const catalog=await requestJSON('/v1/models');for(const model of catalog.data)modelNames.set(model.id,model.name);queueListVersion=null;}catch{/* Health still works when model discovery is temporarily unavailable. */}}
+  window.ImageGenShell={configure(options){callbacks={...callbacks,...options};},refresh:refreshQueue,requestJSON,updateHealth,setStatus,resetOffset(){queueOffset=0;}};
+  document.addEventListener('DOMContentLoaded',()=>{loadNames().then(refreshQueue);setInterval(refreshQueue,2000);setInterval(loadNames,15000);},{once:true});
+})();

@@ -218,9 +218,8 @@ class GalleryTest(unittest.TestCase):
             self.assertEqual(self.client.get('/v1/images').status_code, 503)
 
     def test_gallery_route(self):
-        (self.root / 'ui').mkdir()
-        (self.root / 'ui/gallery.html').write_text('<!doctype html><title>Gallery</title>')
-        response = self.client.get('/gallery')
+        with patch.object(server,'PROJECT_ROOT',Path(__file__).resolve().parents[1]):
+            response = self.client.get('/gallery')
         self.assertEqual(response.status_code, 200)
         self.assertIn('text/html', response.headers['content-type'])
         self.assertEqual(response.headers['cache-control'], 'no-store')

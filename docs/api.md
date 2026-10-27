@@ -597,6 +597,8 @@ The URLs below are read-only. They are useful for previews/downloads and cover r
 | GET `/assets/observability.js` | Generator | 200 | Local interactive resource graphs, `text/javascript`. |
 | GET `/assets/help.css` | Generator | 200 | Shared tooltip stylesheet, `text/css`. |
 | GET `/assets/help.js` | Generator | 200 | Shared tooltip interactions, `text/javascript`. |
+| GET `/assets/shell.css` | Generator | 200 | Common header and queue modal styling, `text/css`. |
+| GET `/assets/shell.js` | Generator | 200 | Shared runtime status, queue controls and polling, `text/javascript`. |
 | GET `/docs` | Both | 200 | Swagger UI for that service. |
 | GET `/redoc` | Both | 200 | Alternative API reference UI. |
 | GET `/openapi.json` | Both | 200 | Machine-readable OpenAPI schema for that service. |
@@ -604,7 +606,7 @@ The URLs below are read-only. They are useful for previews/downloads and cover r
 
 The four framework documentation routes (`/docs`, `/redoc`, `/openapi.json`, `/docs/oauth2-redirect`) also support HEAD for headers without the response body.
 
-Missing/invalid media IDs or unreadable metadata return **404**. PNGs/custom destinations remain resolvable after restarts while their files/indexes remain available. URLs require a running generator. The queue API has no root webpage, gallery, uploads or media routes; requesting them there returns **404**. Generator/gallery pages and catalog JSON use `Cache-Control:no-store`.
+Missing/invalid media IDs or unreadable metadata return **404**. PNGs/custom destinations remain resolvable after restarts while their files/indexes remain available. URLs require a running generator. The queue API has no root webpage, gallery, uploads or media routes; requesting them there returns **404**. Generator, gallery and observability pages share the generator header, live status and queue modal. Queue actions call the same generator APIs on every page. Monitor/Open image/Run Now from another page open `/?job=<job-id>` to show or follow that job; this UI link does not submit or rerun work by itself. UI pages, shared assets and catalog JSON use `Cache-Control:no-store`.
 
 ## Errors and safe retries
 

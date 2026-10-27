@@ -10,9 +10,9 @@
     :root{color-scheme:dark;--bg:#171717;--panel:#222222;--line:#3b3b3b;--muted:#ababab;--text:#eeeeee;--accent:#93c5fd;--surface:linear-gradient(145deg,#292a2d 0%,#222224 55%,#202020 100%);--accent-fill:linear-gradient(135deg,#b1d5ff,#83b6f1);--accent-hover:linear-gradient(135deg,#c5e0ff,#a1ccff)}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:wait;opacity:.5}
-    :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}header{max-width:1320px;margin:auto;padding:12px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:20px}
-    .brand{display:flex;align-items:center;gap:12px}.mark{width:35px;height:35px;background:var(--accent);color:#10243c;border-radius:10px;display:grid;place-items:center;font-size:23px;font-weight:700}.brand strong{font-size:18px;letter-spacing:-.5px}.brand small{display:block;font-size:11px;color:var(--muted);letter-spacing:1.3px;text-transform:uppercase}
-    .header-actions{display:flex;align-items:center;gap:24px}.nav{display:flex;gap:5px;padding:4px;background:#1d1d1d;border:1px solid var(--line);border-radius:10px}.nav a{text-decoration:none;padding:7px 15px;font-size:12px;border-radius:6px;color:var(--muted)}.nav a[aria-current]{background:#273649;color:var(--accent)}.status{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;background:#808080;border-radius:50%}.status[data-state=ready] .dot{background:var(--accent)}.status[data-state=busy] .dot{background:#7dd3fc}.status[data-state=offline] .dot{background:#ed9696}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}
+
+
     main{max-width:1320px;margin:auto;padding:16px 36px 20px}.intro{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:12px;padding:6px 0}h1{font-size:24px;line-height:1.2;font-weight:550;letter-spacing:-.7px;margin:0}.intro p{color:var(--muted);margin:3px 0 0;font-size:12px}.tag{font-size:11px;text-transform:uppercase;letter-spacing:1.4px;color:var(--muted);white-space:nowrap}
     .workspace{display:grid;grid-template-columns:340px minmax(0,1fr);gap:24px;align-items:start}.controls{padding:24px;background:var(--surface);border:1px solid var(--line);border-radius:16px}label{display:block;font-size:13px;font-weight:550;margin-bottom:9px}.label-row{display:flex;align-items:center;justify-content:space-between}.label-row button{border:0;background:none;color:var(--accent);font-size:12px;padding:0 0 9px}textarea,input,select{width:100%;color:var(--text);background:#1b1b1b;border:1px solid #4b4b4b;border-radius:9px;padding:11px 12px}textarea{resize:vertical;min-height:190px;line-height:1.6;font-size:14px}textarea::placeholder,input::placeholder{color:#858585}.hint{font-size:12px;color:var(--muted);margin:8px 0 22px}.field{margin-top:20px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}summary{cursor:pointer;font-size:13px;color:var(--muted);padding:20px 0 0}details .hint{margin-bottom:0}
     .generate{background:var(--accent-fill);color:#10243c;border:0;border-radius:10px;width:100%;padding:13px 16px;font-weight:650;margin-top:25px;display:flex;align-items:center;justify-content:space-between}.generate:hover:not(:disabled){background:var(--accent-hover)}.shortcut{font-size:11px;color:var(--muted);text-align:center;margin:10px 0 0}.error{margin:18px 0 0;padding:12px;border-radius:8px;border:1px solid #79514a;background:#332421;color:#f7c6bc;font-size:13px;overflow-wrap:anywhere}.error[hidden]{display:none}
@@ -21,52 +21,24 @@
     .result-bar[hidden]{display:none}.result-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;margin-top:16px;min-height:38px}.result-info{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.actions{display:flex;flex-wrap:wrap;gap:10px}.actions[hidden]{display:none}.secondary{display:inline-block;border:1px solid #4b4b4b;background:#2a2a2a;border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text);text-decoration:none;white-space:nowrap}.secondary:hover{background:#363636}
     .reference-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}.reference-title{font-size:13px;font-weight:550;margin:0 0 10px}.optional{font-weight:400;color:var(--muted)}.choose-photo{width:100%;padding:13px;border:1px dashed #626262;border-radius:9px;background:#2a2a2a;color:var(--accent);text-align:center}.choose-photo:hover{background:#363636}.reference-card{display:flex;gap:12px;align-items:center;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:9px;min-width:0}.reference-card[hidden],.reference-options[hidden]{display:none}.reference-card img{width:64px;height:64px;object-fit:cover;border-radius:5px}.reference-description{min-width:0;flex:1}.reference-description strong{display:block;font-size:12px;overflow-wrap:anywhere}.reference-description small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.remove-photo{border:0;background:none;color:var(--muted);padding:5px;font-size:18px}.reference-section .hint{margin-bottom:0}.reference-path summary{padding-top:12px;font-size:12px}.reference-options{margin-top:16px}.reference-options input{padding:9px 12px}.reference-section input[type=file][hidden]{display:none}
     footer{max-width:1320px;margin:18px auto 0;padding:22px 36px 30px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:16px;line-height:1.8}footer code{font-family:ui-monospace,monospace;font-size:10px;overflow-wrap:anywhere}footer a{white-space:nowrap}#announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-    @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}header,footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
-    @media(max-width:640px){header{padding:12px 18px;flex-wrap:wrap}.header-actions{gap:12px;flex-wrap:wrap}.nav a{padding:6px 10px}.brand strong{font-size:16px}main{padding:14px 18px 10px}h1{font-size:22px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:12px}footer{flex-direction:column;padding:20px 18px}.status{font-size:11px}}
+    @media(max-width:850px){.workspace{grid-template-columns:290px minmax(0,1fr);gap:18px}.controls{padding:20px}.preview{min-height:460px}main{padding:30px 24px 16px}footer{padding-left:24px;padding-right:24px}.result-bar{align-items:flex-start;flex-direction:column}.tag{display:none}}
+    @media(max-width:640px){main{padding:14px 18px 10px}h1{font-size:22px}.workspace{grid-template-columns:1fr}.controls{padding:20px}textarea{min-height:130px}.preview{min-height:360px}.result-bar{flex-direction:row;flex-wrap:wrap}.intro{margin-bottom:12px}footer{flex-direction:column;padding:20px 18px}}
     @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
-    .queue-panel{margin:auto;width:min(1180px,calc(100vw - 32px));height:80vh;max-height:80vh;height:80dvh;max-height:80dvh;color:var(--text);overflow:hidden;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
-
-    .queue-drag.queue-drag{flex-shrink:0;align-self:stretch;min-width:30px;min-height:30px;padding:4px;color:#929397;background:transparent;border:1px solid transparent;font-size:20px;line-height:1;cursor:grab;touch-action:none;user-select:none}
-    .queue-drag-spacer{flex:0 0 30px;align-self:stretch}
-    .queue-drag:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.queue-drag:active{cursor:grabbing}
-    .queue-item.dragging{opacity:.45}.queue-item.drop-before{box-shadow:0 -2px 0 var(--accent)}.queue-item.drop-after{box-shadow:0 2px 0 var(--accent)}
-    .queue-actions{display:flex;gap:6px;flex-wrap:nowrap;align-items:center;justify-content:flex-end;flex-shrink:0}
-    @media(max-width:600px){.queue-item{flex-wrap:wrap}.queue-actions{margin-left:auto}.queue-drag.queue-drag{align-self:center}.queue-copy{min-width:150px}}
-
+    .immediate-choice{display:flex;align-items:center;gap:8px;margin-top:22px}.immediate-choice input{width:auto}
     .workflow-tabs{display:flex;gap:8px;margin:0 0 24px}.workflow-tabs button{border:1px solid var(--line);border-radius:8px;padding:11px 18px;background:transparent;color:var(--muted)}.workflow-tabs button[aria-pressed=true]{background:var(--accent-fill);color:#10243c;border-color:var(--accent)}
     .workflow-edit{position:relative;display:inline-flex}.workflow-edit[data-unavailable=true]{cursor:not-allowed}.workflow-edit button:disabled{pointer-events:none}.workflow-tooltip{display:none;position:absolute;top:calc(100% + 8px);left:0;z-index:10000;width:250px;max-width:calc(100vw - 60px);padding:11px 13px;border:1px solid #555555;border-radius:9px;background:#2c2c2c;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 8px 28px #0007}.workflow-edit[data-unavailable=true]:is(:hover,:focus-within) .workflow-tooltip{display:block}
     .model-status{white-space:pre-wrap;overflow-wrap:anywhere}.source-editor{width:100%;min-width:0;margin-top:16px}.source-editor h2{font-size:16px;margin:0 0 6px}#source-canvas{cursor:crosshair;touch-action:none}.source-editor .hint{margin-top:8px}.source-editor[hidden],#clear-selection[hidden]{display:none}.source-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:12px}
 
     /* Subtle depth on charcoal surfaces; blue stays an accent. */
-    .controls,.queue-panel{box-shadow:inset 0 1px 0 #ffffff06,0 12px 32px #00000018}.preview{box-shadow:inset 0 1px 0 #ffffff05,0 16px 40px #0000001c}
+    .controls{box-shadow:inset 0 1px 0 #ffffff06,0 12px 32px #00000018}.preview{box-shadow:inset 0 1px 0 #ffffff05,0 16px 40px #0000001c}
 
-    .queue-panel[open]{display:flex;flex-direction:column}.queue-panel::backdrop{background:#07080bb8;backdrop-filter:blur(6px)}body:has(#queue-dialog[open]){overflow:hidden}
-    .queue-panel> :not(#queue-list){flex-shrink:0}.queue-panel #queue-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;align-content:start}.queue-dialog-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.queue-panel .queue-count{margin:10px 0 0}.queue-panel .queue-pages{padding-top:12px;border-top:1px solid var(--line)}
-    #queue-badge{display:inline-block;min-width:18px;margin-left:4px;padding:0 5px;border-radius:9px;background:#273649;color:var(--accent);font-size:11px}#queue-badge[hidden]{display:none}
-    /* Keep queue controls aligned with VoiceGen's muted, solid button palette. */
-    .queue-panel .secondary{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px;line-height:1.55;border-color:#414747;background:#25292a;color:#cbd1ce}
-    .queue-panel .secondary:hover:not(:disabled){border-color:#59625f;background:#2e3433;color:#edf2ef}
-    .queue-icon{width:14px;height:14px;flex:none;display:block;color:#a4afaa}
-    #open-queue{display:inline-flex;align-items:center;gap:7px}
-    .queue-drag.queue-drag{display:grid;place-items:center}
-    .queue-actions .secondary{flex:0 0 auto;width:auto;min-width:92px;height:32px;padding:2px 6px;gap:6px;border-radius:6px;font-size:12px;line-height:1.1;text-align:center;white-space:nowrap}
-    .queue-actions .secondary span{min-width:0}
-    .queue-actions .queue-monitor{background:#203044;border-color:#3a526c;color:#c1d1e0}
-    .queue-actions .queue-monitor:hover:not(:disabled){background:#293d54;border-color:#536f8c;color:#dce8f4}
-    .queue-actions .queue-monitor .queue-icon{color:#a4bcd3}
-    .queue-actions .queue-run-now{background:#25372d;border-color:#405e4b;color:#c4d7ca}
-    .queue-actions .queue-run-now:hover:not(:disabled){background:#304737;border-color:#597962;color:#dfede3}
-    .queue-actions .queue-run-now .queue-icon{color:#acc6b3}
-    .queue-actions .queue-remove{background:#3b292e;border-color:#69434b;color:#dfc4cb}
-    .queue-actions .queue-remove:hover:not(:disabled){background:#4d353c;border-color:#885b65;color:#f1dce2}
-    .queue-actions .queue-remove .queue-icon{color:#cba8af}
-    @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1;flex-wrap:wrap}.queue-actions .secondary{min-width:0;font-size:11px;gap:5px;padding:2px 5px}}
-  </style>
+</style>
   <link rel="stylesheet" href="/assets/help.css">
   <script src="/assets/help.js" defer></script>
+  <link rel="stylesheet" href="/assets/shell.css">
 </head>
 <body>
-  <header><div class="brand"><img class="mark" width="35" height="35" alt="" aria-hidden="true" src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2393c5fd%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%2310243c%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%2310243c%22%2F%3E%3C%2Fsvg%3E"><div><strong id="model-name">Image Studio</strong><small>Local studio</small></div></div><div class="header-actions"><nav class="nav" aria-label="Main navigation"><a href="/" aria-current="page">Generator</a><a href="/gallery">Gallery</a><a href="/observability">Observability</a></nav><button class="secondary" id="open-queue" type="button" aria-haspopup="dialog" aria-controls="queue-dialog">Queue <span id="queue-badge" hidden></span></button><div class="status" id="status" data-state="checking"><span class="dot"></span><span id="status-text">Connecting…</span></div></div></header>
+  <!-- IMAGEGEN_HEADER -->
   <main>
     <div class="intro"><div><h1>Make something worth seeing.</h1><p>A few words. A new image. All on your Mac.</p></div><span class="tag">Your private workspace</span></div>
     <p class="hint" id="license-notice" hidden></p>
@@ -133,44 +105,12 @@
 
     <p id="announcement" role="status" aria-live="polite"></p>
   </main>
-    <dialog class="queue-panel" id="queue-dialog" aria-labelledby="queue-title">
-      <div class="queue-heading"><h2 id="queue-title">Queue</h2><div class="queue-dialog-actions"><span class="help-control"><button class="secondary" id="pause-queue" type="button">Pause queue</button><button type="button" class="help-button" aria-label="Help with Pause queue" data-help="Pauses or resumes ordinary queued work. The active batch finishes, and Generate immediately requests can still run."><span aria-hidden="true">?</span></button></span><span class="help-control"><button class="secondary" id="clear-queue" type="button">Clear waiting</button><button type="button" class="help-button" aria-label="Help with Clear waiting" data-help="Cancels all waiting jobs across models. The active batch, completed images and job history are kept."><span aria-hidden="true">?</span></button></span><button class="secondary" id="close-queue" type="button" aria-label="Close queue">Close</button></div></div><p class="queue-count" id="queue-summary" role="status">Connecting…</p>
-      <p class="queue-help">Saved on disk and resumed after a server restart. One queue handles all setup image models.</p><p class="queue-help" id="queue-drag-help">Drag the grip on the left to reorder waiting jobs, or focus it and use ↑ / ↓. Run Now uses the next free slot without interrupting the active batch.</p>
-      <div class="queue-tools"><label for="queue-filter" style="margin:0">Show</label><button type="button" class="help-button" aria-label="Help with queue filter" data-help="Show active work or filter saved history by job status. All models share this queue and its ordering."><span aria-hidden="true">?</span></button><select id="queue-filter"><option value="pending">Active queue</option><option value="">All jobs</option><option value="queued">Waiting</option><option value="running">Running</option><option value="succeeded">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></div>
-      <p class="queue-help" id="queue-notice" role="status" hidden></p><div class="queue-list" id="queue-list" aria-live="polite"></div>
-      <p class="error" id="queue-error" role="alert" hidden></p><div class="queue-pages"><button class="secondary" id="queue-previous" type="button" disabled>← Previous</button><span class="queue-count" id="queue-page"></span><button class="secondary" id="queue-next" type="button" disabled>Next →</button></div>
-    </dialog>
+<!-- IMAGEGEN_QUEUE -->
+  <script src="/assets/shell.js"></script>
   <footer><div>Saved to <code id="saved-path">Loading save folder…</code></div><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <script>
     const $ = id => document.getElementById(id);
-    const queueIconPaths={
- queue:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
- monitor:'M4 4h16v12H4zM8 21h8M12 16v5',
- play:'m8 5 11 7-11 7Z',
- pause:'M8 5v14M16 5v14',
- remove:'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6',
- clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
- close:'m6 6 12 12M18 6 6 18',
- previous:'m14 6-6 6 6 6',next:'m10 6 6 6-6 6',
- resources:'M4 3v18h17M8 16v-5M13 16V7M18 16v-8',
- retry:'M3 10a9 9 0 1 1 1 8M3 4v6h6',
- grip:'M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01'
-};
-function queueIcon(name){
- const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
- for(const[key,value]of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':name==='grip'?'3':'1.6','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false',class:'queue-icon'}))icon.setAttribute(key,value);
- const path=document.createElementNS(icon.namespaceURI,'path');path.setAttribute('d',queueIconPaths[name]);icon.append(path);return icon;
-}
-function queueLabel(control,icon,label){
-      const text=document.createElement('span');text.textContent=label;control.replaceChildren(queueIcon(icon),text);return control;
-    }
-    function queueControl(tag,label,icon,cls='secondary'){
-      const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
-    }
-    for(const[id,icon,label]of [['pause-queue','pause','Pause queue'],['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
-    $('open-queue').prepend(queueIcon('queue'));
     const watchingJobs = {generate:null,edit:null};
-    let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
     let activeModel = null, defaultModel = null, loraRequestVersion = 0, defaultSteps = 9, maxSteps = 12, referenceMode = 'variation';
     let generating = false, ready = false, serverBusy = false, lastSeed = null, lastResult = null;
     let referenceFile = null, referenceUpload = null, referencePreviewURL = null, referenceDimensions = null;
@@ -390,7 +330,7 @@ function queueLabel(control,icon,label){
       } catch { if(version===loraRequestVersion && workflow===owner){ pendingLora=null;$('lora-hint').textContent = 'Could not load styles. Reload after checking the server.'; } }
     }
     $('lora').addEventListener('change', () => {pendingLora=null;updateLoRA();});
-    function status(text, state) { $('status-text').textContent = text; $('status').dataset.state = state; }
+    function status(text,state){window.ImageGenShell.setStatus(text,state);}
     function updateButton() {
       updateWorkflowAvailability();
       const selectedArea=workflow==='edit' && $('edit-area').value==='selected';
@@ -474,11 +414,7 @@ function queueLabel(control,icon,label){
     });
     $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
     $('reference').addEventListener('input', () => { if (referenceFile || !$('reference-card').hidden) clearPhoto(); referenceDimensions = null; $('reference-size').value='auto'; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
-    function updateRuntimeStatus(data) {
-      if (generating) return;
-      const name=modelCatalog.find(item=>item.id===data.active_model)?.name || data.active_model || 'queued image';
-      status(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…` : data.status==='ready' ? 'Ready on your Mac' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : 'checking');
-    }
+    function updateRuntimeStatus(data){window.ImageGenShell.updateHealth(data);}
     async function checkHealth() {
       try {
         const response = await fetch('/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
@@ -581,7 +517,7 @@ function queueLabel(control,icon,label){
         if (payload.generate_immediately) followJob(job.id);
         $('announcement').textContent = payload.generate_immediately ? 'Image request saved. It will run in the next immediate slot.' : 'Image added to the persisted queue.';
         $('import-note').textContent = $('announcement').textContent; $('import-note').hidden = false;
-        queueOffset = 0; await refreshQueue();
+        window.ImageGenShell.resetOffset(); await refreshQueue();
       } catch (error) {
         $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
@@ -696,135 +632,16 @@ function queueLabel(control,icon,label){
       if(owner!==workflow || displayedBatch!==batch)return;
       $('announcement').textContent=announcement;
     }
-    async function requestJSON(url, options = {}) {
-      const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
-      const data=await response.json();
-      if (!response.ok) {const error=new Error(typeof data.detail === 'string' ? data.detail : 'Queue request failed.');error.status=response.status;throw error;}
-      return data;
+    const requestJSON=window.ImageGenShell.requestJSON;
+    async function inspectQueueJob(job){
+      try{
+        const current=await requestJSON('/v1/jobs/'+job.id);setWorkflow(jobWorkflow(current));
+        if(current.status==='succeeded' || current.partial_result)await displayJob(current);
+        if(['failed','cancelled'].includes(current.status))showError(current.error || 'This job was cancelled.');
+        else if(current.status!=='succeeded'){followJob(job.id,jobWorkflow(current));await refreshQueue();}
+      }catch(error){showError(error.message);}
     }
-    async function queueAction(url, options) {
-      if (queueMutating) return;
-      queueMutating=true; $('queue-error').hidden=true;
-      try { return await requestJSON(url,options); }
-      catch(error) { showError(error.message); }
-      finally { queueMutating=false; await refreshQueue(); }
-    }
-    function moveQueueJob(identifier,position) {
-      return queueAction('/v1/jobs/'+identifier+'/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position})});
-    }
-    function clearQueueDrag() {
-      const drag=queueDrag; queueDrag=null;
-      $('queue-list').querySelectorAll('.queue-item').forEach(row => row.classList.remove('dragging','drop-before','drop-after'));
-      return drag;
-    }
-    function attachQueueDrag(handle,row,job) {
-      handle.addEventListener('keydown',event => {
-        if (!['ArrowUp','ArrowDown'].includes(event.key)) return;
-        event.preventDefault();
-        const position=job.queue_position+(event.key==='ArrowUp' ? -1 : 1);
-        if (position<1 || position>Number($('queue-list').dataset.waiting)) return;
-        moveQueueJob(job.id,position).then(() => {
-          $('queue-list').querySelector(`[data-job-id="${job.id}"] .queue-drag`)?.focus();
-        });
-      });
-      handle.addEventListener('pointerdown',event => {
-        if (event.button!==0 || queueMutating) return;
-        queueDrag={id:job.id,position:job.queue_position,startY:event.clientY,active:false};
-        handle.setPointerCapture(event.pointerId);
-      });
-      handle.addEventListener('pointermove',event => {
-        if (!queueDrag || queueDrag.id!==job.id) return;
-        if (!queueDrag.active && Math.abs(event.clientY-queueDrag.startY)<5) return;
-        queueDrag.active=true; row.classList.add('dragging');
-        const others=[...$('queue-list').querySelectorAll('[data-position]')].filter(item => item!==row);
-        others.forEach(item => item.classList.remove('drop-before','drop-after'));
-        if (!others.length) return;
-        const next=others.find(item => { const bounds=item.getBoundingClientRect(); return event.clientY<bounds.top+bounds.height/2; });
-        const target=next || others.at(-1),position=Number(target.dataset.position);
-        target.classList.add(next ? 'drop-before' : 'drop-after');
-        queueDrag.position=next ? position-(job.queue_position<position ? 1 : 0) : position+(job.queue_position>position ? 1 : 0);
-        const list=$('queue-list'),bounds=list.getBoundingClientRect();
-        if (event.clientY<bounds.top+35) list.scrollBy(0,-18);
-        else if (event.clientY>bounds.bottom-35) list.scrollBy(0,18);
-      });
-      handle.addEventListener('pointerup',() => {
-        const drag=clearQueueDrag();
-        if (drag?.active && drag.position!==job.queue_position) moveQueueJob(job.id,drag.position);
-        else refreshQueue();
-      });
-      handle.addEventListener('pointercancel',() => { clearQueueDrag(); refreshQueue(); });
-      handle.addEventListener('lostpointercapture',() => { if (queueDrag) { clearQueueDrag(); refreshQueue(); } });
-    }
-    window.addEventListener('blur',clearQueueDrag);
-    function renderQueueJob(job) {
-      const row=document.createElement('div'); row.className='queue-item';
-      const copy=document.createElement('div'); copy.className='queue-copy';
-      const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
-      const detail=document.createElement('small'); detail.textContent=`${modelCatalog.find(item=>item.id===job.model)?.name || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size==='auto' || (!job.request.size && job.request.reference_image) ? 'Auto resolution' : job.request.size || '1024x1024'} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
-      copy.append(title,detail);
-      if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
-      row.dataset.jobId=job.id;
-      if (job.status==='queued') {
-        row.dataset.position=job.queue_position;
-        const handle=document.createElement('button'); handle.type='button'; handle.className='queue-drag'; handle.append(queueIcon('grip'));
-        handle.setAttribute('aria-label',`Move waiting job ${job.queue_position}: ${job.request.prompt.slice(0,80)}`);
-        handle.setAttribute('aria-describedby','queue-drag-help');
-        attachQueueDrag(handle,row,job); row.append(handle);
-      } else {
-        const spacer=document.createElement('span'); spacer.className='queue-drag-spacer'; spacer.setAttribute('aria-hidden','true'); row.append(spacer);
-      }
-      row.append(copy);
-      const actions=document.createElement('div'); actions.className='queue-actions';
-      const inspect=queueControl('button',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'play' : 'monitor','secondary queue-monitor'); inspect.type='button';
-      inspect.addEventListener('click',async() => {
-        $('queue-dialog').close();
-        try {
-          const current=await requestJSON('/v1/jobs/'+job.id);setWorkflow(jobWorkflow(current));
-          if (current.status==='succeeded' || current.partial_result) await displayJob(current);
-          if (['failed','cancelled'].includes(current.status)) showError(current.error || 'This job was cancelled.');
-          else if (current.status!=='succeeded') { followJob(job.id,jobWorkflow(current)); await refreshQueue(); }
-        } catch(error) { showError(error.message); }
-      }); actions.append(inspect);
-      if (job.status==='queued') {
-        const run=queueControl('button','Run Now','play','secondary queue-run-now'); run.type='button';
-        run.title='Run at the next free slot, even while paused; the active batch finishes first.';
-        run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close();setWorkflow(jobWorkflow(job));followJob(job.id,jobWorkflow(job));refreshQueue(); } })); actions.append(run);
-        const remove=queueControl('button','Remove','remove','secondary queue-remove'); remove.type='button';
-        remove.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); actions.append(remove);
-      } else if (['failed','cancelled'].includes(job.status)) {
-        const retry=queueControl('button','Retry','retry'); retry.type='button';
-        retry.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); actions.append(retry);
-      }
-      if (job.attempts>0) { const metrics=queueControl('a','Metrics','resources','secondary queue-metrics'); metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model}); metrics.title='View resource measurements for this job'; actions.append(metrics); }
-      row.append(actions); return row;
-    }
-    async function refreshQueue() {
-      if (pollingQueue || queueDrag || queueMutating) return;
-      pollingQueue=true;
-      try {
-        const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
-        if ($('queue-filter').value) params.set('status',$('queue-filter').value);
-        const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health')]);
-        activeModel=health.active_model; serverBusy=health.busy; updateRuntimeStatus(health);
-        const summary=health.queue || {};
-        queuePaused=!!summary.paused;
-        const count=(summary.running || 0)+(summary.queued || 0); $('queue-badge').textContent=String(count); $('queue-badge').hidden=!count;
-        $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
-        queueLabel($('pause-queue'),queuePaused ? 'play' : 'pause',queuePaused ? 'Resume queue' : 'Pause queue');
-        $('clear-queue').disabled=!summary.queued;
-        $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
-        $('queue-notice').hidden=!$('queue-notice').textContent;
-        if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
-        if (queueDrag || queueMutating) return;
-        $('queue-list').dataset.waiting=String(summary.queued || 0);
-        const version=JSON.stringify(list.data);
-        if (version!==queueListVersion) {
-          $('queue-list').replaceChildren(...list.data.map(renderQueueJob)); queueListVersion=version;
-          if (!list.total) { const empty=document.createElement('p'); empty.className='queue-help'; empty.textContent='No jobs in this view.'; $('queue-list').append(empty); }
-        }
-        queueNext=list.next_offset ?? null; queuePrevious=list.previous_offset ?? null;
-        $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
-        $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
+    async function refreshWatchedJobs(summary){
         for(const owner of ['generate','edit']){
           const identifier=watchingJobs[owner];if(!identifier)continue;
           let job;
@@ -841,18 +658,13 @@ function queueLabel(control,icon,label){
           }
           if(owner===workflow)updateWorkflowPreview();
         }
-      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
-      finally { pollingQueue=false; }
     }
-    $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
-    $('close-queue').addEventListener('click',() => $('queue-dialog').close());
-    $('queue-dialog').addEventListener('close',clearQueueDrag);
-    $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
-    $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
-    $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
-    $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
-    $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });
-    $('queue-previous').addEventListener('click',() => { if (queuePrevious!==null) { queueOffset=queuePrevious; refreshQueue(); } });
+    function refreshQueue(){return window.ImageGenShell.refresh();}
+    async function importQueueJob(){
+      const params=new URLSearchParams(location.search),identifier=params.get('job');if(!identifier)return;
+      if(!/^[0-9a-f]{32}$/.test(identifier)){showError('This queue link is invalid. Open the job from Queue again.');return;}
+      await inspectQueueJob({id:identifier});params.delete('job');history.replaceState(null,'',location.pathname+(params.size?'?'+params:''));
+    }
     function selectSize(value) {
       if (typeof value !== 'string' || !/^\d+x\d+$/.test(value)) return false;
       const dimensions = value.split('x').map(Number);
@@ -944,8 +756,9 @@ function queueLabel(control,icon,label){
         $('prompt').focus();
       } catch (error) { if(targetVersion===workflowVersion)showError(error instanceof TypeError ? 'Could not load the saved image. Check the server, then open it from the gallery again.' : error.message); }
     }
-    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await restoreWatchers(); await importSavedImage(); await refreshQueue(); }
-    initialize(); setInterval(async()=>{await checkHealth();if (!generating && !previewingExpansion) await loadModels();}, 15000); setInterval(refreshQueue, 2000);
+    async function initialize() { updateReferenceSizing(); await checkHealth(); await loadModels(); await loadLoRAs(); await restoreWatchers(); await importSavedImage(); await importQueueJob(); await refreshQueue(); }
+    window.ImageGenShell.configure({onHealth(health){activeModel=health.active_model;serverBusy=health.busy;},onRefresh:refreshWatchedJobs,onInspect:inspectQueueJob,onRunNow(job){setWorkflow(jobWorkflow(job));followJob(job.id,jobWorkflow(job));refreshQueue();}});
+    initialize(); setInterval(async()=>{await checkHealth();if (!generating && !previewingExpansion) await loadModels();}, 15000);
   </script>
 </body>
 </html>

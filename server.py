@@ -54,6 +54,7 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from ui_shell import render_page
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -561,7 +562,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse(PROJECT_ROOT / "ui" / "index.html", media_type="text/html", headers={"Cache-Control": "no-store"})
+    return render_page(PROJECT_ROOT,"index.html")
 
 
 @app.get("/assets/help.css", include_in_schema=False)
@@ -572,6 +573,16 @@ def ui_help_styles():
 @app.get("/assets/help.js", include_in_schema=False)
 def ui_help_script():
     return FileResponse(PROJECT_ROOT / "ui" / "assets" / "help.js", media_type="text/javascript", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/assets/shell.css", include_in_schema=False)
+def ui_shell_styles():
+    return FileResponse(PROJECT_ROOT / "ui/assets/shell.css", media_type="text/css", headers={"Cache-Control":"no-store"})
+
+
+@app.get("/assets/shell.js", include_in_schema=False)
+def ui_shell_script():
+    return FileResponse(PROJECT_ROOT / "ui/assets/shell.js", media_type="text/javascript", headers={"Cache-Control":"no-store"})
 
 
 @app.get("/health")
@@ -1162,7 +1173,7 @@ def catalog_urls(record, request):
 
 @app.get("/gallery", include_in_schema=False)
 def gallery():
-    return FileResponse(PROJECT_ROOT / "ui" / "gallery.html", media_type="text/html", headers={"Cache-Control": "no-store"})
+    return render_page(PROJECT_ROOT,"gallery.html")
 
 
 @app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
