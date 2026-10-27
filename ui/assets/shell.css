@@ -5,9 +5,10 @@
 .app-header .brand strong{font-size:18px;font-weight:700;letter-spacing:-.5px;display:inline}
 .app-header .brand small{display:block;font-size:11px;color:#ababab;letter-spacing:1.3px;text-transform:uppercase}
 .app-header .header-actions{display:flex;align-items:center;gap:24px}
-.app-header .nav{display:flex;flex-wrap:nowrap;gap:5px;padding:4px;background:#1d1d1d;border:1px solid #3b3b3b;border-radius:10px}
-.app-header .nav a{text-decoration:none;padding:7px 15px;font-size:12px;border-radius:6px;color:#ababab;white-space:nowrap}
-.app-header .nav a[aria-current]{background:#273649;color:#93c5fd}
+.app-header .nav{display:flex;align-items:center;flex-wrap:nowrap;gap:18px}
+.app-header .nav a{display:inline-flex;align-items:center;text-decoration:none;padding:7px 0;font-size:12px;color:#ababab;white-space:nowrap}
+.app-header .nav a:hover{text-decoration:underline;text-underline-offset:4px}
+.app-header .nav a[aria-current="page"]{color:#93c5fd}
 .app-header .status{display:flex;gap:8px;align-items:center;color:#ababab;font-size:12px}
 .app-header .dot{width:7px;height:7px;background:#808080;border-radius:50%;flex-shrink:0}
 .app-header .status[data-state=ready] .dot{background:#93c5fd}.app-header .status[data-state=busy] .dot{background:#7dd3fc}.app-header .status[data-state=offline] .dot{background:#ed9696}
@@ -22,7 +23,7 @@
 .queue-panel .error{margin:18px 0 0;padding:12px;border-radius:8px;border:1px solid #79514a;background:#332421;color:#f7c6bc;font-size:13px;overflow-wrap:anywhere}.queue-panel .error[hidden]{display:none}
 @media(max-width:850px){.app-header{padding-left:24px;padding-right:24px}}
 @media(max-width:720px){.app-header .header-actions{gap:10px;flex-wrap:wrap}}
-@media(max-width:640px){.app-header{padding:12px 18px;flex-wrap:wrap}.app-header .header-actions{gap:12px;flex-wrap:wrap}.app-header .nav a{padding:6px 10px}.app-header .brand strong{font-size:16px}.app-header .status{font-size:11px}}
+@media(max-width:640px){.app-header{padding:12px 18px;flex-wrap:wrap}.app-header .header-actions{gap:12px;flex-wrap:wrap}.app-header .nav{gap:16px}.app-header .nav a{padding:6px 0}.app-header .brand strong{font-size:16px}.app-header .status{font-size:11px}}
 
     .queue-panel{margin:auto;width:min(1180px,calc(100vw - 32px));height:80vh;max-height:80vh;height:80dvh;max-height:80dvh;color:var(--text);overflow:hidden;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface)}.queue-heading,.queue-tools,.queue-item,.queue-pages{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.queue-heading h2{margin:0;font-size:20px;font-weight:550}.queue-tools{justify-content:flex-start;margin:16px 0}.queue-tools select{width:auto}.queue-list{display:grid;gap:0}.queue-item{padding:7px 0;border-top:1px solid var(--line);gap:8px;flex-wrap:nowrap}.queue-copy{min-width:0;flex:1}.queue-copy strong{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:500;line-height:1.35}.queue-copy small{display:block;color:var(--muted);font-size:11px;line-height:1.4}.queue-copy .queue-help{margin:3px 0 0;line-height:1.4}.queue-item button{flex-shrink:0}.queue-pages{margin-top:16px}.queue-error{color:#f7c6bc;overflow-wrap:anywhere}.queue-help{font-size:12px;color:var(--muted);margin:7px 0}.queue-count{font-size:13px;color:var(--muted)}
 

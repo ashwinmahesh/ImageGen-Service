@@ -69,7 +69,7 @@ Klein 4B uses Apache 2.0. Commercial model use of [Klein 9B](https://huggingface
 
 ## Keep a searchable image library
 
-Generator, Gallery and Observability share the same header, navigation, live server status and **Queue** button. Open and manage the queue from any page; **Monitor** or **Open image** takes you to the generator preview when needed.
+Generator, Gallery and Observability share the same header, navigation, live server status and **Queue** button. Plain text navigation links highlight the current page in blue and keep the others gray; Command-click (Mac), Ctrl-click (Windows/Linux) or middle-click opens a destination in a new tab. Open and manage the queue from any page; **Monitor** or **Open image** takes you to the generator preview when needed.
 
 The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation. Choose **Edit photo** to open the selected image directly in the Edit preview, even when a different model created it. The action is available whenever a setup model supports editing. Choose an editor if prompted, describe the change and submit; your original file stays unchanged. **Make a variation** and **Reuse settings** remain separate actions.
 
