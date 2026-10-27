@@ -5,7 +5,7 @@ description: Set up and use the shared local Apple Silicon image service for Z-I
 
 # Operate ImageGen-Service
 
-Use this skill to set up or call the service. For repository edits, follow `AGENTS.md` in the checkout. The human-facing `README.md` provides the quick start; `docs/setup.md` covers advanced configuration; `docs/api.md` covers request fields, results, queue semantics and recovery. Read the reference relevant to the task. Each live `/openapi.json` is authoritative for its service. No Codex plugin, shell alias or chat history is required.
+Use this skill to set up or call the service. For repository edits, follow `AGENTS.md` in the checkout. The human-facing `README.md` introduces the project; `QUICKSTART.md` walks through first use; `MANUAL.md` explains everyday controls and workflows; `docs/setup.md` covers advanced configuration; `docs/api.md` covers request fields, results, queue semantics and recovery. Read the reference relevant to the task. Each live `/openapi.json` is authoritative for its service. No Codex plugin, shell alias or chat history is required.
 
 Locate the provided checkout containing `Makefile`, `server.py` and `model_profiles.py`. On the original Mac it is `~/Documents/models/ImageGen-Service`, with model/media storage at `/Volumes/ASH-SSD/models`. Elsewhere use the supplied checkout and chosen store. Do not recreate retired per-model source projects. All backends share one source tree and environment.
 

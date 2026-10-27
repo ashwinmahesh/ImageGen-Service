@@ -1,6 +1,6 @@
 # Setup and runtime reference
 
-Start with the [README quick start](../README.md#quick-start). This page explains advanced configuration, model sources and operational details. For image requests and queue semantics, see the [API reference](api.md).
+Start with [Quick Start](../QUICKSTART.md), or read the [User Manual](../MANUAL.md) for all user-facing controls. This page explains advanced configuration, model sources and operational details. For image requests and queue semantics, see the [API reference](api.md).
 
 ## First-time setup
 

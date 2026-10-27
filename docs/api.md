@@ -1,6 +1,6 @@
 # ImageGen API reference
 
-This is the human-readable reference for **all HTTP endpoints in ImageGen-Service**. Use it to build a client, submit images from another tool, manage saved work or browse results. For your first request, follow the [quick-start walkthrough](../QUICKSTART.md#5-generate-through-the-api).
+This is the human-readable reference for **all HTTP endpoints in ImageGen-Service**. Use it to build a client, submit images from another tool, manage saved work or browse results. For your first request, follow the [quick-start walkthrough](../QUICKSTART.md#5-use-the-api).
 
 ## Contents
 
@@ -370,7 +370,7 @@ Values above are illustrative. `created` is integer Unix seconds; `generation_se
 
 Set `n` to 2–5. The first seed is random if omitted, then persisted; option `i` uses `(first_seed + i) % 4294967296` for zero-based `i`. Images render sequentially in one durable job. With `expand_prompt:true`, expansion is shared unless `vary_prompt:true` requests distinct composition plans.
 
-All candidate prompts are committed before rendering and reused after interruption. Recovery adopts completed files and renders missing options only. Explicit retry creates a new full batch. Different seeds/prompts can still give similar layouts for constrained prompts or strongly preserved references. See the [README example](../README.md#explore-multiple-options).
+All candidate prompts are committed before rendering and reused after interruption. Recovery adopts completed files and renders missing options only. Explicit retry creates a new full batch. Different seeds/prompts can still give similar layouts for constrained prompts or strongly preserved references. See the [manual example](../MANUAL.md#explore-multiple-options).
 
 ## Independent queue API (generator may be off)
 

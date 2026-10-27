@@ -1,6 +1,6 @@
 # Working on ImageGen-Service
 
-This file is for agents changing the repository. An agent operating the service should read `skill/image-model-server/SKILL.md`. Keep `README.md` written for people: explain what the project does and the implemented techniques behind its image workflow; put step-by-step usage in `QUICKSTART.md`. Detailed contracts belong in `docs/api.md` and `docs/setup.md`.
+This file is for agents changing the repository. An agent operating the service should read `skill/image-model-server/SKILL.md`. Keep `README.md` written for people: explain what the project does and the implemented techniques behind its image workflow; put a short first-use walkthrough in `QUICKSTART.md` and the full human usage guide in `MANUAL.md`. Detailed contracts belong in `docs/api.md` and `docs/setup.md`.
 
 ## Project layout
 
@@ -79,8 +79,9 @@ Git contains source, docs and the four approved screenshots under `docs/screensh
 
 Update these together when their behavior changes:
 
-- `README.md`: human project overview, supported capabilities and high-level image techniques; link the step-by-step quick start and detailed references.
-- `QUICKSTART.md`: step-by-step human setup, webpage/API walkthroughs and concise setting explanations; keep examples and defaults current.
+- `README.md`: a short human introduction, four-command start, scannable capabilities and links to the guides. Keep roughly 400–600 words, with one main screenshot and optional extra screenshots collapsed. Do not append a paragraph for every feature or copy UI pixel details, API schemas, failure/recovery rules, sampling windows or implementation notes here; maintain those in their dedicated guides.
+- `QUICKSTART.md`: a short, beginner-friendly path from download/setup to a first image, basic webpage controls, one asynchronous API example and stop/restart instructions. Aim for a few minutes of reading; link advanced choices to the manual instead of expanding every feature here. Keep examples and defaults current.
+- `MANUAL.md`: the full human usage guide: model choices, prompt techniques, settings, editing, LoRAs, gallery, queues, monitoring and troubleshooting. Move substantial usage explanations here, retaining links from the overview and Quick Start. Keep exact setup/API contracts in their dedicated references.
 - `docs/setup.md`: exact setup, storage and startup behavior.
 - `docs/api.md`: human-readable specifications for every endpoint on both services, including methods, ports, request/response fields, errors, media routes and recovery. Check its endpoint inventory against the registered routes and both live schemas when APIs change.
 - `skill/image-model-server/SKILL.md`: portable operating instructions; keep the Z-Image wrapper consistent.
