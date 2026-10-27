@@ -90,7 +90,7 @@ Ordinary jobs run in order. The webpage defaults to **Generate immediately**, wh
 
 Jobs survive restarts. The generator accesses SQLite directly, so the webpage and generation continue if the standalone queue API stops. Jobs retain their requested model. If its files become unavailable after admission, it stays waiting with an explanation while other eligible jobs continue. New requests for models that need setup are rejected; run setup first.
 
-The header’s **Queue** button opens a modal with the active/waiting count, pause/clear controls and saved history. It lets you drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
+The header’s **Queue** button opens a modal with the active/waiting count, pause/clear controls and saved history. Compact controls pair icons with labels, using muted blue for **Monitor**, green for **Run Now**, and red for **Remove**, matching VoiceGen. Drag waiting jobs into a different order or use **Run Now** to put one next, after the active batch finishes. Run Now also works while ordinary work is paused. Saved order survives restarts, and both APIs expose the same controls.
 
 ## Built for local hardware and storage
 
