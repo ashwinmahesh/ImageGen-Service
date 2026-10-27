@@ -6,6 +6,8 @@ import tempfile
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+MAX_REFERENCE_EDGE = 2048
+
 
 class ReferenceError(ValueError):
     pass
@@ -66,8 +68,11 @@ def edge_pad(photo, canvas_size):
 
 @contextmanager
 def prepare_geometry(reference_path, requested_size, scratch_root):
-    requested = tuple(map(int, requested_size.split("x")))
+    automatic = requested_size == 'auto'
+    requested = None if automatic else tuple(map(int, requested_size.split("x")))
     if reference_path is None:
+        if automatic:
+            raise ReferenceError('Auto resolution requires a reference photo')
         yield Geometry(None, requested, requested)
         return
     try:
@@ -80,7 +85,8 @@ def prepare_geometry(reference_path, requested_size, scratch_root):
             photo = ImageOps.exif_transpose(source).convert("RGB")
     except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
         raise ReferenceError(f"Cannot read reference_image {reference_path}: {exc}") from exc
-    output_size = output_dimensions(photo.size, max(requested))
+    long_edge = min(max(photo.size), MAX_REFERENCE_EDGE) if automatic else max(requested)
+    output_size = output_dimensions(photo.size, long_edge)
     model_size = tuple(max(256, ((dimension + 63) // 64) * 64) for dimension in output_size)
     if photo.size == output_size == model_size and orientation == 1:
         yield Geometry(reference_path, model_size, output_size, photo.size)

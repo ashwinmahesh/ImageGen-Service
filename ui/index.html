@@ -102,7 +102,7 @@
           <div id="reference-options" class="reference-options" hidden><div class="help-label"><label for="strength">Keep the original</label><button type="button" class="help-button" aria-label="Help with Keep the original" data-help="Higher values preserve more of the reference photo; lower values allow bigger changes. Start at 0.6."><span aria-hidden="true">?</span></button></div><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
         <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p></div>
-        <div class="field" id="resolution-field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, resolution sets the long edge and keeps the photo’s aspect ratio."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
+        <div class="field" id="resolution-field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, Auto detects its dimensions without upscaling (up to a 2048 px long edge). Choose a long edge only to override it; the photo’s aspect ratio is preserved."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="auto">Auto · match photo</option><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <div class="field"><div class="help-label"><label for="image-count">Number of images</label><button type="button" class="help-button" aria-label="Help with Number of images" data-help="Generate 1–5 options, one after another, with different seeds. More options take more time; composition variation can add further variety."><span aria-hidden="true">?</span></button></div><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint" id="image-count-hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
         <section id="variation-controls" hidden><div class="help-choice"><label class="immediate-choice"><input id="vary-prompt" type="checkbox" role="switch" class="setting-switch" checked>Different compositions with LLM</label><button type="button" class="help-button" aria-label="Help with Different compositions with LLM" data-help="Gives each option its own composition prompt while keeping your stated subjects and style. Requires at least two images and prompt expansion."><span aria-hidden="true">?</span></button></div><p class="hint" id="variation-hint"></p></section>
         <details><summary>Fine-tune the settings</summary><div class="two field"><div><div class="help-label"><label for="steps">Steps</label><button type="button" class="help-button" aria-label="Help with Steps" data-help="How many refinement steps the image model takes. More steps cost time and do not always improve the result; start with this model’s default."><span aria-hidden="true">?</span></button></div><input id="steps" type="number" min="1" max="12" step="1" value="9" required></div><div><div class="help-label"><label for="seed">Seed</label><button type="button" class="help-button" aria-label="Help with Seed" data-help="Leave blank for a random starting point, or reuse a number to compare changes from the same starting noise."><span aria-hidden="true">?</span></button></div><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Random"></div></div><p class="hint" id="steps-hint">Reuse a seed to explore variations of the same idea.</p></details>
@@ -187,7 +187,7 @@ function queueLabel(control,icon,label){
     [...$('form').querySelectorAll('details')].forEach((detail,index)=>detail.dataset.workflowDetail=String(index));
     function newWorkflowState(owner){
       const fields=structuredClone(initialWorkflowFields);fields['model-choice'].value='';
-      if(owner==='edit'){fields.lora.value='';fields['reference-size'].value='1024';fields.steps.value='';}
+      if(owner==='edit'){fields.lora.value='';fields['reference-size'].value='auto';fields.steps.value='';}
       return {initialized:false,fields,details:{},referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,selectionRect:null,maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
     }
     const workflowStates={generate:newWorkflowState('generate'),edit:newWorkflowState('edit')};
@@ -268,7 +268,7 @@ function queueLabel(control,icon,label){
         referenceMode=workflow==='edit' ? 'edit' : 'variation';
         $('model-status').textContent=workflow==='edit' && editsSupported() ? 'Choose an editing model to continue.' : 'No setup models available. Run make setup, then refresh this page.';
         $('edit-area').options[1].disabled=true; $('edit-area-hint').textContent='Choose a model to see its editing options.';
-        $('steps').value=''; updateReferenceSizing(); updateButton(); updateVariationControls(); return;
+        $('steps').value=''; updateReferenceSizing(); updateButton(); updateVariationControls(); updateExpansionGuidance(); return;
       }
       defaultSteps=profile.default_steps; maxSteps=profile.max_steps;
       $('steps').value=defaultSteps; $('steps').max=maxSteps;
@@ -286,7 +286,7 @@ function queueLabel(control,icon,label){
       $('edit-area').options[1].disabled=!maskSupported();
       if (!maskSupported()) { $('edit-area').value='whole'; selectionRect=null; maskUpload=null; savedMaskPath=null; }
       $('edit-area-hint').textContent=maskSupported() ? 'Select an area on the source photo to edit it. Pixels outside the selection are copied from the resized original.' : 'This Klein runtime edits the whole photo. Choose Qwen-Image 2.1 Turbo for area selection.';
-      updateReferenceSizing(); updateSourceCanvas(); updateButton(); updateVariationControls();
+      updateReferenceSizing(); updateSourceCanvas(); updateButton(); updateVariationControls(); updateExpansionGuidance();
     }
     function setWorkflow(next) {
       if (next===workflow || generating || previewingExpansion || (next==='edit' && !editsSupported())) return;
@@ -405,33 +405,39 @@ function queueLabel(control,icon,label){
       $('preview-expansion').disabled=!expansionEnabled || serverBusy || previewingExpansion || generating || varyingCompositions() || !chosenProfile();
       $('preview-expansion').title=varyingCompositions() ? 'Distinct candidate prompts are planned when the batch starts; inspect each image’s saved expansion.' : '';
     }
+    function updateExpansionGuidance(){
+      const profile=chosenProfile(),guidance=workflow==='edit' ? profile?.photo_editing?.prompt_expansion_guidance : profile?.[profile.id]?.prompt_expansion_guidance;
+      $('expansion-guidance').textContent=guidance ? `Guidance: ${guidance.id}${guidance.verified_token_count ? ' · image token budget checked' : ' · native token count unavailable'}` : '';
+    }
     function showError(message) { const target=$($('queue-dialog').open ? 'queue-error' : 'error'); target.textContent=message; target.hidden=false; }
     function updateReferenceSizing() {
       const hasReference = Boolean(referenceFile || $('reference').value.trim());
       $('reference-options').hidden = !hasReference || referenceMode === 'edit' || workflow==='edit';
-      if (hasReference && !usingReferenceSizing) selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
       usingReferenceSizing = hasReference;
       $('size').hidden = hasReference; $('size').disabled = hasReference;
       $('reference-size').hidden = !hasReference; $('reference-size').disabled = !hasReference || generating;
       $('size-label').textContent = hasReference ? 'Reference resolution' : 'Image size';
       $('size-label').htmlFor = hasReference ? 'reference-size' : 'size';
       $('reference-size-hint').hidden = !hasReference;
-      const longEdge = hasReference ? Number($('reference-size').value) : Math.max(...$('size').value.split('x').map(Number));
+      const automatic=hasReference && $('reference-size').value==='auto';
+      const detected=referenceDimensions ? Math.max(...referenceDimensions) : null;
+      const longEdge=hasReference ? automatic ? detected && Math.min(2048,detected) : Number($('reference-size').value) : Math.max(...$('size').value.split('x').map(Number));
       $('size-hint').hidden = longEdge <= 1024;
       if (hasReference) {
         let dimensions = '';
-        if (referenceDimensions) {
+        if (referenceDimensions && longEdge) {
           const [width, height] = referenceDimensions;
           const scale = longEdge / Math.max(width, height);
           dimensions = `${Math.max(1, Math.round(width * scale))} × ${Math.max(1, Math.round(height * scale))} · `;
         }
-        $('reference-size-hint').textContent = `${dimensions}Matches the photo’s aspect ratio automatically.`;
+        $('reference-size-hint').textContent=automatic ? detected ? `${dimensions}Detected from the photo${detected>2048 ? ' · capped at 2048 px long edge' : ' · original resolution'}.` : 'Auto · the server detects the photo dimensions when the job runs (up to 2048 px long edge).' : `${dimensions}Custom long edge; keeps the photo’s aspect ratio.`;
       }
       updateButton();
     }
     $('reference-size').addEventListener('change', updateReferenceSizing);
     function clearPhoto() {
       if (workflow==='edit' && displayedBatch?.request.task==='edit') displayedBatch=null;
+      $('reference-size').value='auto';
       referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; selectionRect=null; maskUpload=null; savedMaskPath=null; $('source-editor').hidden=true;
       if (referencePreviewURL) URL.revokeObjectURL(referencePreviewURL);
       referencePreviewURL = null; $('reference-preview').removeAttribute('src');
@@ -467,7 +473,7 @@ function queueLabel(control,icon,label){
       candidate.src = previewURL;
     });
     $('remove-photo').addEventListener('click', () => { $('reference').value = ''; clearPhoto(); $('choose-photo').focus(); });
-    $('reference').addEventListener('input', () => { if (referenceFile || !$('reference-card').hidden) clearPhoto(); referenceDimensions = null; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
+    $('reference').addEventListener('input', () => { if (referenceFile || !$('reference-card').hidden) clearPhoto(); referenceDimensions = null; $('reference-size').value='auto'; $('reference-options').hidden = !$('reference').value.trim(); updateReferenceSizing(); });
     function updateRuntimeStatus(data) {
       if (generating) return;
       const name=modelCatalog.find(item=>item.id===data.active_model)?.name || data.active_model || 'queued image';
@@ -491,8 +497,7 @@ function queueLabel(control,icon,label){
           setLoRAMode(data.loras_enabled); if (lorasEnabled) loadLoRAs();
         }
         const expansion = cap.prompt_expansion || {};
-        const selected=chosenProfile(), guidance=selected?.[selected.id]?.prompt_expansion_guidance;
-        $('expansion-guidance').textContent = guidance ? `Guidance: ${guidance.id}${guidance.verified_token_count ? ' · image token budget checked' : ' · native token count unavailable'}` : '';
+        updateExpansionGuidance();
         if (expansionEnabled !== !!expansion.enabled) {
           expansionEnabled = !!expansion.enabled;
           $('expansion-controls').hidden = !expansionEnabled;
@@ -526,7 +531,7 @@ function queueLabel(control,icon,label){
       $('prompt').value=workflow==='edit' ? '' : result.prompt;
       if(result.expanded)$('expand-prompt').checked=false;
       $('lora').value=workflow==='generate' ? result.lora : '';updateLoRA(false);if(result.lora)$('lora-strength').value=result.lora_strength;
-      updateReferenceSizing();selectLongEdge(Math.max(...referenceDimensions));updateReferenceSizing();updateVariationControls();updateSourceCanvas();
+      $('reference-size').value='auto';updateReferenceSizing();updateVariationControls();updateSourceCanvas();
       $('announcement').textContent='Image selected for editing. Describe the changes, then create a new version.';
       $('prompt').focus();$('prompt').select();
     });
@@ -535,7 +540,7 @@ function queueLabel(control,icon,label){
       event.preventDefault(); if (generating || previewingExpansion || !ready || !chosenProfile()) return;
       const prompt = $('prompt').value.trim();
       if (!prompt) { $('error').textContent = 'Describe the image you want to create.'; $('error').hidden = false; $('prompt').focus(); return; }
-      const payload = {model: chosenModel(), prompt, n:Number($('image-count').value), size: usingReferenceSizing ? `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
+      const payload = {model: chosenModel(), prompt, n:Number($('image-count').value), size: usingReferenceSizing ? $('reference-size').value==='auto' ? 'auto' : `${$('reference-size').value}x${$('reference-size').value}` : $('size').value, steps: Number($('steps').value), response_format: 'url', generate_immediately: $('generate-immediately').checked};
       if (workflow==='edit') { payload.task='edit'; if ($('preserve').value.trim()) payload.preserve=$('preserve').value.trim(); }
       if (expansionEnabled && $('expand-prompt').checked) payload.expand_prompt = true;
       if (varyingCompositions()) payload.vary_prompt=true;
@@ -755,7 +760,7 @@ function queueLabel(control,icon,label){
       const row=document.createElement('div'); row.className='queue-item';
       const copy=document.createElement('div'); copy.className='queue-copy';
       const title=document.createElement('strong'); title.textContent=job.request.prompt.slice(0,180);
-      const detail=document.createElement('small'); detail.textContent=`${modelCatalog.find(item=>item.id===job.model)?.name || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
+      const detail=document.createElement('small'); detail.textContent=`${modelCatalog.find(item=>item.id===job.model)?.name || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size==='auto' || (!job.request.size && job.request.reference_image) ? 'Auto resolution' : job.request.size || '1024x1024'} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
       copy.append(title,detail);
       if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
       row.dataset.jobId=job.id;
@@ -884,7 +889,7 @@ function queueLabel(control,icon,label){
         if (metadata.prompt_expansion) { showExpansion(metadata.prompt_expansion); $('expand-prompt').checked=false; updateVariationControls(); } $('tags').value = (item.tags || []).join(', ');
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
         if (sameModel && Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= maxSteps) $('steps').value = item.steps;
-        if (![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
+        if (metadata.requested_size!=='auto' && ![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
         $('lora').value = '';
         if (sameModel && item.lora) {
           const adapter = loraCatalog.find(entry => entry.id === item.lora.id && entry.available);
@@ -899,15 +904,17 @@ function queueLabel(control,icon,label){
           $('reference-info').textContent = (item.size || 'PNG') + ' · ready for a variation';
           $('reference-card').hidden = false; $('reference-options').hidden = referenceMode === 'edit'; $('choose-photo').textContent = 'Change photo'; $('strength').value = '0.6';
           if (Number($('steps').value) < 2) $('steps').value = String(defaultSteps);
-          updateReferenceSizing(); selectLongEdge(Math.max(...$('size').value.split('x').map(Number)));
+          $('reference-size').value='auto';updateReferenceSizing();
         } else if (typeof metadata.reference_image === 'string' && metadata.reference_image) {
           $('reference').value = metadata.reference_image; $('reference-options').hidden = referenceMode === 'edit';
+          if(Array.isArray(metadata.reference_size) && metadata.reference_size.length===2 && metadata.reference_size.every(value=>Number.isFinite(value) && value>0))referenceDimensions=metadata.reference_size.slice();
           if (Number.isFinite(metadata.image_strength) && metadata.image_strength >= 0 && metadata.image_strength < 1) $('strength').value = metadata.image_strength;
           if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
           if(targetVersion!==workflowVersion)return;
         if (metadata.task==='edit' && metadata.mask_image && maskSupported()) { savedMaskPath=metadata.mask_image; $('edit-area').value='selected'; warnings.push('The saved edit mask will be reused; clear the selection to start a new region.'); }
           warnings.push('This generation used a reference file; it must still exist at the saved path.');
         }
+        if(mode==='settings' && $('reference').value.trim() && metadata.requested_size && metadata.requested_size!=='auto')selectLongEdge(Math.max(...metadata.requested_size.split('x').map(Number)));
         updateReferenceSizing();
         $('seed').closest('details').open = true;
         $('import-note').textContent = (mode === 'reference' ? 'Gallery image selected. Describe the variation you want, then generate.' : 'Saved prompt and settings loaded. Review them before generating.') + (warnings.length ? ' ' + warnings.join(' ') : '');

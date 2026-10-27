@@ -155,7 +155,7 @@ def create_app(project=PROJECT_ROOT):
 
     @app.post('/v1/jobs',response_model=QueueJob,status_code=202,summary='Commit a request to the shared queue',description=(
         'model (default: shared saved choice) labels a job in state/queue/jobs.sqlite3. Only setup models are accepted. request contains '
-        'the image settings, such as prompt, size, seed, n and expand_prompt. For photo edits, include '
+        'the image settings, such as prompt, size, seed, n and expand_prompt. With a reference, omitted size or size:auto detects source resolution (2048px long-edge cap) during consumption. For photo edits, include '
         'task:"edit", reference_image and optional preserve inside request. Qwen selected-area edits also '
         'accept request.mask_image: an absolute server-local mask path matching the oriented source photo '
         '(white edits, black preserves at output resolution). Klein supports whole-photo edits only. '
@@ -256,7 +256,7 @@ class Replacement(BaseModel):
     request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed. Photo edits use task:"edit", reference_image, optional preserve, and Qwen-only mask_image (white edits, black preserves). Paths must remain accessible on the generator Mac until completion and recovery.',examples=[
         {'prompt':'A lantern in a misty forest','size':'1024x1024','n':1,'expand_prompt':True},
         {'task':'edit','prompt':'Change the jacket to green.','reference_image':'/absolute/path/photo.png',
-         'mask_image':'/absolute/path/mask.png','preserve':'Face, pose and background','size':'1024x1024'}])
+         'mask_image':'/absolute/path/mask.png','preserve':'Face, pose and background','size':'auto'}])
 
 
 class Submission(Replacement):

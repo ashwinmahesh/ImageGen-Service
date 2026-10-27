@@ -114,7 +114,7 @@ The API names below map to the webpage controls.
 | Setting | API field | What to know |
 | --- | --- | --- |
 | Description | `prompt` | Required. Describe subject, medium/style, setting and light. Maximum 4000 characters; Z-Image processes 512 tokens including formatting, so put essential details first. |
-| Resolution | `size` | Default `1024x1024`. API dimensions must be multiples of 64 from 256–2048. With a reference, the larger dimension sets the long edge and the photo sets the ratio. |
+| Resolution | `size` | Without a reference: `1024x1024` by default. With a reference: Auto detects its oriented dimensions without upscaling, capped at a 2048px long edge. API clients omit `size` or pass `"auto"`; an explicit `WIDTHxHEIGHT` overrides the long edge (multiples of 64 from 256–2048). The photo sets the ratio. |
 | Number of options | `n` | 1–5, default 1. Options render in turn with different seeds. More options take longer. |
 | Prompt expansion | `expand_prompt` | Uses the text LLM when enabled at startup. Switched on by default in the UI; API default is false. It does not inspect reference photos. |
 | Different compositions | `vary_prompt` | Requires `expand_prompt:true` and `n>=2`. Gives each option its own expanded composition. The UI enables it for eligible batches; API default is false. |
@@ -128,7 +128,7 @@ The API names below map to the webpage controls.
 | Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false to join the end of the queue. |
 | API result format | `response_format` | Use `"url"` for easy previews/downloads. Default is `"b64_json"`. Both save the PNG and metadata on disk. |
 
-With Klein or Qwen selected, upload a photo and write an instruction such as “Change the jacket to green; keep the face, pose and background.” The service follows the photo's aspect ratio. Use 1024px initially for Qwen Turbo; Qwen also supports a selected-area mask; multiple reference photos are not exposed. Turn off description expansion when you want to send your instruction exactly as written.
+With Klein or Qwen selected, upload a photo and write an instruction such as “Change the jacket to green; keep the face, pose and background.” The service follows the photo's aspect ratio. Reference resolution starts on Auto; Qwen also supports a selected-area mask; multiple reference photos are not exposed. Turn off description expansion when you want to send your instruction exactly as written.
 
 ### Edit an existing photo
 
@@ -136,7 +136,7 @@ With Klein or Qwen selected, upload a photo and write an instruction such as “
 2. Select **Edit photo**, then choose an editing model. The tab is available whenever at least one setup model supports editing, even if the Generate tab currently uses Z-Image or Chroma. On the first visit it opens with an empty model selector; choose a setup Klein or Qwen model before submitting. Later visits restore your editing model. If none are setup, the tab stays disabled and its hover/focus tooltip names suitable models to set up.
 3. Choose the source photo and describe only what to change. Add optional requirements under **What should stay the same?**
 4. For Qwen, drag a rectangle over the source preview; **Selected area** is chosen automatically. **Whole photo** remains available; Klein supports whole-photo editing only.
-5. Keep the 1024px long-edge resolution and default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
+5. Leave reference resolution on **Auto** to detect the photo size (up to a 2048px long edge), or choose a different long edge. Keep the model's default steps initially. Refinement uses a separate editing policy; **Preview refinement** shows the exact instruction. It cannot inspect the source photo.
 6. Select **Edit photo** to submit. Several options repeat the same requested edit with different seeds; composition variation is unavailable in this mode. Clear the selection to choose a new area.
 
 The Edit preview uses a single box: upload a photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state.

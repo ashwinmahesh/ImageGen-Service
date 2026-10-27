@@ -35,12 +35,34 @@ class EditRefinementTest(unittest.TestCase):
     def test_edit_policy_has_no_scene_or_composition_expansion(self):
         data,messages=self.refine({'edit_details':'Change only the jacket color to green.','preservation':'Keep the face and background as they are.'})
         self.assertEqual(data['task'],'edit')
-        self.assertEqual(data['guidance_profile'],'qwen-image-2.1-turbo-edit-v1')
+        self.assertEqual(data['guidance_profile'],'qwen-image-2.1-turbo-edit-v2')
         self.assertTrue(data['expanded_prompt'].startswith(data['original_prompt']+'\n'))
         self.assertIn('cannot see the photo',messages[0]['content'])
         self.assertIn('face and background',messages[-1]['content'])
         self.assertNotIn('Composition goal',str(messages))
         self.assertNotIn('style_details',str(messages))
+
+    def test_public_preserve_field_echo_is_normalized(self):
+        data,messages=self.refine({'edit_details':'Change only the jacket color to green.','preserve':'Keep the face and background unchanged.'})
+        self.assertEqual(data['details']['preservation'],'Keep the face and background unchanged.')
+        self.assertNotIn('preserve',data['details'])
+        self.assertIn('"preservation"',messages[-1]['content'])
+        self.assertEqual(data['guidance_version'],2)
+
+    def test_preservation_of_framing_is_not_a_camera_change(self):
+        for text in ['Do not crop the image.','Keep the original close-up.','Keep the pose without a new camera angle.']:
+            with self.subTest(text=text):
+                data,_=self.refine({'edit_details':'Change only the jacket color.','preservation':text})
+                self.assertIn(text,data['expanded_prompt'])
+        with self.assertRaisesRegex(prompt_expander.ExpansionError,'framing change'):
+            self.refine({'edit_details':'Keep the face and reframe into a wide shot.','preservation':'Keep the subject.'})
+
+    def test_invalid_or_ambiguous_refiner_fields_still_fail(self):
+        for details in [{'edit_details':'Change jacket.','preserve':'Face','preservation':'Background'},
+                        {'edit_details':'Change jacket.','preservation':['Face']},
+                        {'edit_details':'','preservation':''}]:
+            with self.subTest(details=details),self.assertRaisesRegex(prompt_expander.ExpansionError,'invalid edit JSON'):
+                self.refine(details)
 
     def test_generation_shaped_or_unrequested_camera_refinement_is_rejected(self):
         for details in [{'style_details':'Warm light','additional_composition':'Wide angle'},
@@ -118,6 +140,7 @@ try:
     ImageDraw.Draw(pixels).rectangle((50,50,100,100),fill=255);pixels.save(mask)
     settings={**fixture.payload,'task':'edit','reference_image':str(source),'mask_image':str(mask),
               'prompt':'Change the jacket to green.','preserve':'Face and background','n':2}
+    settings.pop('size',None)  # Both APIs must resolve omitted reference size to Auto.
     generator_schema=fixture.client.get('/openapi.json').json()
     assert 'mask_image' in generator_schema['components']['schemas']['GenerateRequest']['properties']
     queue_schema=fixture.queue_http.get('/openapi.json').json()
@@ -140,7 +163,9 @@ try:
         result=server.execute_job(claimed)
         frozen=fixture.store.get(identifier)['request']
         assert frozen['mask_image']==str(mask) and frozen['preserve']=='Face and background'
+        assert frozen['size']=='auto'
         for image in result['images']:
+            assert image['size']=='256x256'
             assert image['task']=='edit' and image['edit_scope']=='mask'
             assert image['mask_image']==str(mask)
             with Image.open(image['file_path']) as pixels:
@@ -219,7 +244,7 @@ try:
         assert response.status_code==200,response.text
         assert response.json()['data'][0]['prompt_expansion']['task']=='edit'
         metadata=json.loads(Path(response.json()['data'][0]['metadata_path']).read_text())
-        assert metadata[server.API_MODEL]['prompt_expansion_guidance']['id'].endswith('-edit-v1')
+        assert metadata[server.API_MODEL]['prompt_expansion_guidance']['id'].endswith('-edit-v2')
         refiner.assert_called_once()
     schema=fixture.client.get('/openapi.json').json()
     assert '/v1/images/edits' in schema['paths']

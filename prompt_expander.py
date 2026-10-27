@@ -10,7 +10,7 @@ from enhancer_profile import REPOSITORY, REVISION, check_assets
 import hashlib
 import re
 from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, guidance_for, public_guidance, style_context, style_anchor, example_for
-from prompt_policy import EDIT_POLICY_VERSION, EDIT_SYSTEM_PROMPT, edit_guidance_for
+from prompt_policy import EDIT_POLICY_VERSION, EDIT_SYSTEM_PROMPT, EDIT_EXAMPLE_USER, EDIT_EXAMPLE_ASSISTANT, edit_guidance_for
 from model_profiles import PROFILES
 from photo_workflows import supported_tasks, edit_prompt
 
@@ -226,6 +226,37 @@ def run_worker(request):
     return candidates[0]
 
 
+def parse_edit_details(text, original):
+    """Normalize one known field synonym without accepting extra edit fields."""
+    try:
+        value=re.fullmatch(r'```(?:json)?\s*(.*?)\s*```',text.strip(),re.S)
+        details=json.loads(value.group(1) if value else text)
+        # The stock model sometimes echoes the public request's preserve key.
+        if isinstance(details,dict) and set(details)=={'edit_details','preserve'}:
+            details['preservation']=details.pop('preserve')
+        if not isinstance(details,dict) or set(details)!={'edit_details','preservation'}:
+            raise ValueError('expected edit_details and preservation strings')
+        if not all(isinstance(item,str) for item in details.values()):
+            raise ValueError('edit fields must be strings')
+        details={key:value.strip() for key,value in details.items()}
+        addition=' '.join(value for value in details.values() if value)
+        if not addition or len(addition)>1200 or re.search(r'</?think>|<lora:',addition,re.I):
+            raise ValueError('empty, overlong or improperly formatted edit details')
+    except (ValueError,TypeError,KeyError) as error:
+        raise ExpansionError('The refiner returned invalid edit JSON; retry or disable Prompt expansion.') from error
+    # Keep framing guards, but do not mistake "Do not crop the image" for an edit.
+    for sentence in re.split(r'(?<=[.!?])\s+',addition):
+        for match in re.finditer(r'wide shot|close-up|new camera angle|reframe|crop the image',sentence,re.I):
+            if match.group().lower() in original.lower():
+                continue
+            before=sentence[:match.start()]
+            negated=re.search(r"(?:\b(?:do not|don't|never|avoid)\s+(?:(?:use|add|introduce|apply|create|switch to|change to)\s+)?|\b(?:without|no)\s+)(?:a\s+|an\s+|the\s+)?$",before,re.I)
+            retained=re.search(r'\b(?:keep|retain|preserve|maintain)\s+(?:the\s+)?(?:original|existing|current)\s+$',before,re.I)
+            if not (negated or retained):
+                raise ExpansionError('The refiner introduced an unrequested framing change; retry or disable Prompt expansion.')
+    return details,addition
+
+
 def run_edit_worker(request):
     """Photo edits use their own policy, with no scene/composition expansion path."""
     original=request['prompt']
@@ -239,8 +270,10 @@ def run_edit_worker(request):
         raise ExpansionError('Preservation requirements must be at most 1000 characters')
     guidance=edit_guidance_for(identifier)
     messages=[{'role':'system','content':EDIT_SYSTEM_PROMPT+'\n\n'+guidance['instructions']},
+              {'role':'user','content':EDIT_EXAMPLE_USER},
+              {'role':'assistant','content':EDIT_EXAMPLE_ASSISTANT},
               {'role':'user','content':'Refine only this requested photo edit with at most 60 NEW words.\n'
-               +json.dumps({'instruction':original,'preserve':preserve},ensure_ascii=False)}]
+               +json.dumps({'instruction':original,'preservation':preserve or ''},ensure_ascii=False)}]
     from mlx_lm import load, stream_generate
     from mlx_lm.sample_utils import make_sampler
     model,tokenizer=load(request['weights'])
@@ -251,32 +284,18 @@ def run_edit_worker(request):
         final=response
     if final is None or final.finish_reason=='length':
         raise ExpansionError('Edit-instruction refinement exceeded its output limit; retry or disable refinement')
-    try:
-        value=re.fullmatch(r'```(?:json)?\s*(.*?)\s*```',text.strip(),re.S)
-        details=json.loads(value.group(1) if value else text)
-        if not isinstance(details,dict) or set(details)!={'edit_details','preservation'}:
-            raise ValueError('Wrong edit fields')
-        if not all(isinstance(item,str) for item in details.values()):
-            raise ValueError('Edit fields must be strings')
-        details={key:value.strip() for key,value in details.items()}
-        addition=' '.join(value for value in details.values() if value)
-        if not addition or len(addition)>1200 or '<think>' in addition or '<lora:' in addition.lower():
-            raise ValueError('Invalid edit details')
-        # Narrow guards catch unrequested camera changes; the policy handles broader fidelity.
-        for phrase in ('wide shot','close-up','new camera angle','reframe','crop the image'):
-            if phrase in addition.lower() and phrase not in original.lower():
-                raise ValueError('Unrequested framing change')
-        data={'original_prompt':original,'expanded_prompt':original+'\n'+addition,'task':'edit'}
-        validate_expansion(original,data)
-        if len(edit_prompt(data['expanded_prompt'],preserve))>4000:
-            raise ValueError('Edit instruction exceeds the final prompt budget')
+    details,addition=parse_edit_details(text,original)
+    data={'original_prompt':original,'expanded_prompt':original+'\n'+addition,'task':'edit'}
+    try:validate_expansion(original,data)
     except (ValueError,TypeError,KeyError) as error:
-        raise ExpansionError('The refiner did not return usable, scoped edit instructions; retry or disable refinement') from error
+        raise ExpansionError('The refined edit exceeds its prompt budget; shorten the instruction or disable Prompt expansion.') from error
+    if len(edit_prompt(data['expanded_prompt'],preserve))>4000:
+        raise ExpansionError('The refined edit and preservation requirements exceed the final prompt budget; shorten them or disable Prompt expansion.')
     import resource
-    data.update(details=details,image_model=identifier,guidance_profile=guidance['id'],guidance_version=1,
+    data.update(details=details,image_model=identifier,guidance_profile=guidance['id'],guidance_version=guidance['version'],
                 original_image_tokens=None,expanded_image_tokens=None,image_token_limit=None,
                 sampling={'temperature':0.0},policy_version=EDIT_POLICY_VERSION,
-                policy_sha256=hashlib.sha256(json.dumps([EDIT_SYSTEM_PROMPT,guidance,preserve],sort_keys=True).encode()).hexdigest(),
+                policy_sha256=hashlib.sha256(json.dumps([EDIT_SYSTEM_PROMPT,guidance,EDIT_EXAMPLE_USER,EDIT_EXAMPLE_ASSISTANT,preserve],sort_keys=True).encode()).hexdigest(),
                 peak_mlx_memory_gb=round(final.peak_memory,3),
                 peak_process_rss_gb=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/(1e9 if sys.platform=='darwin' else 1e6),3))
     return data

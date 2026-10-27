@@ -46,6 +46,31 @@ class ReferenceGeometryTest(unittest.TestCase):
                 self.assertEqual(ref.read_bytes(), original)
                 self.assertFalse(Path(call['image_path']).exists())
 
+    def test_auto_resolution_keeps_source_size_and_caps_large_photos(self):
+        for source_size, expected in [((403,271),(403,271)),((64,96),(64,96)),((3000,1500),(2048,1024))]:
+            with self.subTest(source_size=source_size):
+                ref=self.root/'auto.png';Image.new('RGB',source_size,'red').save(ref)
+                response=self.post(reference_image=str(ref),size='auto')
+                self.assertEqual(response.status_code,200,response.text)
+                item=response.json()['data'][0]
+                self.assertEqual((item['width'],item['height']),expected)
+                metadata=json.loads(Path(item['metadata_path']).read_text())
+                self.assertEqual(metadata['requested_size'],'auto')
+                self.assertEqual(metadata['reference_size'],list(source_size))
+                self.assertTrue(all(value%64==0 for value in self.fake.reference_sizes[-1]))
+
+    def test_omitted_reference_size_detects_oriented_photo_but_plain_generation_keeps_default(self):
+        ref=self.root/'auto-camera.jpg';exif=Image.Exif();exif[274]=6
+        Image.new('RGB',(320,256),'red').save(ref,exif=exif)
+        response=self.client.post('/v1/images/generations',json={'prompt':'A fox','reference_image':str(ref),'steps':3})
+        self.assertEqual(response.status_code,200,response.text)
+        item=response.json()['data'][0]
+        self.assertEqual(item['size'],'256x320')
+        self.assertEqual(json.loads(Path(item['metadata_path']).read_text())['requested_size'],'auto')
+        response=self.client.post('/v1/images/generations',json={'prompt':'A fox'})
+        self.assertEqual(response.json()['data'][0]['size'],'1024x1024')
+        self.assertEqual(self.post(size='auto').status_code,422)
+
     def test_direct_camera_file_uses_display_orientation(self):
         ref = self.root / 'camera.jpg'
         exif = Image.Exif()

@@ -202,13 +202,14 @@ class GenerateRequest(BaseModel):
     def model_defaults(cls,value):
         if not isinstance(value,dict):return value
         value=dict(value);selected=value.setdefault('model',selected_default())
+        value.setdefault('size','auto' if value.get('reference_image') else '1024x1024')
         if selected in PROFILES:
             value.setdefault('steps',PROFILES[selected]['steps'])
             value.setdefault('output_dir',str(model_root(selected)/'images'))
         return value
 
     prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
-    size: str = Field(default="1024x1024", description="WIDTHxHEIGHT; each dimension must be a multiple of 64 from 256 to 2048. With reference_image, only the larger dimension is used: output automatically follows the oriented reference aspect ratio, rounded to whole pixels. Padding for the model grid is trimmed from the saved image; its short edge may be below 256. Above 1024, VAE tiling reduces memory use. Larger images take longer; 2048x2048 may require closing other GPU-heavy apps on this 24 GB Mac.")
+    size: str = Field(default="1024x1024", description="Omit with reference_image, or use auto, to detect the oriented photo dimensions without upscaling, capped at a 2048px long edge. Without a reference, omitted size is 1024x1024 and auto is invalid. An explicit WIDTHxHEIGHT overrides resolution: each dimension must be a multiple of 64 from 256 to 2048; with a reference, only the larger dimension sets the long edge and output follows its aspect ratio. Padding for the model grid is trimmed from the saved image; detected dimensions need not be multiples of 64. Above 1024, VAE tiling reduces memory use. Larger images take longer and use more memory.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires LLM-enabled serving (default; NO_LLM=1 disables it). Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     vary_prompt: bool = Field(default=False,strict=True,description="Requires expand_prompt:true and n>=2. Plan a distinct LLM expansion/composition per option, preserving explicit original constraints and style. All prompts are persisted before rendering and reused after restart. Default false shares one expansion; the UI enables this for multi-image batches with expansion. Improves creative variety but cannot guarantee visibly different results for constrained prompts or strongly preserved references.")
@@ -255,6 +256,8 @@ class GenerateRequest(BaseModel):
     @model_validator(mode="after")
     def validate_reference_settings(self):
         profile=PROFILES[self.model]
+        if self.size=='auto' and self.reference_image is None:
+            raise ValueError('Auto resolution requires reference_image; use WIDTHxHEIGHT for text-to-image generation')
         if self.steps>profile['max_steps']:raise ValueError(f"steps must be at most {profile['max_steps']} for {profile['name']}")
         if self.task=='edit':
             if 'edit' not in supported_tasks(profile):
@@ -303,10 +306,12 @@ class GenerateRequest(BaseModel):
     @field_validator("size")
     @classmethod
     def validate_size(cls, value):
+        if value=='auto':
+            return value
         try:
             width, height = map(int, value.split("x"))
         except ValueError:
-            raise ValueError("Use WIDTHxHEIGHT, such as 1024x1024") from None
+            raise ValueError("Use auto with a reference photo, or WIDTHxHEIGHT such as 1024x1024") from None
         if any(d < 256 or d > 2048 or d % 64 for d in (width, height)):
             raise ValueError("Each dimension must be a multiple of 64 between 256 and 2048")
         return f"{width}x{height}"
@@ -604,7 +609,7 @@ def capabilities(identifier=None,*,ready=None):
         'tasks':supported_tasks(profile),'mask_editing':bool(profile.get('mask_editing')),
         'photo_editing':{'supported':'edit' in supported_tasks(profile),'models':[key for key in ready if 'edit' in supported_tasks(PROFILES[key])],
             'setup_hint':'Set up '+', '.join(profile['name'] for profile in PROFILES.values() if 'edit' in supported_tasks(profile))+'. Use make setup to add one.',
-            'requires_reference':True,'default_long_edge':1024,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
+            'requires_reference':True,'default_reference_size':'auto','default_long_edge':None,'max_long_edge':2048,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
             'prompt_expansion_guidance':public_edit_guidance(identifier) if 'edit' in supported_tasks(profile) else None},
         'default_size':'1024x1024','prompt_note':profile['prompt_note'],'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
         'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,identifier),
