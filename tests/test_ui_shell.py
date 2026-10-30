@@ -67,6 +67,15 @@ class SharedShellTest(unittest.TestCase):
         self.assertIn('pollingQueue=true; const pauseRevision=queuePauseRevision;',script)
         self.assertIn('if (!queueMutating && pauseRevision===queuePauseRevision) showQueuePaused(!!summary.paused)',script)
 
+    def test_disabled_controls_are_not_shown_as_busy_and_new_photos_clear_selections(self):
+        styles=(PROJECT/'ui/index.html').read_text()+(PROJECT/'ui/assets/shell.css').read_text()
+        # A disabled control is unavailable, not working: no wait cursor on it.
+        for rule in re.findall(r'[^{}]*:disabled[^{}]*\{[^}]*\}',styles):self.assertNotIn('cursor:wait',rule)
+        page=(PROJECT/'ui/index.html').read_text()
+        clear=page[page.index('function clearPhoto()'):page.index("$('choose-photo').addEventListener")]
+        # Editing a new source, including a previous edit's result, starts without the old selection.
+        for reset in ('maskStrokes=[]','maskUpload=null','savedMaskPath=null','savedMaskImage=null',"$('edit-area').value='whole'"):self.assertIn(reset,clear)
+
     def test_shared_assets_are_local_uncached_and_paths_are_not_arbitrary(self):
         client=TestClient(server.app,base_url='http://127.0.0.1')
         try:
