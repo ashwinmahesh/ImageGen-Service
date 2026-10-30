@@ -239,7 +239,7 @@ function queueLabel(control,icon,label){
         }
         queueNext=list.next_offset ?? null; queuePrevious=list.previous_offset ?? null;
         $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
-        $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
+        $('queue-page').textContent=`Page ${Math.floor(queueOffset/QUEUE_PAGE_SIZE)+1} of ${Math.max(1,Math.ceil(list.total/QUEUE_PAGE_SIZE))} · ${list.total} jobs`;
         await callbacks.onRefresh?.(summary,health);
       } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; queueSwitches().forEach(toggle => { toggle.disabled=true; }); }
       finally { pollingQueue=false; }
