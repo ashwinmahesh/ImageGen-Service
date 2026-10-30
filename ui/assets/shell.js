@@ -2,6 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id),modelNames=new Map();
   let callbacks={},statusHoldUntil=0;
+  const QUEUE_PAGE_SIZE=20;
   const CANCEL_RUNNING_PROMPT='Stop this job now? The image being rendered is discarded; finished options in a batch are kept.';
   function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
   function remainingLabel(seconds){
@@ -104,8 +105,28 @@ function queueLabel(control,icon,label){
     }
     function clearQueueDrag() {
       const drag=queueDrag; queueDrag=null;
-      $('queue-list').querySelectorAll('.queue-item').forEach(row => row.classList.remove('dragging','drop-before','drop-after'));
+      drag?.ghost?.remove();
+      $('queue-list').querySelectorAll('.queue-item').forEach(row => row.classList.remove('dragging'));
+      if (drag?.active) queueListVersion=null;  // Rows were moved locally; the next poll redraws the saved order.
       return drag;
+    }
+    // Dragging lifts a copy of the row that follows the pointer; the real row stays as the gap and moves between rows.
+    function liftQueueRow(row,event) {
+      const bounds=row.getBoundingClientRect(),ghost=row.cloneNode(true);
+      ghost.className='queue-item queue-ghost'; ghost.removeAttribute('data-position'); ghost.removeAttribute('data-job-id'); ghost.setAttribute('aria-hidden','true'); ghost.inert=true;
+      Object.assign(ghost.style,{left:bounds.left+'px',top:bounds.top+'px',width:bounds.width+'px',height:bounds.height+'px'});
+      $('queue-dialog').append(ghost); row.classList.add('dragging');
+      return {ghost,offset:event.clientY-bounds.top};
+    }
+    function moveQueueGap(list,row,before) {
+      // Animate the rows that shift around the gap from where they were (FLIP).
+      const rows=[...list.children].filter(item => item!==row),first=new Map(rows.map(item => [item,item.getBoundingClientRect().top]));
+      list.insertBefore(row,before);
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      for (const item of rows) {
+        const shift=first.get(item)-item.getBoundingClientRect().top;
+        if (shift) item.animate([{transform:`translateY(${shift}px)`},{transform:'none'}],{duration:150,easing:'ease-out'});
+      }
     }
     function attachQueueDrag(handle,row,job) {
       handle.addEventListener('keydown',event => {
@@ -124,16 +145,21 @@ function queueLabel(control,icon,label){
       });
       handle.addEventListener('pointermove',event => {
         if (!queueDrag || queueDrag.id!==job.id) return;
-        if (!queueDrag.active && Math.abs(event.clientY-queueDrag.startY)<5) return;
-        queueDrag.active=true; row.classList.add('dragging');
-        const others=[...$('queue-list').querySelectorAll('[data-position]')].filter(item => item!==row);
-        others.forEach(item => item.classList.remove('drop-before','drop-after'));
+        if (!queueDrag.active) {
+          if (Math.abs(event.clientY-queueDrag.startY)<5) return;
+          Object.assign(queueDrag,{active:true},liftQueueRow(row,event));
+        }
+        queueDrag.ghost.style.top=(event.clientY-queueDrag.offset)+'px';
+        const list=$('queue-list'),waiting=[...list.querySelectorAll('[data-position]')];
+        const others=waiting.filter(item => item!==row);
         if (!others.length) return;
         const next=others.find(item => { const bounds=item.getBoundingClientRect(); return event.clientY<bounds.top+bounds.height/2; });
-        const target=next || others.at(-1),position=Number(target.dataset.position);
-        target.classList.add(next ? 'drop-before' : 'drop-after');
-        queueDrag.position=next ? position-(job.queue_position<position ? 1 : 0) : position+(job.queue_position>position ? 1 : 0);
-        const list=$('queue-list'),bounds=list.getBoundingClientRect();
+        const before=next || others.at(-1).nextSibling;
+        if (before!==row && row.nextSibling!==before) moveQueueGap(list,row,before);
+        // Waiting rows on a page hold consecutive global positions, so the gap's index gives the new position.
+        const first=Math.min(...waiting.map(item => Number(item.dataset.position)));
+        queueDrag.position=first+[...list.querySelectorAll('[data-position]')].indexOf(row);
+        const bounds=list.getBoundingClientRect();
         if (event.clientY<bounds.top+35) list.scrollBy(0,-18);
         else if (event.clientY>bounds.bottom-35) list.scrollBy(0,18);
       });
@@ -192,7 +218,7 @@ function queueLabel(control,icon,label){
       if (pollingQueue || queueDrag || queueMutating) return;
       pollingQueue=true; const pauseRevision=queuePauseRevision;
       try {
-        const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
+        const params=new URLSearchParams({limit:String(QUEUE_PAGE_SIZE),offset:String(queueOffset)});
         if ($('queue-filter').value) params.set('status',$('queue-filter').value);
         const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health').catch(error=>{setStatus('Server offline','offline');throw error;})]);
         updateHealth(health);
@@ -203,7 +229,7 @@ function queueLabel(control,icon,label){
         $('clear-queue').disabled=!summary.queued;
         $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
         $('queue-notice').hidden=!$('queue-notice').textContent;
-        if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-10); return; }
+        if (queueOffset && !list.data.length) { queueOffset=Math.max(0,queueOffset-QUEUE_PAGE_SIZE); return; }
         if (queueDrag || queueMutating) return;
         $('queue-list').dataset.waiting=String(summary.queued || 0);
         const version=JSON.stringify(list.data);
