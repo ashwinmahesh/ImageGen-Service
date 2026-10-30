@@ -138,16 +138,21 @@ def prepare_mask(mask_path, geometry, scratch_root):
 
 
 def widen_mask_to_grid(mask_path, grid=16):
-    """Select every model patch the mask touches, so thin strokes are not blended back to the source.
+    """Give every model patch the strongest mask value it contains, so thin strokes are not blended back to the source.
 
-    Qwen edits in 16x16 latent patches and pins each one toward the source in proportion
-    to how much of it is unselected. composite_edit still trims to the exact painted mask.
+    Qwen edits in 16x16 latent patches and pins each one toward the source in proportion to how much of it
+    is unselected. Per-patch maxima widen strokes without thresholding or averaging, so soft 0-255 coverage
+    survives. Only inference receives this copy; composite_edit still uses the exact prepared mask.
     """
     with Image.open(mask_path) as image:
-        mask=image.convert('L').point(lambda value:255 if value>127 else 0)
-    columns,rows=-(-mask.width//grid),-(-mask.height//grid)
-    patches=mask.resize((columns,rows),Image.Resampling.BOX).point(lambda value:255 if value else 0)
-    widened=patches.resize((columns*grid,rows*grid),Image.Resampling.NEAREST).crop((0,0,mask.width,mask.height))
+        mask=image.convert('L')
+    widened=Image.new('L',mask.size,0)
+    for top in range(0,mask.height,grid):
+        for left in range(0,mask.width,grid):
+            box=(left,top,min(left+grid,mask.width),min(top+grid,mask.height))
+            value=mask.crop(box).getextrema()[1]
+            if value:
+                widened.paste(value,box)
     path=Path(mask_path).with_name('model-mask.png')
     widened.save(path)
     return str(path)

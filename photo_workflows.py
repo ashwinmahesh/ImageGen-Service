@@ -1,48 +1,32 @@
 """Shared task semantics; no inference imports or implicit model switching."""
 EDIT_SCOPE='Apply only the requested changes to the source photo. Preserve all other content, identity, framing and appearance unless the requested edit requires changing them.'
+MAX_PROMPT_CHARACTERS=4000
+MAX_LOCATION_BOXES=8
+# Longest possible location hint: the maximum number of boxes with four-digit coordinates.
+WORST_CASE_REGION=', '.join(['{"bbox_2d": [1000, 1000, 1000, 1000]}']*MAX_LOCATION_BOXES)
+PROMPT_TOO_LONG=(f'The complete edit prompt exceeds {MAX_PROMPT_CHARACTERS} characters, including preservation and selected-area guidance. '
+                 'Shorten the instruction or preservation text, or disable refinement.')
 
 
 def supported_tasks(profile):
     return ['generate','edit'] if profile.get('reference_mode')=='edit' else ['generate']
 
 
-GRID_NAMES=(('top-left corner','top edge','top-right corner'),('left side','center','right side'),('bottom-left corner','bottom edge','bottom-right corner'))
-
-
-def describe_mask_region(mask):
-    """Name where a white-edits mask lies on a 3x3 grid, since the model never sees the mask itself."""
-    width,height=mask.size
-    binary=mask.point(lambda value:255 if value>127 else 0)
-    coverage={}
-    for row in range(3):
-        for column in range(3):
-            cell=binary.crop((column*width//3,row*height//3,(column+1)*width//3,(row+1)*height//3))
-            coverage[row,column]=cell.histogram()[255]/(cell.width*cell.height)
-    selected=[cell for cell,share in coverage.items() if share>=0.4]
-    if not selected:
-        # Thin strokes and small spots fill no cell, so name every cell they pass through.
-        touched=[cell for cell,share in coverage.items() if share>=0.005] or [max(coverage,key=coverage.get)]
-        box=binary.getbbox()
-        if box is None:
-            return 'a small part of the image'
-        filled=binary.histogram()[255]/((box[2]-box[0])*(box[3]-box[1]))
-        names=', '.join(GRID_NAMES[r][c] for r,c in touched)
-        return f'a thin strip running through the {names} of the image' if filled<0.3 else f'a small area in the {names} of the image'
-    if len(selected)==9:
-        return 'the whole image'
-    border=[cell for cell in selected if cell!=(1,1)]
-    if (1,1) not in selected and len(border)>=5:
-        return 'the background around the main subject, along the '+', '.join(GRID_NAMES[r][c] for r,c in border)
-    return 'the '+', '.join(GRID_NAMES[r][c] for r,c in selected)+' of the image'
-
-
-def mask_boxes(mask, grid=64, max_boxes=8):
+def mask_boxes(mask, grid=64, max_boxes=MAX_LOCATION_BOXES):
     """Bounding boxes on Qwen3-VL's 0-1000 grounding scale, one per painted area.
 
-    Long thin areas (strokes along an edge) are split into pieces along their length,
-    so the boxes follow the stroke instead of claiming everything inside its curve.
+    A grid cell counts as painted when any pixel in its footprint is nonzero, so a minimum brush dot,
+    a one-pixel stroke or a faint grey selection still yields a box. Long thin areas (strokes along an
+    edge) are split into pieces along their length, so the boxes follow the stroke instead of claiming
+    everything inside its curve.
     """
-    small=mask.convert('L').resize((grid,grid)).point(lambda value:255 if value>40 else 0)
+    from PIL import Image
+    gray=mask.convert('L')
+    full_width,full_height=gray.size
+    small=Image.new('L',(grid,grid))
+    small.putdata([
+        255 if gray.crop((x*full_width//grid,y*full_height//grid,((x+1)*full_width+grid-1)//grid,((y+1)*full_height+grid-1)//grid)).getextrema()[1] else 0
+        for y in range(grid) for x in range(grid)])
     pixels=small.load()
     painted={(x,y) for y in range(grid) for x in range(grid) if pixels[x,y]}
     areas=[]
@@ -79,3 +63,15 @@ def edit_prompt(instruction, preserve=None, region=None):
     if region:
         scope=f'The selected area to edit is inside these boxes (x1, y1, x2, y2 on a 0-1000 scale of the image): {region}. Make the requested change only there.\n'+scope
     return instruction+'\n'+scope
+
+
+def edit_prompt_fits(instruction, preserve=None, *, region=None, masked=False):
+    """Whether the complete rendering prompt stays within the limit.
+
+    Pass the real ``region`` once the boxes are known. ``masked`` instead reserves worst-case hint
+    room when they are not (before refinement); without either, the hint is not counted, which is
+    the lower bound that request validation can check without reading the photo or mask.
+    """
+    if region is None and masked:
+        region=WORST_CASE_REGION
+    return len(edit_prompt(instruction,preserve,region))<=MAX_PROMPT_CHARACTERS

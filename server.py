@@ -27,7 +27,7 @@ if __name__ == '__main__':
         os.environ['IMAGE_MODEL']=selected.model
 
 from model_profiles import PROFILES, model_details
-from photo_workflows import supported_tasks, edit_prompt, describe_mask_boxes
+from photo_workflows import supported_tasks, edit_prompt, edit_prompt_fits, describe_mask_boxes, MAX_PROMPT_CHARACTERS, PROMPT_TOO_LONG
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
@@ -209,7 +209,7 @@ class GenerateRequest(BaseModel):
             value.setdefault('output_dir',str(model_root(selected)/'images'))
         return value
 
-    prompt: str = Field(min_length=1, max_length=4000, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
+    prompt: str = Field(min_length=1, max_length=MAX_PROMPT_CHARACTERS, description="Describe the image to generate. API limit: 4000 characters. " + PROFILE["prompt_note"] + " Put essential details first.")
     size: str = Field(default="1024x1024", description="Omit with reference_image, or use auto, to detect the oriented photo dimensions without upscaling, capped at a 2048px long edge. Without a reference, omitted size is 1024x1024 and auto is invalid. An explicit WIDTHxHEIGHT overrides resolution: each dimension must be a multiple of 64 from 256 to 2048; with a reference, only the larger dimension sets the long edge and output follows its aspect ratio. Padding for the model grid is trimmed from the saved image; detected dimensions need not be multiples of 64. Above 1024, VAE tiling reduces memory use. Larger images take longer and use more memory.")
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires LLM-enabled serving (default; NO_LLM=1 disables it). Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
@@ -267,7 +267,7 @@ class GenerateRequest(BaseModel):
                 raise ValueError('Edit photo requires reference_image')
             if self.vary_prompt:
                 raise ValueError('Composition variation is unavailable for photo edits; use n for alternate attempts at the same edit')
-            if len(edit_prompt(self.prompt,self.preserve))>4000:
+            if not edit_prompt_fits(self.prompt,self.preserve):
                 raise ValueError('Edit instruction and preservation requirements must fit within 4000 characters including editing guidance')
         elif self.preserve is not None:
             raise ValueError('preserve requires task:edit')
@@ -499,8 +499,15 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
                 model.tiling_config=None
         else:
             model.active_log=ROOT/'logs'/(identifier+'.log')
-        region=describe_mask_boxes(read_mask(payload.mask_image,geometry.reference_size)) if mask_path else None
+        region=None
+        if mask_path:
+            # The prepared mask shares the padded image's coordinates; the widened inference copy would over-report.
+            from PIL import Image
+            with Image.open(mask_path) as prepared_mask:
+                region=describe_mask_boxes(prepared_mask)
         rendering_prompt=edit_prompt(payload.prompt,payload.preserve,region) if payload.task=='edit' else payload.prompt
+        if payload.task=='edit' and not edit_prompt_fits(payload.prompt,payload.preserve,region=region):
+            raise LocalFileError(PROMPT_TOO_LONG)
         result = model.generate_image(
             seed=seed, prompt=rendering_prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
@@ -625,7 +632,7 @@ def capabilities(identifier=None,*,ready=None):
             'setup_hint':'Set up '+', '.join(profile['name'] for profile in PROFILES.values() if 'edit' in supported_tasks(profile))+'. Use make setup to add one.',
             'requires_reference':True,'default_reference_size':'auto','default_long_edge':None,'max_long_edge':2048,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
             'prompt_expansion_guidance':public_edit_guidance(identifier) if 'edit' in supported_tasks(profile) else None},
-        'default_size':'1024x1024','prompt_note':profile['prompt_note'],'max_prompt_characters':4000,'min_dimension':256,'max_dimension':2048,
+        'default_size':'1024x1024','prompt_note':profile['prompt_note'],'max_prompt_characters':MAX_PROMPT_CHARACTERS,'min_dimension':256,'max_dimension':2048,
         'loras_enabled':app.state.loras_enabled,'prompt_expansion':prompt_expander.expansion_capability(app.state.llm_enabled,identifier),
         'queue_api_url':queue_client.url,'persistent_queue':True,'immediate_generation':True,'default_image_count':1,'max_image_count':5}
 
@@ -648,7 +655,7 @@ def models():
 class ExpandPromptRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     model:Literal[tuple(PROFILES)]=Field(default_factory=selected_default)
-    prompt: str = Field(min_length=1,max_length=4000)
+    prompt: str = Field(min_length=1,max_length=MAX_PROMPT_CHARACTERS)
     lora: str | None = None
     lora_strength: float | None = Field(default=None,ge=0,le=2,allow_inf_nan=False)
     task: Literal['generate','edit'] = 'generate'
@@ -667,7 +674,7 @@ class ExpandPromptRequest(BaseModel):
             raise ValueError('Photo-edit instruction refinement requires an editing model')
         if self.task!='edit' and self.preserve is not None:
             raise ValueError('preserve requires task:edit')
-        if self.task=='edit' and len(edit_prompt(self.prompt,self.preserve))>4000:
+        if self.task=='edit' and not edit_prompt_fits(self.prompt,self.preserve):
             raise ValueError('Edit instruction and preservation requirements exceed the prompt budget')
         return self
 
@@ -837,7 +844,7 @@ def prepare_job_prompt(payload,job):
         if not job.get('prompt_expansion'):
             job_worker.stage='expanding_prompt'
             expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
-                  **({'task':'edit','preserve':payload.preserve} if payload.task=='edit' else {}),
+                  **({'task':'edit','preserve':payload.preserve,**({'masked':True} if payload.mask_image else {})} if payload.task=='edit' else {}),
                   image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
             job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
         prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
