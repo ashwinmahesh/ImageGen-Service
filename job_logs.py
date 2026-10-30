@@ -26,6 +26,11 @@ def runtime_folder(project,identifier):
     return folder
 
 
+def candidate_identifier(identifier,index,count):
+    """Image ID, and native log name, of one option in a batch."""
+    return identifier if count==1 else uuid.uuid5(uuid.UUID(identifier),f'image-{index+1}').hex
+
+
 def event(message):
     try:print(f'[{datetime.now(timezone.utc).isoformat(timespec="seconds")}] {message}',flush=True)
     except (OSError,ValueError):pass
@@ -132,7 +137,7 @@ def read_job_logs(project,identifier,*,model=None,max_bytes=65536):
             logs=data_directory(project)/selected/'logs'
             count=record['request'].get('n',1);count=count if type(count) is int and 1<=count<=5 else 1
             for index in range(count):
-                candidate=identifier if count==1 else uuid.uuid5(uuid.UUID(identifier),f'image-{index+1}').hex
+                candidate=candidate_identifier(identifier,index,count)
                 candidates.append((logs/(candidate+'.log'),{'kind':'native','label':f'Image runtime · option {index+1}','attempt':None,'candidate_index':index+1}))
             warnings.append('Native output logs contain the latest file contents; they are not separated by attempt.')
         except (OSError,RuntimeError,ValueError):warnings.append('Native logs are unavailable while model storage is inaccessible.')

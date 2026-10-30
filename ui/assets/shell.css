@@ -63,4 +63,7 @@
     .queue-actions .queue-remove{background:#3b292e;border-color:#69434b;color:#dfc4cb}
     .queue-actions .queue-remove:hover:not(:disabled){background:#4d353c;border-color:#885b65;color:#f1dce2}
     .queue-actions .queue-remove .queue-icon{color:#cba8af}
+    .job-progress{height:6px;border-radius:999px;background:var(--line);overflow:hidden}.job-progress>span{display:block;width:0;height:100%;border-radius:inherit;background:var(--accent-solid);transition:width .4s ease}
+    .queue-progress{display:flex;align-items:center;gap:8px;margin-top:5px}.queue-progress .job-progress{flex:0 1 140px;height:4px}.queue-progress small{color:var(--muted);font-size:11px;line-height:1.4}
+    @media(prefers-reduced-motion:reduce){.job-progress>span{transition:none}}
     @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1;flex-wrap:wrap}.queue-actions .secondary{min-width:0;font-size:11px;gap:5px;padding:2px 5px}}

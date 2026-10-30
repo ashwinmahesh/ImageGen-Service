@@ -43,7 +43,9 @@ from model_catalog import default_model,require_ready,configure_schema
 from model_process import ModelProcess
 from adapter_catalog import model_loras
 from queue_client import QueueClient
-from queue_api import DEFAULT_QUEUE_PORT, MoveJob
+from queue_api import DEFAULT_QUEUE_PORT, MoveJob, JobProgress
+from job_logs import candidate_identifier
+from job_progress import ProgressTracker
 import prompt_expander
 from prompt_policy import public_guidance, public_edit_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
@@ -64,6 +66,7 @@ busy = threading.Lock()
 model = None
 job_store = None
 job_worker = None
+progress_tracker = None
 observability_monitor = None
 observability_error = None
 queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)),project=PROJECT_ROOT)
@@ -117,7 +120,7 @@ def resolve_for_model(payload):
 
 
 def initialize_service():
-    global job_store,job_worker,model
+    global job_store,job_worker,model,progress_tracker
     if app.state.llm_enabled:check_enhancer_assets(PROJECT_ROOT)
     check_model_assets(PROJECT_ROOT,API_MODEL)
     job_store=JobStore(QUEUE_DATABASE)
@@ -126,6 +129,7 @@ def initialize_service():
     job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,
         busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor,eligible_models=ready_models)
     job_worker.acquire(prepare=lambda:initialize_shared_queue(PROJECT_ROOT))
+    progress_tracker=ProgressTracker(job_store,job_worker,PROJECT_ROOT)
     job_store.set_setting('default_model',API_MODEL)
     if observability_monitor:observability_monitor.recover_jobs()
     for identifier in ready_models():
@@ -148,11 +152,13 @@ async def lifespan(app):
     try:
         await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
         job_worker.start(executor)
+        if progress_tracker:progress_tracker.start()
         yield
     finally:
         try:
             if job_worker:await asyncio.to_thread(job_worker.stop)
             executor.shutdown(wait=True)
+            if progress_tracker:await asyncio.to_thread(progress_tracker.stop)
         finally:
             try:
                 if isinstance(model,ModelProcess):await asyncio.to_thread(model.close)
@@ -592,8 +598,8 @@ def health():
     state = {"status": "ready" if model is not None else "loading", 'service':'imagegen-generator','version':'4.0.0','runtime_model_switching':True,'queue_scope':'shared','default_model':default_model(PROJECT_ROOT),'active_model':model.active_model if isinstance(model,ModelProcess) else API_MODEL if model else None,'model_loaded':model.loaded if isinstance(model,ModelProcess) else model is not None,  "busy": busy.locked() or preview_gate.locked(), "prompt_expansion": prompt_expander.expansion_capability(app.state.llm_enabled,selected_default()), "project_dir": str(PROJECT_ROOT), "data_dir": str(model_root(selected_default())), "loras_enabled": app.state.loras_enabled, "capabilities": capabilities()}
     if observability_monitor:state['observability']=observability_monitor.status()
     elif observability_error:state['observability']={'recording':False,'error':observability_error}
-    if state['busy'] and hasattr(model,'progress'):
-        state['progress']=model.progress()
+    if progress_tracker and job_worker and job_worker.job:
+        state['progress']=progress_tracker.current
     if job_store:
         try:
             state['queue']=job_store.summary()
@@ -798,10 +804,6 @@ def batch_result(images):
             'seconds':round(sum(image['seconds'] for image in images),2)}
 
 
-def candidate_identifier(identifier,index,count):
-    return identifier if count==1 else uuid.uuid5(uuid.UUID(identifier),f'image-{index+1}').hex
-
-
 def committed_candidate(payload,job,identifier,index):
     path=Path(payload.output_dir)/(identifier+'.png')
     metadata=image_catalog.read_metadata(path.with_suffix('.json'))
@@ -935,6 +937,7 @@ class JobResponse(BaseModel):
     completed_images: int = 0
     total_images: int = 1
     blocked_reason: str | None=None
+    progress: JobProgress | None=Field(default=None,description='Running jobs: whole-job percentage, phase, sampler step and a rough time estimate. Succeeded jobs report 100; waiting, failed and cancelled jobs omit it.')
     partial_result: GenerateResponse | None = None
     result: GenerateResponse | None=None
 

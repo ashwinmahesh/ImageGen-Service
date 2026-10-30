@@ -3,9 +3,31 @@
   const $=id=>document.getElementById(id),modelNames=new Map();
   let callbacks={};
   function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
+  function remainingLabel(seconds){
+    if(seconds==null)return '';
+    return seconds<60 ? ` · about ${Math.max(5,Math.round(seconds/5)*5)} sec left` : ` · about ${Math.round(seconds/60)} min left`;
+  }
+  function progressLabel(progress){
+    if(!progress)return '';
+    if(progress.phase==='sampling')return `${progress.percent}%${remainingLabel(progress.estimated_remaining_seconds)}`;
+    if(progress.phase==='finishing')return `${progress.percent}% · saving the image`;
+    if(progress.phase==='loading_model')return `${progress.percent}% · loading the model`;
+    return `${progress.percent}%`;
+  }
+  function setProgressBar(bar,progress){
+    const percent=Math.max(0,Math.min(100,progress?.percent ?? 0));
+    bar.firstElementChild.style.width=percent+'%';
+    bar.setAttribute('aria-valuenow',String(percent));bar.setAttribute('aria-valuetext',`${percent} percent`);
+  }
+  function progressBar(progress,label){
+    const bar=document.createElement('div');bar.className='job-progress';bar.setAttribute('role','progressbar');
+    bar.setAttribute('aria-valuemin','0');bar.setAttribute('aria-valuemax','100');bar.setAttribute('aria-label',label);
+    bar.append(document.createElement('span'));setProgressBar(bar,progress);return bar;
+  }
   function updateHealth(data){
     const name=modelNames.get(data.active_model)||data.active_model||'queued image';
-    setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…` : data.status==='ready' ? 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : data.status==='error' ? 'offline' : 'checking');
+    const percent=data.progress && data.progress.phase!=='done' ? ` ${data.progress.percent}%` : '';
+    setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…${percent}` : data.status==='ready' ? 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : data.status==='error' ? 'offline' : 'checking');
     callbacks.onHealth?.(data);
   }
   function queueError(message){$('queue-error').textContent=message;$('queue-error').hidden=false;}
@@ -108,6 +130,7 @@ function queueLabel(control,icon,label){
       const detail=document.createElement('small'); detail.textContent=`${modelNames.get(job.model) || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size==='auto' || (!job.request.size && job.request.reference_image) ? 'Auto resolution' : job.request.size || '1024x1024'} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
       copy.append(title,detail);
       if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
+      if (job.status==='running') { const progress=document.createElement('div'); progress.className='queue-progress'; const label=document.createElement('small'); label.textContent=progressLabel(job.progress) || 'Starting'; progress.append(progressBar(job.progress,'Job progress'),label); copy.append(progress); }
       row.dataset.jobId=job.id;
       if (job.status==='queued') {
         row.dataset.position=job.queue_position;
@@ -177,6 +200,6 @@ function queueLabel(control,icon,label){
     $('queue-previous').addEventListener('click',() => { if (queuePrevious!==null) { queueOffset=queuePrevious; refreshQueue(); } });
 
   async function loadNames(){try{const catalog=await requestJSON('/v1/models');for(const model of catalog.data)modelNames.set(model.id,model.name);queueListVersion=null;}catch{/* Health still works when model discovery is temporarily unavailable. */}}
-  window.ImageGenShell={configure(options){callbacks={...callbacks,...options};},refresh:refreshQueue,requestJSON,updateHealth,setStatus,resetOffset(){queueOffset=0;}};
+  window.ImageGenShell={configure(options){callbacks={...callbacks,...options};},refresh:refreshQueue,requestJSON,updateHealth,setStatus,progressLabel,setProgressBar,resetOffset(){queueOffset=0;}};
   document.addEventListener('DOMContentLoaded',()=>{loadNames().then(refreshQueue);setInterval(refreshQueue,2000);setInterval(loadNames,15000);},{once:true});
 })();
