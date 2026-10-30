@@ -253,6 +253,8 @@ In this table **Both** means the endpoint exists on each port. Both services man
 | POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |
 | DELETE `/v1/jobs/{identifier}` | Both | 200 | Cancel a waiting job, or ask the generator to stop a running one; returns the job record. No request body. |
 | DELETE `/v1/jobs` | Both | 200 | Cancel all waiting jobs across the shared queue; returns `{cancelled:integer}`. No body. |
+| GET `/v1/settings` | Both | 200 | Read `{keep_weights_loaded}`. Both services share the value through the queue database. |
+| PATCH `/v1/settings` | Both | 200 | Body `{"keep_weights_loaded": true|false}` (strict bool, no other fields). When true, FLUX.2 Klein and Qwen-Image keep their weights loaded between images while the next image uses the same model (another batch option or the next waiting job), and release them when that run ends. While loaded, Qwen holds about 9.4 GB. Default false; applies from the next image. |
 | POST `/v1/jobs/{identifier}/retry` | Both | 202 | Retry a failed/cancelled job as a new ordinary job. No body. Returns the new record, with `retry_of`. |
 | GET `/v1/queue` | Queue | 200 | Read global counts/pause state. On the generator, read `queue` in GET `/health`. |
 | PATCH `/v1/queue` | Both | 200 | Body `{"paused":true}` or `{"paused":false}`. Returns counts/state. Queue response also includes `queue_scope:"shared"`. |

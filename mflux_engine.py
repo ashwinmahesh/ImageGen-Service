@@ -1,10 +1,14 @@
-"""Run MLX editing pipelines in an offline child that releases all weights on exit."""
+"""Run MLX editing pipelines in an offline child that releases all weights on exit.
+
+With Keep weights loaded on, consecutive images for this model render in-process instead,
+reusing one loaded model until the run of same-model work ends."""
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+import time
 
 from PIL import Image
 from config import ROOT, MODEL_DIR, PROFILE, PROJECT_ROOT
@@ -16,9 +20,51 @@ class MfluxEngine:
     def __init__(self):
         validate_snapshot(MODEL_DIR,PROFILE,completed=True)
         self.active_log=None
+        self.resident=None  # (weights key, model, latent creator) kept between images
 
     def generate_image(self, **settings):
-        return MfluxResult(settings)
+        return MfluxResult(settings,self)
+
+    def render_resident(self,module,arguments,destination,log_path,settings):
+        """Render in this process, loading weights once and keeping them while the server asks."""
+        from contextlib import redirect_stderr,redirect_stdout
+        import live_preview
+        from model_lifecycle import operation
+        import resident_mflux
+        try:
+            # The runtime log gets the same tqdm output, so progress and job logs work unchanged.
+            with log_path.open('w') as stream,redirect_stdout(stream),redirect_stderr(stream):
+                args=resident_mflux.parse(module,arguments)
+                wanted=resident_mflux.key(module,args)
+                if self.resident is None or self.resident[0]!=wanted:
+                    self.release()
+                    started=time.monotonic()
+                    with operation('load','weights','keep_weights_loaded'):
+                        model,latent_creator=resident_mflux.build(module,args)
+                    self.resident=(wanted,model,latent_creator)
+                    print(f'Loaded weights in {time.monotonic()-started:.1f}s; keeping them for the next image',flush=True)
+                else:
+                    print('Reusing weights kept in memory',flush=True)
+                _,model,latent_creator=self.resident
+                detach=live_preview.attach(model,latent_creator,settings['preview_dir']) if settings.get('preview_dir') else None
+                try:
+                    resident_mflux.generate(module,model,args).save(path=destination,export_json_metadata=False,overwrite=True)
+                finally:
+                    if detach:detach()
+        except BaseException:
+            self.release();raise
+        if not settings.get('keep_loaded'):self.release()
+
+    def release(self):
+        """Drop weights kept between images and return their memory."""
+        if self.resident is None:return
+        import gc
+        from model_lifecycle import operation
+        with operation('unload','weights','keep_weights_loaded'):
+            self.resident=None;gc.collect()
+            import mlx.core as mx
+            mx.clear_cache()
+        print('Released weights kept between images',flush=True)
 
     def progress(self):
         if self.active_log is None or not self.active_log.is_file():
@@ -40,8 +86,9 @@ class MfluxEngine:
 
 
 class MfluxResult:
-    def __init__(self, settings):
+    def __init__(self, settings, engine=None):
         self.settings=settings
+        self.engine=engine
 
     def save(self, path, overwrite=False):
         path=Path(path)
@@ -83,13 +130,16 @@ class MfluxResult:
                 command+=['--lora',selection['file_path'],str(selection['strength']),'--no-bake-lora']
             if settings.get('preview_dir'):
                 command+=['--stepwise-image-output-dir',str(settings['preview_dir'])]
-            environment={**os.environ,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1',
-                         'TMPDIR':str(scratch),'PYTHONUNBUFFERED':'1'}
-            with log_path.open('w') as stream:
-                process=subprocess.run(command,cwd=ROOT,env=environment,stdout=stream,stderr=subprocess.STDOUT,
-                                       timeout=3600,pass_fds=tuple(settings.get('inherited_fds',())))
-            if process.returncode:
-                raise RuntimeError(f"{PROFILE['name']} exited {process.returncode}; see {log_path}")
+            if self.engine is not None and (settings.get('keep_loaded') or self.engine.resident is not None):
+                self.engine.render_resident(module,command[len(launcher):],destination,log_path,settings)
+            else:
+                environment={**os.environ,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1',
+                             'TMPDIR':str(scratch),'PYTHONUNBUFFERED':'1'}
+                with log_path.open('w') as stream:
+                    process=subprocess.run(command,cwd=ROOT,env=environment,stdout=stream,stderr=subprocess.STDOUT,
+                                           timeout=3600,pass_fds=tuple(settings.get('inherited_fds',())))
+                if process.returncode:
+                    raise RuntimeError(f"{PROFILE['name']} exited {process.returncode}; see {log_path}")
             if not destination.is_file():
                 raise RuntimeError(f"{PROFILE['name']} produced no image; see {log_path}")
             with Image.open(destination) as result:

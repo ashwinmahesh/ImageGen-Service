@@ -276,6 +276,12 @@ To delete a result, open it in **Gallery**, choose **Delete image** below its fi
 
 This screenshot uses simulated demonstration data.
 
+## Settings
+
+Open the gear icon at the right of any page's header for settings shared by the whole service.
+
+**Keep image weights loaded between generations** (off by default) keeps FLUX.2 Klein and Qwen-Image in memory while the next image in the queue uses the same model, such as the other options in a batch or several queued Qwen edits. Normally these models reload for every image, which takes roughly 30 seconds per Qwen image. They're released as soon as the next image needs a different model or the queue runs out of work for them. While loaded, Qwen holds about 9.4 GB of memory, so leave this off if the Mac is short on memory or you run voice jobs at the same time. Z-Image always stays loaded. Scripts can change it with `PATCH /v1/settings` on either service.
+
 ## Manage the queue
 
 Open **Queue** in any page's header to see active and waiting jobs, saved history, pause/clear controls and pagination. **Monitor** opens the job in a new browser tab, in its **Generate** or **Edit photo** view with the job's own prompt, model, settings, source photo and selected area, and follows it in the preview without changing its place. Editing those fields does not change the job; generating submits a new one. **Open image** does the same for a finished job and shows its results. The address bar always includes the job you are viewing (`?job=…`), so reloading, Back/Forward and copied links reopen it. **Cancel** on a running job (in its queue row, or **Stop generating** under the preview) stops it within about a second and frees the GPU for the next job; finished options in a batch are kept. A running job shows its percentage and a rough time left, both in its queue row and under the preview, from the model's own step counter. A batch counts each image equally, and the last few percent cover decoding and saving the image. Drag a waiting job by its left-hand grip to reorder it, or focus the grip and press ↑ / ↓. **Run Now** puts it in the next free slot, even when ordinary work is paused. An active batch always finishes first. Close the modal with its **×** button, Escape or the backdrop.

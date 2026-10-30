@@ -34,7 +34,7 @@ from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt
 from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
 import image_catalog
-from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL
+from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL, KEEP_WEIGHTS_SETTING
 from generation_worker import QueueWorker
 from observability import ResourceMonitor
 from observability_api import create_router as observability_router
@@ -562,6 +562,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             seed=seed, prompt=rendering_prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
             **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and child_backend else {}),
+            **({'keep_loaded':keep_weights_loaded(job)} if job and PROFILE.get('cli_module') else {}),
             image_path=geometry.image_path,
             image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
             **({'mask_path':widen_mask_to_grid(mask_path)} if mask_path else {}),
@@ -798,6 +799,33 @@ def normalized_request(payload):
     if data['reference_image'] is None or PROFILES[payload.model].get('reference_mode')=='edit':
         data.pop('image_strength',None)
     return data
+
+
+def keep_weights_loaded(job):
+    """Keep CLI-model weights after this image when the setting is on and the next image uses this model."""
+    if not job_store.setting(KEEP_WEIGHTS_SETTING,False):return False
+    if job.get('_candidate_index',1)<job['request'].get('n',1):return True
+    return job_store.summary().get('next_model')==API_MODEL
+
+
+class RuntimeSettings(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    keep_weights_loaded: bool=Field(strict=True,description="When true, FLUX.2 Klein and Qwen-Image keep their weights loaded between images while the next image in the queue uses the same model (another option in a batch or the next waiting job), instead of reloading for every image; they are released when that run ends. Holds the whole model in memory (about 9.4 GB for Qwen) while it runs. Z-Image always stays loaded. Default false; kept across restarts.")
+
+
+@app.get('/v1/settings',response_model=RuntimeSettings,summary='Read generator settings',
+         description='Settings live in the shared queue database, so the standalone queue API reads and changes the same values.')
+def read_settings():
+    queue_ready(require_worker=False)
+    return {'keep_weights_loaded':bool(job_store.setting(KEEP_WEIGHTS_SETTING,False))}
+
+
+@app.patch('/v1/settings',response_model=RuntimeSettings,summary='Change generator settings',
+           description='Body {"keep_weights_loaded": true|false}. Takes effect from the next image; an image already rendering finishes as it started.')
+def update_settings(payload:RuntimeSettings):
+    queue_ready(require_worker=False)
+    job_store.set_setting(KEEP_WEIGHTS_SETTING,payload.keep_weights_loaded)
+    return read_settings()
 
 
 def queue_ready(require_worker=True):

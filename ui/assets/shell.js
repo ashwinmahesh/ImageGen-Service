@@ -71,6 +71,22 @@ function queueLabel(control,icon,label){
     }
     for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
     $('close-queue').replaceChildren(queueIcon('close'));
+    // Settings live in the shared queue database (GET/PATCH /v1/settings on either service).
+    $('close-settings').replaceChildren(queueIcon('close'));
+    function settingsError(message){$('settings-error').textContent=message;$('settings-error').hidden=!message;}
+    async function loadSettings(){
+      try{const settings=await requestJSON('/v1/settings');$('keep-weights-loaded').checked=!!settings.keep_weights_loaded;$('keep-weights-loaded').disabled=false;settingsError('');}
+      catch(error){$('keep-weights-loaded').disabled=true;settingsError('Could not read settings: '+error.message);}
+    }
+    $('open-settings').addEventListener('click',()=>{$('settings-dialog').showModal();loadSettings();});
+    $('close-settings').addEventListener('click',()=>$('settings-dialog').close());
+    $('settings-dialog').addEventListener('click',event=>{if(event.target===$('settings-dialog'))$('settings-dialog').close();});
+    $('keep-weights-loaded').addEventListener('change',async event=>{
+      const toggle=event.target,wanted=toggle.checked;toggle.disabled=true;
+      try{const settings=await requestJSON('/v1/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({keep_weights_loaded:wanted})});toggle.checked=!!settings.keep_weights_loaded;settingsError('');}
+      catch(error){toggle.checked=!wanted;settingsError('Could not save the setting: '+error.message);}
+      finally{toggle.disabled=false;}
+    });
     $('open-queue').prepend(queueIcon('queue'));
     let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
     // The header and Queue modal switches both mirror the persisted pause flag from polling.
