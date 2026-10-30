@@ -47,6 +47,7 @@
  clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
  close:'m6 6 12 12M18 6 6 18',
  stop:'M7 7h10v10H7z',
+ image:'M4 5h16v14H4zM9 10h.01M20 16l-5-5-9 8',
  previous:'m14 6-6 6 6 6',next:'m10 6 6 6-6 6',
  resources:'M4 3v18h17M8 16v-5M13 16V7M18 16v-8',
  retry:'M3 10a9 9 0 1 1 1 8M3 4v6h6',
@@ -62,6 +63,11 @@ function queueLabel(control,icon,label){
     }
     function queueControl(tag,label,icon,cls='secondary'){
       const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
+    }
+    // Row actions show only their icon; the action name is the accessible label and the hover tooltip.
+    function queueIconControl(tag,label,icon,cls='secondary'){
+      const control=document.createElement(tag);control.className=cls+' queue-icon-button';
+      control.replaceChildren(queueIcon(icon));control.setAttribute('aria-label',label);control.title=label;return control;
     }
     for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
     $('close-queue').replaceChildren(queueIcon('close'));
@@ -195,25 +201,23 @@ function queueLabel(control,icon,label){
       row.append(copy);
       const actions=document.createElement('div'); actions.className='queue-actions';
       // Each job opens in its own tab with its saved form, photo and preview; native link gestures keep working.
-      const inspect=queueControl('a',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'play' : 'monitor','secondary queue-monitor');
-      inspect.href='/?'+new URLSearchParams({job:job.id}); inspect.target='_blank'; inspect.rel='noopener'; inspect.title='Open this job in a new tab';
+      const inspect=queueIconControl('a',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'image' : 'monitor','secondary queue-monitor');
+      inspect.href='/?'+new URLSearchParams({job:job.id}); inspect.target='_blank'; inspect.rel='noopener';
       actions.append(inspect);
       if (job.status==='running') {
-        const stop=queueControl('button',job.cancel_requested ? 'Stopping…' : 'Cancel','stop','secondary queue-remove'); stop.type='button'; stop.disabled=job.cancel_requested;
-        stop.title='Stop this job now. Finished options in a batch are kept.';
+        const stop=queueIconControl('button',job.cancel_requested ? 'Stopping…' : 'Cancel','stop','secondary queue-remove'); stop.type='button'; stop.disabled=job.cancel_requested;
         stop.addEventListener('click',() => { if (confirm(CANCEL_RUNNING_PROMPT)) queueAction('/v1/jobs/'+job.id,{method:'DELETE'}); }); actions.append(stop);
       }
       if (job.status==='queued') {
-        const run=queueControl('button','Run Now','play','secondary queue-run-now'); run.type='button';
-        run.title='Run at the next free slot, even while paused; the active batch finishes first.';
+        const run=queueIconControl('button','Run Now','play','secondary queue-run-now'); run.type='button';
         run.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/run-now',{method:'POST'}).then(result => { if (result) { $('queue-dialog').close(); if(callbacks.onRunNow)callbacks.onRunNow(job);else inspectJob(job); } })); actions.append(run);
-        const remove=queueControl('button','Remove','remove','secondary queue-remove'); remove.type='button';
+        const remove=queueIconControl('button','Remove','remove','secondary queue-remove'); remove.type='button';
         remove.addEventListener('click',() => queueAction('/v1/jobs/'+job.id,{method:'DELETE'})); actions.append(remove);
       } else if (['failed','cancelled'].includes(job.status)) {
-        const retry=queueControl('button','Retry','retry'); retry.type='button';
+        const retry=queueIconControl('button','Retry','retry'); retry.type='button';
         retry.addEventListener('click',() => queueAction('/v1/jobs/'+job.id+'/retry',{method:'POST'})); actions.append(retry);
       }
-      if (job.attempts>0) { const metrics=queueControl('a','Metrics','resources','secondary queue-metrics'); metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model}); metrics.title='View resource measurements for this job'; actions.append(metrics); }
+      if (job.attempts>0) { const metrics=queueIconControl('a','Metrics','resources','secondary queue-metrics'); metrics.href='/observability?'+new URLSearchParams({job:job.id,model:job.model}); actions.append(metrics); }
       row.append(actions); return row;
     }
     async function refreshQueue() {
