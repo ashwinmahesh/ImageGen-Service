@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id),modelNames=new Map();
-  let callbacks={};
+  let callbacks={},statusHoldUntil=0;
   const CANCEL_RUNNING_PROMPT='Stop this job now? The image being rendered is discarded; finished options in a batch are kept.';
   function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
   function remainingLabel(seconds){
@@ -26,9 +26,10 @@
     bar.append(document.createElement('span'));setProgressBar(bar,progress);return bar;
   }
   function updateHealth(data){
-    const name=modelNames.get(data.active_model)||data.active_model||'queued image';
+    const name=modelNames.get(data.active_model)||data.active_model||'queued image',paused=!!data.queue?.paused;
     const percent=data.progress && data.progress.phase!=='done' ? ` ${data.progress.percent}%` : '';
-    setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…${percent}` : data.status==='ready' ? 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : data.status==='error' ? 'offline' : 'checking');
+    // Keep a failed pause/resume message visible briefly instead of replacing it on the next poll.
+    if (Date.now()>=statusHoldUntil) setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…${percent}` : data.status==='ready' ? paused ? 'Queue paused' : 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? paused ? 'paused' : 'ready' : data.status==='error' ? 'offline' : 'checking');
     callbacks.onHealth?.(data);
   }
   function queueError(message){$('queue-error').textContent=message;$('queue-error').hidden=false;}
@@ -41,7 +42,6 @@
  queue:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
  monitor:'M4 4h16v12H4zM8 21h8M12 16v5',
  play:'m8 5 11 7-11 7Z',
- pause:'M8 5v14M16 5v14',
  remove:'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6',
  clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
  close:'m6 6 12 12M18 6 6 18',
@@ -62,10 +62,30 @@ function queueLabel(control,icon,label){
     function queueControl(tag,label,icon,cls='secondary'){
       const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
     }
-    for(const[id,icon,label]of [['pause-queue','pause','Pause queue'],['clear-queue','clear','Clear waiting'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
+    for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
     $('close-queue').replaceChildren(queueIcon('close'));
     $('open-queue').prepend(queueIcon('queue'));
     let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
+    // The header and Queue modal switches both mirror the persisted pause flag from polling.
+    // Each pause/resume bumps the revision so a poll requested before it cannot undo the change.
+    let queuePauseRevision = 0;
+    const queueSwitches=() => [$('queue-processing'),$('queue-processing-dialog')];
+    function showQueuePaused(paused) {
+      queuePaused=paused;
+      for (const toggle of queueSwitches()) { toggle.checked=!paused; toggle.disabled=false; }
+    }
+    async function setQueuePaused(paused) {
+      const toggles=queueSwitches(); toggles.forEach(toggle => { toggle.disabled=true; }); $('queue-switch-alert').textContent='';
+      if (queueMutating) { showQueuePaused(queuePaused); return; }
+      queueMutating=true; queuePauseRevision++; $('queue-error').hidden=true;
+      try { const state=await requestJSON('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})}); showQueuePaused(!!state.paused); }
+      catch(error) {
+        const message=`Could not ${paused ? 'pause' : 'resume'} the queue: ${error.message}`;
+        showQueuePaused(queuePaused); queueError(message); $('queue-switch-alert').textContent=message;
+        setStatus(paused ? 'Pause failed' : 'Resume failed','offline'); statusHoldUntil=Date.now()+6000;
+      }
+      finally { toggles.forEach(toggle => { toggle.disabled=false; }); queueMutating=false; queuePauseRevision++; await refreshQueue(); }
+    }
     async function requestJSON(url, options = {}) {
       const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
       const data=await response.json();
@@ -170,17 +190,16 @@ function queueLabel(control,icon,label){
     }
     async function refreshQueue() {
       if (pollingQueue || queueDrag || queueMutating) return;
-      pollingQueue=true;
+      pollingQueue=true; const pauseRevision=queuePauseRevision;
       try {
         const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
         if ($('queue-filter').value) params.set('status',$('queue-filter').value);
         const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health').catch(error=>{setStatus('Server offline','offline');throw error;})]);
         updateHealth(health);
         const summary=health.queue || {};
-        queuePaused=!!summary.paused;
+        if (!queueMutating && pauseRevision===queuePauseRevision) showQueuePaused(!!summary.paused);
         const count=(summary.running || 0)+(summary.queued || 0); $('queue-badge').textContent=String(count); $('queue-badge').hidden=!count;
         $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
-        queueLabel($('pause-queue'),queuePaused ? 'play' : 'pause',queuePaused ? 'Resume queue' : 'Pause queue');
         $('clear-queue').disabled=!summary.queued;
         $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
         $('queue-notice').hidden=!$('queue-notice').textContent;
@@ -196,14 +215,14 @@ function queueLabel(control,icon,label){
         $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
         $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
         await callbacks.onRefresh?.(summary,health);
-      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; queueSwitches().forEach(toggle => { toggle.disabled=true; }); }
       finally { pollingQueue=false; }
     }
     $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
     $('close-queue').addEventListener('click',() => $('queue-dialog').close());
     $('queue-dialog').addEventListener('close',clearQueueDrag);
     $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
-    $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
+    for (const toggle of queueSwitches()) toggle.addEventListener('change',event => setQueuePaused(!event.target.checked));
     $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
     $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
     $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });

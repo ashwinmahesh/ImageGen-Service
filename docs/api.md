@@ -284,6 +284,8 @@ Ordinary admissions append to the queue. New `generate_immediately:true` admissi
 
 The header’s **Queue** button opens a modal with active/waiting counts, pause/clear, filters and pagination. **Monitor** follows a job in the main preview; **Open image** displays completed results, and **Metrics** opens resource history. Waiting jobs have green **Run Now** and red **Remove** actions. The modal supports Close, Escape and backdrop dismissal. It provides a grip on the left of each waiting row. Drag it above/below another visible waiting job, or focus it and press ↑ / ↓ to move one position (including across page boundaries). **Run Now** follows that job's progress in the preview. Active and finished jobs have no scheduling controls. Both services use the same SQL operations; generator/UI controls work even while standalone queue HTTP is offline.
 
+Every page header also has a **Process queue** switch beside the Queue button, and the Queue modal header has the same switch beside Clear waiting. On means waiting jobs run; off means the queue is paused. Both send the generator `PATCH /v1/queue` and follow `queue.paused` from `/health`, polled every two seconds, so a pause made through the standalone queue API or another tool appears within one poll. While paused and idle, the header status reads **Queue paused**. A failed change puts both switches back to the saved state and shows the error.
+
 ```sh
 # Replace this value with a waiting job ID.
 IMAGEGEN_JOB_ID="paste-the-job-id-here"
@@ -303,11 +305,17 @@ DELETE cancels a waiting job immediately. For a running job it returns the job w
 
 Retry is allowed only for failed/cancelled entries (**409** otherwise), with a new ID and ordinary priority. It reuses saved settings and any frozen seed. A retry is a new full batch; completed files from the old job remain. Restore missing references/adapters first. Generator-side retry can return **400/422** if those saved settings/inputs are unusable. Repeating the retry call intentionally creates another job; it has no idempotency header parameter.
 
-Pause persists across restarts. The active batch finishes; explicitly immediate jobs may still run while ordinary queued work is paused. To stop active inference, cancel that job with DELETE.
+Pause persists across restarts and is shared by both services; either one can pause or resume it. The active batch finishes, then ordinary waiting jobs stay queued. Jobs admitted with `generate_immediately:true`, and jobs given Run Now, can still run while paused. Pausing never stops active inference; to stop it, cancel that job with DELETE. Read the current state from the generator's `/health` `queue.paused`, or from the queue's GET `/v1/queue` `paused`.
 
 ```sh
+# Pause (either port: 5742 generator, 55302 queue)
 curl --fail-with-body --request PATCH http://localhost:5742/v1/queue \
   -H 'Content-Type: application/json' -d '{"paused":true}'
+# Resume
+curl --fail-with-body --request PATCH http://localhost:55302/v1/queue \
+  -H 'Content-Type: application/json' -d '{"paused":false}'
+# Read
+curl --fail-with-body http://localhost:55302/v1/queue
 ```
 
 ## Job and image responses

@@ -35,12 +35,37 @@ class SharedShellTest(unittest.TestCase):
                     elements=Elements(response.text)
                     self.assertEqual(elements.current,[path])
                     self.assertEqual(len(elements.ids),len(set(elements.ids)))
-                    for identifier in ('model-name','open-queue','queue-badge','status-text','queue-dialog','pause-queue','queue-list'):
+                    for identifier in ('model-name','open-queue','queue-badge','queue-processing','status-text','queue-dialog','queue-processing-dialog','queue-list'):
                         self.assertIn(identifier,elements.ids)
                     header=re.search(r'<header\b.*?</header>',response.text,re.S).group()
                     headers.append(re.sub(r'\s+aria-current="page"','',header))
             finally:client.close()
         self.assertEqual(headers[0],headers[1]);self.assertEqual(headers[0],headers[2])
+
+    def test_header_and_modal_queue_switches_are_labelled_and_drive_the_shared_pause_flag(self):
+        header=(PROJECT/'ui/partials/header.html').read_text()
+        modal=(PROJECT/'ui/partials/queue.html').read_text()
+        for markup,identifier in ((header,'queue-processing'),(modal,'queue-processing-dialog')):
+            switch=re.search(r'<input id="%s"[^>]*>'%identifier,markup).group()
+            for attribute in ('type="checkbox"','role="switch"','class="setting-switch"'):
+                self.assertIn(attribute,switch)
+            self.assertIn('<label for="%s">Process queue</label>'%identifier,markup)
+            self.assertIn('aria-label="Help with Process queue"',markup)
+            self.assertIn('Generate immediately and Run Now requests still run while paused',markup)
+        # The modal switch replaces the old Pause queue button; Clear waiting and Close stay after it.
+        self.assertNotIn('pause-queue',modal)
+        self.assertLess(modal.index('queue-processing-dialog'),modal.index('id="clear-queue"'))
+        self.assertLess(modal.index('id="clear-queue"'),modal.index('id="close-queue"'))
+        self.assertRegex(header,r'id="queue-switch-alert" role="alert"')
+        script=(PROJECT/'ui/assets/shell.js').read_text()
+        # Both controls send the same PATCH and follow the polled /health queue.paused value.
+        self.assertIn("requestJSON('/v1/queue',{method:'PATCH'",script)
+        self.assertIn("const queueSwitches=() => [$('queue-processing'),$('queue-processing-dialog')];",script)
+        self.assertIn("for (const toggle of queueSwitches()) toggle.addEventListener('change',event => setQueuePaused(!event.target.checked));",script)
+        self.assertNotIn('pause-queue',script)
+        # A poll requested before a pause/resume must not undo it.
+        self.assertIn('pollingQueue=true; const pauseRevision=queuePauseRevision;',script)
+        self.assertIn('if (!queueMutating && pauseRevision===queuePauseRevision) showQueuePaused(!!summary.paused)',script)
 
     def test_shared_assets_are_local_uncached_and_paths_are_not_arbitrary(self):
         client=TestClient(server.app,base_url='http://127.0.0.1')
