@@ -172,7 +172,7 @@ Generator, Gallery and Observability share the same header. Command-click a navi
 2. Enter a prompt, such as **A watercolor fox in a snowy forest, soft morning light**.
 3. For a first image, choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the default steps alone.
 4. Keep **Prompt expansion** switched on if you want added style, lighting and composition details. **Preview expansion** lets you review the description first. If you adopt it with **Use this description**, automatic expansion turns off to avoid expanding twice. Malformed LLM responses get one automatic formatting retry; if it still fails, preview again or turn Prompt expansion off to use your original description.
-5. Click **Generate image**. **Generate immediately** is switched on by default: your request gets the next free slot ahead of ordinary queued work, after the active batch finishes.
+5. Click **Generate image**. **Generate immediately** is switched on by default: your request gets the next free slot ahead of ordinary queued work, after the active batch finishes. Switch on **Live preview** to watch the image form under the progress spinner while it renders. It's off by default because every preview takes extra decoding time, which is most noticeable on fast models such as Z-Image and FLUX.2 Klein.
 6. View or download the result. With multiple options, select a thumbnail to choose the image you want.
 
 For a photo variation, click **Choose photo** or expand **Or use a file path**. **Keep the original** defaults to 0.6; lower values allow larger changes. The output follows the photo's aspect ratio. This creates variations, with no guarantee of precise edits or exact identity preservation.

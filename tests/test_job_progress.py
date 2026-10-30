@@ -144,7 +144,7 @@ class StoredProgressTest(unittest.TestCase):
         self.assertIsNone(admitted['progress'])
         claimed=self.store.claim()
         self.assertEqual(self.store.get(claimed['id'])['progress']['phase'],'starting')
-        saved={'percent':36,'phase':'sampling','image':2,'total_images':2,'step':2,'total_steps':4,'estimated_remaining_seconds':64,'updated':1.0}
+        saved={'percent':36,'phase':'sampling','image':2,'total_images':2,'step':2,'total_steps':4,'estimated_remaining_seconds':64,'preview_updated':None,'updated':1.0}
         self.assertFalse(self.store.save_live_progress(claimed['id'],claimed['attempts']+1,saved))
         self.assertTrue(self.store.save_live_progress(claimed['id'],claimed['attempts'],saved))
         self.assertEqual(self.client.get('/v1/jobs/'+claimed['id']).json()['progress'],saved)

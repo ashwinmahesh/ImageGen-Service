@@ -124,6 +124,7 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `seed` | integer or null | Omit/null for random; otherwise 0–4294967295. First option's seed; later options increment modulo 2^32. |
 | `expand_prompt` | boolean | false in API; enabled UI initially checks it. Requires LLM-enabled serving. Saves the original and expanded text. |
 | `vary_prompt` | boolean | false. Requires `expand_prompt:true` and `n>=2`; creates a distinct expansion for each option. |
+| `live_preview` | boolean | false. Save an in-progress preview while this job renders; read it from GET `/v1/jobs/{id}/preview`. FLUX.2 Klein, Qwen and Z-Image decode the image after each sampling step; Chroma writes about eight previews per image. Each preview adds decoding time, most noticeably on fast models. |
 | `generate_immediately` | boolean | false for async jobs, true for synchronous generation. True gets the next free slot before ordinary waiting work; never interrupts active work. |
 | `response_format` | string | `"b64_json"` or `"url"`; default `"b64_json"`. URL format is convenient for polling and downloads. Both save files. |
 | `output_dir` | string | `<store>/<requested-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
@@ -246,6 +247,7 @@ In this table **Both** means the endpoint exists on each port. Both services man
 | GET `/v1/jobs` | Both | 200 | List jobs using optional `status`, `limit`, `offset`; returns a page. |
 | GET `/v1/jobs/{identifier}` | Both | 200 | Read one job and any saved result. |
 | GET `/v1/jobs/{identifier}/inputs/{field}` | Generator | 200 | `field` is `reference_image` or `mask_image`. Returns the PNG, JPEG or WebP file that job's request names, from any saved path, for previews. **404** if the job has no such input or the file is missing or unreadable; **415** for other file types. |
+| GET `/v1/jobs/{identifier}/preview` | Generator | 200 | The newest in-progress PNG of a running `live_preview` job (uncached). Fetch again when `progress.preview_updated` changes. **404** before the first preview, after the job ends, or without `live_preview`. Previews are deleted when the job finishes. |
 | PATCH `/v1/jobs/{identifier}` | Both | 200 | Replace a never-started waiting request. Generator: complete flat settings. Queue: `{request:{...}}`. Returns the updated job. |
 | POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
 | POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |
@@ -352,6 +354,7 @@ While a job runs, the generator reads the step counter that each image runtime p
 | `image`, `total_images` | integers | One-based option rendering now (null before rendering starts) and batch size. |
 | `step`, `total_steps` | integers or null | Sampler step of the current image. Null while the runtime loads. |
 | `estimated_remaining_seconds` | integer or null | Rough estimate from the measured sampler speed, plus measured time per image for later batch options. Null until sampling starts. Native runtimes reload weights for every image, which the first estimate does not include. |
+| `preview_updated` | number or null | `live_preview` jobs only: Unix seconds the newest preview was written; null before the first one. |
 | `updated` | number or null | Unix seconds when the generator last saved it. |
 
 Progress is informational. A retry or recovered attempt starts again from 0; check `status` for completion. If the generator stops, the last saved value remains until recovery requeues the job.

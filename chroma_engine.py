@@ -80,6 +80,10 @@ class ChromaResult:
             if selection:
                 command += ['--lora-model-dir', str(Path(selection['file_path']).parent),
                             '--lora-apply-mode', 'at_runtime']
+            if s.get('preview_dir'):
+                # About eight decoded previews per image, whatever the step count.
+                command += ['--preview', 'vae', '--preview-path', str(Path(s['preview_dir'])/'preview.png'),
+                            '--preview-interval', str(max(1, s['num_inference_steps']//8))]
             if s.get('image_path') and s.get('image_strength',0)>0:
                 # Keep the API convention: higher means MORE original preserved.
                 # sd.cpp uses the inverse (denoising strength), so translate it.

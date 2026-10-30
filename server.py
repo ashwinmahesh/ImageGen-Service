@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import secrets
+import shutil
 import threading
 import time
 import uuid
@@ -46,6 +47,7 @@ from queue_client import QueueClient
 from queue_api import DEFAULT_QUEUE_PORT, MoveJob, JobProgress
 from job_logs import candidate_identifier
 from job_progress import ProgressTracker
+import live_preview
 import prompt_expander
 from prompt_policy import public_guidance, public_edit_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
@@ -220,6 +222,7 @@ class GenerateRequest(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=32, description="Optional image tags: at most 32 text labels, each 1–64 characters after whitespace normalization. Commas/control characters are disallowed. Duplicates are removed case-insensitively. Editable later with PATCH /v1/images/{id}/tags.")
     expand_prompt: bool = Field(default=False, strict=True, description="Requires LLM-enabled serving (default; NO_LLM=1 disables it). Keep the description verbatim and append visual detail with the local text LLM before rendering. Original and expanded prompts are persisted. Over-budget expansions fail without compression/truncation. Does not inspect reference photos.")
     vary_prompt: bool = Field(default=False,strict=True,description="Requires expand_prompt:true and n>=2. Plan a distinct LLM expansion/composition per option, preserving explicit original constraints and style. All prompts are persisted before rendering and reused after restart. Default false shares one expansion; the UI enables this for multi-image batches with expansion. Improves creative variety but cannot guarantee visibly different results for constrained prompts or strongly preserved references.")
+    live_preview: bool = Field(default=False,strict=True,description="Save an in-progress preview while rendering (off by default). GET /v1/jobs/{id}/preview returns the newest one and progress.preview_updated says when it changed. Each preview decodes the image partway through, so generation is slower, most noticeably on fast models.")
     generate_immediately: bool = Field(default=False,strict=True,description="false adds a durable shared-queue job. true runs next ahead of ordinary queued work, FIFO among immediate jobs. It never interrupts inference. The UI enables this by default.")
     n: int = Field(default=1,ge=1,le=5,strict=True,description="Number of image options, 1–5 (default 1). One durable batch rendered sequentially with distinct seeds. seed is the first seed; later options increment it modulo 2^32. expand_prompt shares one expansion unless vary_prompt:true requests distinct composition expansions.")
     steps: int = Field(default=PROFILE["steps"], ge=1, le=max(item["max_steps"] for item in PROFILES.values()), strict=True, description="Sampling steps; omitted uses the requested model default. GET /v1/models provides each model’s default_steps and max_steps; values beyond that model’s limit are rejected.")
@@ -451,6 +454,17 @@ def reference_photo(identifier: str):
     return FileResponse(path, media_type="image/png")
 
 
+@app.get("/v1/jobs/{identifier}/preview", summary="Read a running job's newest live preview",
+         description="Only for jobs submitted with live_preview:true, while they run: returns the newest in-progress PNG. "
+                     "Poll after progress.preview_updated changes. 404 before the first preview, after the job ends, or without live_preview.")
+def job_preview(identifier: str):
+    job = find_job(identifier)
+    if job["status"] != "running" or live_preview.preview_updated(PROJECT_ROOT, job) is None:
+        raise HTTPException(404, "No live preview is available for this job yet")
+    return FileResponse(live_preview.preview_folder(PROJECT_ROOT, identifier) / live_preview.PREVIEW_NAME,
+                        media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 INPUT_MEDIA_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
 
 
@@ -539,6 +553,11 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
         rendering_prompt=edit_prompt(payload.prompt,payload.preserve,region) if payload.task=='edit' else payload.prompt
         if payload.task=='edit' and not edit_prompt_fits(payload.prompt,payload.preserve,region=region):
             raise LocalFileError(PROMPT_TOO_LONG)
+        preview_dir=None
+        if payload.live_preview and job:
+            # One folder per job; each batch option starts from an empty preview.
+            preview_dir=live_preview.preview_folder(PROJECT_ROOT,job.get('_batch_id') or job['id'])
+            shutil.rmtree(preview_dir,ignore_errors=True);preview_dir.mkdir(parents=True)
         result = model.generate_image(
             seed=seed, prompt=rendering_prompt, width=width, height=height,
             num_inference_steps=payload.steps, lora=selection,
@@ -546,6 +565,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             image_path=geometry.image_path,
             image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
             **({'mask_path':widen_mask_to_grid(mask_path)} if mask_path else {}),
+            **({'preview_dir':str(preview_dir)} if preview_dir else {}),
         )
         result.save(str(path), overwrite=True)
         if mask_path:
@@ -904,6 +924,14 @@ def prepare_candidate_prompts(payload,job):
 
 
 def execute_job(job):
+    try:
+        return execute_job_now(job)
+    finally:
+        # Previews only matter while the job runs.
+        if job['request'].get('live_preview'):shutil.rmtree(live_preview.preview_folder(PROJECT_ROOT,job['id']),ignore_errors=True)
+
+
+def execute_job_now(job):
     if isinstance(model,ModelProcess):return model.execute(job)
     payload=GenerateRequest.model_validate(job['request'])
     if not job.get('_prepared'):
