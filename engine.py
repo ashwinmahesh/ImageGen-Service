@@ -45,8 +45,16 @@ class ZImageEngine:
             self._model = self._factory(selection)
             self._selection_key = key
 
-    def generate_image(self, *, lora=None, **settings):
+    def generate_image(self, *, lora=None, preview_dir=None, **settings):
         self._ensure_model(lora)
         self._model.tiling_config = self.tiling_config
         settings["prompt"] = effective_prompt(settings["prompt"], lora)
-        return self._model.generate_image(**settings)
+        if preview_dir is None:
+            return self._model.generate_image(**settings)
+        import live_preview
+        from mflux.models.z_image.latent_creator import ZImageLatentCreator
+        detach = live_preview.attach(self._model, ZImageLatentCreator, preview_dir)
+        try:
+            return self._model.generate_image(**settings)
+        finally:
+            detach()

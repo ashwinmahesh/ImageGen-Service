@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 from PIL import Image
-from config import ROOT, MODEL_DIR, PROFILE
+from config import ROOT, MODEL_DIR, PROFILE, PROJECT_ROOT
 from lora_catalog import effective_prompt
 from model_assets import validate_snapshot
 
@@ -63,7 +63,9 @@ class MfluxResult:
             selection=settings.get('lora')
             prompt.write_text(effective_prompt(settings['prompt'],selection))
             destination=temporary/'result.png'
-            command=[sys.executable,'-m',module,'--model',str(MODEL_DIR),
+            # Live previews run the same CLI through a wrapper that keeps only the newest step image.
+            launcher=[sys.executable,str(PROJECT_ROOT/'live_preview.py'),module] if settings.get('preview_dir') else [sys.executable,'-m',module]
+            command=[*launcher,'--model',str(MODEL_DIR),
                      '--base-model',PROFILE['base_model'],'--low-ram',
                      '--steps',str(settings['num_inference_steps']),
                      '--width',str(settings['width']),'--height',str(settings['height']),
@@ -79,6 +81,8 @@ class MfluxResult:
                 command+=['--mask-image',str(settings['mask_path'])]
             if selection:
                 command+=['--lora',selection['file_path'],str(selection['strength']),'--no-bake-lora']
+            if settings.get('preview_dir'):
+                command+=['--stepwise-image-output-dir',str(settings['preview_dir'])]
             environment={**os.environ,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1',
                          'TMPDIR':str(scratch),'PYTHONUNBUFFERED':'1'}
             with log_path.open('w') as stream:

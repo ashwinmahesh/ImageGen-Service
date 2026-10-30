@@ -32,6 +32,7 @@ class JobProgress(BaseModel):
     step:int|None=Field(default=None,description="Sampler step of the current image, read from the runtime's own step counter.")
     total_steps:int|None=None
     estimated_remaining_seconds:int|None=Field(default=None,description='Rough estimate from the measured sampler speed; null until sampling starts.')
+    preview_updated:float|None=Field(default=None,description='live_preview jobs: Unix time the newest in-progress preview was written; null before the first. Fetch it from the generator at GET /v1/jobs/{id}/preview.')
     updated:float|None=Field(default=None,description='Unix time the generator last saved this progress.')
 
 

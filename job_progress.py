@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from job_logs import candidate_identifier, runtime_folder
+from live_preview import preview_updated
 from model_profiles import PROFILES
 from storage_paths import data_directory
 
@@ -118,11 +119,11 @@ class ProgressTracker:
             remaining=round((step[1]-step[0])*step[2]+(count-done-1)*per_image)
         return {'percent':self.best,'phase':phase,'image':None if index is None else index+1,'total_images':count,
                 'step':step[0] if step else None,'total_steps':step[1] if step else None,
-                'estimated_remaining_seconds':remaining,'updated':time.time()}
+                'estimated_remaining_seconds':remaining,'preview_updated':preview_updated(self.project,job),'updated':time.time()}
 
     def changed(self,progress):
         if self.current is None:return True
-        keys=('percent','phase','image','step','total_steps')
+        keys=('percent','phase','image','step','total_steps','preview_updated')
         if any(progress[key]!=self.current[key] for key in keys):return True
         before,after=self.current['estimated_remaining_seconds'],progress['estimated_remaining_seconds']
         if (before is None)!=(after is None) or (after is not None and abs(after-before)>=5):return True
