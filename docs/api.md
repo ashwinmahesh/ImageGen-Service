@@ -245,6 +245,7 @@ In this table **Both** means the endpoint exists on each port. Both services man
 | POST `/v1/jobs` | Both | 202 | Generator: flat image settings. Queue: `{model?,request,adapter_sha256?}`. Returns a job record after committing it. |
 | GET `/v1/jobs` | Both | 200 | List jobs using optional `status`, `limit`, `offset`; returns a page. |
 | GET `/v1/jobs/{identifier}` | Both | 200 | Read one job and any saved result. |
+| GET `/v1/jobs/{identifier}/inputs/{field}` | Generator | 200 | `field` is `reference_image` or `mask_image`. Returns the PNG, JPEG or WebP file that job's request names, from any saved path, for previews. **404** if the job has no such input or the file is missing or unreadable; **415** for other file types. |
 | PATCH `/v1/jobs/{identifier}` | Both | 200 | Replace a never-started waiting request. Generator: complete flat settings. Queue: `{request:{...}}`. Returns the updated job. |
 | POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
 | POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |

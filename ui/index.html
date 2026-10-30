@@ -672,8 +672,10 @@
     $('expand-prompt').addEventListener('change',updateVariationControls);
     $('vary-prompt').addEventListener('change',updateVariationControls);
     function jobWorkflow(job){return job.request?.task==='edit' ? 'edit' : 'generate';}
-    // Uploaded photos/masks and gallery images have browser URLs; other saved paths have no preview.
+    // Inputs of an opened job preview through that job; uploads and gallery images also have their own routes.
+    const jobInputURLs=new Map();
     function savedImageURL(path){
+      if(jobInputURLs.has(path))return jobInputURLs.get(path);
       const match=/(?:^|\/)(references\/)?([0-9a-f]{32})\.png$/.exec(typeof path==='string' ? path : '');
       return !match ? null : match[1] ? `/references/${match[2]}.png` : `/images/${match[2]}.png`;
     }
@@ -683,6 +685,7 @@
       if(owner===workflow)captureWorkflow();
       shownJobs[owner]=job.id;
       const fields=state.fields,set=(id,value)=>{if(fields[id] && value!==undefined && value!==null)fields[id].value=String(value);};
+      for(const field of ['reference_image','mask_image'])if(typeof request[field]==='string' && request[field])jobInputURLs.set(request[field],`/v1/jobs/${job.id}/inputs/${field}`);
       const reference=typeof request.reference_image==='string' ? request.reference_image : '',preview=savedImageURL(reference);
       fields['model-choice'].value=job.model || request.model || '';
       set('prompt',request.prompt);set('preserve',owner==='edit' ? request.preserve || '' : '');
@@ -696,16 +699,17 @@
       set('reference',reference);set('edit-area',request.mask_image ? 'selected' : 'whole');
       Object.assign(state,{initialized:true,referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,usingReferenceSizing:!!reference,
         referenceSrc:preview,referenceHidden:!reference,referenceName:reference ? owner==='edit' ? 'Photo being edited' : 'Reference photo' : '',
-        referenceInfo:reference ? preview ? 'From this job · '+reference.split('/').pop() : 'No preview for this saved path: '+reference : '',
+        referenceInfo:reference ? 'From this job · '+reference.split('/').pop() : '',
         maskStrokes:[],maskUpload:null,savedMaskPath:request.mask_image || null,batch:null,selectedOption:0,
         expansionPreview:job.prompt_expansion || null,expansionHidden:!job.prompt_expansion,expansionOpen:false});
       state.notices.error={text:'',hidden:true};
       state.notices['import-note']={text:'Showing this job’s saved prompt, photo and settings. Editing them here does not change the job; generating submits a new one.',hidden:false};
       if(owner===workflow)restoreWorkflow();else setWorkflow(owner);
       if(edge && workflow===owner)selectLongEdge(Number(edge[1]));
-      $('reference-preview').addEventListener('load',()=>{
+      const loaded=()=>{
         if(workflow===owner && !referenceDimensions && $('reference').value===reference){referenceDimensions=[$('reference-preview').naturalWidth,$('reference-preview').naturalHeight];updateReferenceSizing();}
-      },{once:true});
+      },missing=()=>{if(workflow===owner && $('reference').value===reference)$('reference-info').textContent='This saved photo is missing or unreadable: '+reference;};
+      $('reference-preview').addEventListener('load',loaded,{once:true});$('reference-preview').addEventListener('error',missing,{once:true});
     }
     function persistWatchers(){if(Object.values(watchingJobs).some(Boolean))localStorage.setItem('imagegen-watching',JSON.stringify(watchingJobs));else localStorage.removeItem('imagegen-watching');}
     function followJob(id,owner=workflow){watchingJobs[owner]=id;shownJobs[owner]=id;workflowStates[owner].pendingJob={id,status:'queued'};workflowStates[owner].progressText='';persistWatchers();if(owner===workflow){syncJobURL(true);updateWorkflowPreview();}}

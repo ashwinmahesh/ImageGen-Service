@@ -451,6 +451,31 @@ def reference_photo(identifier: str):
     return FileResponse(path, media_type="image/png")
 
 
+INPUT_MEDIA_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
+
+
+@app.get("/v1/jobs/{identifier}/inputs/{field}", summary="Read a job's source photo or mask",
+         description="Serves the file a job's `reference_image` or `mask_image` names, so pages can preview any saved path. "
+                     "Only paths recorded on that job are read, and only PNG, JPEG or WebP images are returned unchanged. "
+                     "404 when the job has no such input or the file is missing or unreadable; 415 for other file types.")
+def job_input(identifier: str, field: Literal["reference_image", "mask_image"]):
+    value = find_job(identifier)["request"].get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(404, f"This job has no {field}")
+    path = Path(value).expanduser()
+    from PIL import Image, UnidentifiedImageError
+    try:
+        with Image.open(path) as image:
+            media_type = INPUT_MEDIA_TYPES.get(image.format)
+    except UnidentifiedImageError:
+        raise HTTPException(415, "The saved file is not a PNG, JPEG or WebP image") from None
+    except (OSError, Image.DecompressionBombError):
+        raise HTTPException(404, "The saved file is missing or unreadable; check that its drive is connected") from None
+    if media_type is None or not path.is_file():
+        raise HTTPException(415, "The saved file is not a PNG, JPEG or WebP image")
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+
 def generate(payload, job=None):
     if model is None:load_model()
     try:
