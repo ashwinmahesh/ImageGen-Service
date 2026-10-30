@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id),modelNames=new Map();
-  let callbacks={};
+  let callbacks={},statusHoldUntil=0;
   function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
   function remainingLabel(seconds){
     if(seconds==null)return '';
@@ -25,9 +25,10 @@
     bar.append(document.createElement('span'));setProgressBar(bar,progress);return bar;
   }
   function updateHealth(data){
-    const name=modelNames.get(data.active_model)||data.active_model||'queued image';
+    const name=modelNames.get(data.active_model)||data.active_model||'queued image',paused=!!data.queue?.paused;
     const percent=data.progress && data.progress.phase!=='done' ? ` ${data.progress.percent}%` : '';
-    setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…${percent}` : data.status==='ready' ? 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? 'ready' : data.status==='error' ? 'offline' : 'checking');
+    // Keep a failed pause/resume message visible briefly instead of replacing it on the next poll.
+    if (Date.now()>=statusHoldUntil) setStatus(data.busy ? data.queue?.stage==='waiting_for_accelerator' ? 'Waiting for GPU…' : `${data.queue?.stage==='loading_model' ? 'Loading' : 'Processing'} ${name}…${percent}` : data.status==='ready' ? paused ? 'Queue paused' : 'Ready on your Mac' : data.status==='error' ? 'Server unhealthy' : 'Starting…',data.busy ? 'busy' : data.status==='ready' ? paused ? 'paused' : 'ready' : data.status==='error' ? 'offline' : 'checking');
     callbacks.onHealth?.(data);
   }
   function queueError(message){$('queue-error').textContent=message;$('queue-error').hidden=false;}
@@ -63,6 +64,26 @@ function queueLabel(control,icon,label){
     for(const[id,icon,label]of [['pause-queue','pause','Pause queue'],['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
     $('open-queue').prepend(queueIcon('queue'));
     let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
+    // The header switch and the modal button both mirror the persisted pause flag from polling.
+    // Each pause/resume bumps the revision so a poll requested before it cannot undo the change.
+    let queuePauseRevision = 0;
+    function showQueuePaused(paused) {
+      queuePaused=paused;
+      $('queue-processing').checked=!paused; $('queue-processing').disabled=false;
+      queueLabel($('pause-queue'),paused ? 'play' : 'pause',paused ? 'Resume queue' : 'Pause queue');
+    }
+    async function setQueuePaused(paused) {
+      const toggle=$('queue-processing'); toggle.disabled=true; $('queue-switch-alert').textContent='';
+      if (queueMutating) { toggle.checked=!queuePaused; toggle.disabled=false; return; }
+      queueMutating=true; queuePauseRevision++; $('queue-error').hidden=true;
+      try { const state=await requestJSON('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})}); showQueuePaused(!!state.paused); }
+      catch(error) {
+        const message=`Could not ${paused ? 'pause' : 'resume'} the queue: ${error.message}`;
+        toggle.checked=!queuePaused; queueError(message); $('queue-switch-alert').textContent=message;
+        setStatus(paused ? 'Pause failed' : 'Resume failed','offline'); statusHoldUntil=Date.now()+6000;
+      }
+      finally { toggle.disabled=false; queueMutating=false; queuePauseRevision++; await refreshQueue(); }
+    }
     async function requestJSON(url, options = {}) {
       const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
       const data=await response.json();
@@ -160,17 +181,16 @@ function queueLabel(control,icon,label){
     }
     async function refreshQueue() {
       if (pollingQueue || queueDrag || queueMutating) return;
-      pollingQueue=true;
+      pollingQueue=true; const pauseRevision=queuePauseRevision;
       try {
         const params=new URLSearchParams({limit:'10',offset:String(queueOffset)});
         if ($('queue-filter').value) params.set('status',$('queue-filter').value);
         const [list,health]=await Promise.all([requestJSON('/v1/jobs?'+params),requestJSON('/health').catch(error=>{setStatus('Server offline','offline');throw error;})]);
         updateHealth(health);
         const summary=health.queue || {};
-        queuePaused=!!summary.paused;
+        if (!queueMutating && pauseRevision===queuePauseRevision) showQueuePaused(!!summary.paused);
         const count=(summary.running || 0)+(summary.queued || 0); $('queue-badge').textContent=String(count); $('queue-badge').hidden=!count;
         $('queue-summary').textContent=`${summary.running || 0} active · ${summary.queued || 0} waiting${queuePaused ? ' · Queue paused' : ''}`;
-        queueLabel($('pause-queue'),queuePaused ? 'play' : 'pause',queuePaused ? 'Resume queue' : 'Pause queue');
         $('clear-queue').disabled=!summary.queued;
         $('queue-notice').textContent=summary.error || summary.blocked_reason || (!health.queue_api?.available && health.queue_api?.error) || (summary.stage==='waiting_for_accelerator' ? 'Waiting for the shared GPU; no job is lost.' : '');
         $('queue-notice').hidden=!$('queue-notice').textContent;
@@ -186,14 +206,15 @@ function queueLabel(control,icon,label){
         $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
         $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
         await callbacks.onRefresh?.(summary,health);
-      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; }
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; $('queue-processing').disabled=true; }
       finally { pollingQueue=false; }
     }
     $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
     $('close-queue').addEventListener('click',() => $('queue-dialog').close());
     $('queue-dialog').addEventListener('close',clearQueueDrag);
     $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
-    $('pause-queue').addEventListener('click',() => queueAction('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!queuePaused})}));
+    $('pause-queue').addEventListener('click',() => setQueuePaused(!queuePaused));
+    $('queue-processing').addEventListener('change',event => setQueuePaused(!event.target.checked));
     $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
     $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
     $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });
