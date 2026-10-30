@@ -9,6 +9,8 @@ import uuid
 from storage_paths import require_storage
 
 TERMINAL={'succeeded','failed','cancelled'}
+# Settings-table key for the Keep weights loaded switch, shared by both services.
+KEEP_WEIGHTS_SETTING='keep_weights_loaded'
 CANCELLED_WHILE_RUNNING='Cancelled while running; any finished images in a batch are kept'
 
 

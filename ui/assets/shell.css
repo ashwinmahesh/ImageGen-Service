@@ -76,5 +76,7 @@
     @media(prefers-reduced-motion:reduce){.job-progress>span{transition:none}}
     .queue-dialog-actions.queue-dialog-actions{gap:16px}.queue-dialog-actions .help-control{gap:6px}
     .queue-panel .queue-clear{background:#3b2f24;border-color:#6b5139;color:#e6d3bf}.queue-panel .queue-clear:hover:not(:disabled){background:#4a3a2b;border-color:#8a6a4b;color:#f6e7d6}.queue-panel .queue-clear .queue-icon{color:#d1b597}
+    .settings-button{display:inline-grid;place-items:center;width:34px;height:34px;padding:0}
+    .queue-panel.settings-panel{width:min(560px,calc(100vw - 32px));height:auto;max-height:80dvh}.settings-row{margin:18px 0 8px}.settings-row label{margin:0;font-size:13px;font-weight:550}
     .queue-panel .queue-close{width:34px;height:34px;padding:0}.queue-panel .queue-close .queue-icon{width:17px;height:17px}
     @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1;flex-wrap:wrap}.queue-actions .secondary{min-width:0;font-size:11px;gap:5px;padding:2px 5px}.queue-actions .queue-icon-button{padding:0}}

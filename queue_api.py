@@ -10,7 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from job_queue import JobStore, QueueConflict, fingerprint
+from job_queue import JobStore, QueueConflict, fingerprint, KEEP_WEIGHTS_SETTING
 from model_profiles import PROFILES, DEFAULT_MODEL, model_details
 from photo_workflows import supported_tasks
 from queue_storage import initialize_shared_queue,queue_key
@@ -240,6 +240,15 @@ def create_app(project=PROJECT_ROOT):
         data={**item['request'],'generate_immediately':False}
         return record(store().enqueue(data,fingerprint(data),retry_of=identifier))
 
+    @app.get('/v1/settings',response_model=RuntimeSettings,summary='Read generator settings',description='The same shared values as the generator\'s /v1/settings.')
+    def read_settings():
+        return {'keep_weights_loaded':bool(store().setting(KEEP_WEIGHTS_SETTING,False))}
+
+    @app.patch('/v1/settings',response_model=RuntimeSettings,summary='Change generator settings',description='Body {"keep_weights_loaded": true|false}. The generator applies it from its next image.')
+    def update_settings(payload:RuntimeSettings):
+        store().set_setting(KEEP_WEIGHTS_SETTING,payload.keep_weights_loaded)
+        return read_settings()
+
     @app.get('/v1/queue',summary='Read global counts and pause state')
     def summary():
         return {'queue_scope':'shared',**store().summary()}
@@ -283,6 +292,11 @@ class Submission(Replacement):
 class MoveJob(BaseModel):
     model_config=ConfigDict(extra='forbid')
     position:int=Field(ge=1,strict=True,description='One-based destination among all waiting jobs, not the current page. Read queue_position from the list; 1 is next.')
+
+
+class RuntimeSettings(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    keep_weights_loaded:bool=Field(strict=True,description="When true, FLUX.2 Klein and Qwen-Image keep their weights loaded between images while the next image in the queue uses the same model (another option in a batch or the next waiting job), instead of reloading for every image; they are released when that run ends. Holds the whole model in memory (about 9.4 GB for Qwen) while it runs. Z-Image always stays loaded. Default false; kept across restarts.")
 
 
 class Pause(BaseModel):
