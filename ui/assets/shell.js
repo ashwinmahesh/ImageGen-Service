@@ -153,7 +153,9 @@ function queueLabel(control,icon,label){
         const list=$('queue-list'),waiting=[...list.querySelectorAll('[data-position]')];
         const others=waiting.filter(item => item!==row);
         if (!others.length) return;
-        const next=others.find(item => { const bounds=item.getBoundingClientRect(); return event.clientY<bounds.top+bounds.height/2; });
+        // Place the gap by the lifted row's centre, so releasing where the drag began restores the original order.
+        const center=event.clientY-queueDrag.offset+row.offsetHeight/2;
+        const next=others.find(item => { const bounds=item.getBoundingClientRect(); return center<=bounds.top+bounds.height/2; });
         const before=next || others.at(-1).nextSibling;
         if (before!==row && row.nextSibling!==before) moveQueueGap(list,row,before);
         // Waiting rows on a page hold consecutive global positions, so the gap's index gives the new position.
