@@ -2,6 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id),modelNames=new Map();
   let callbacks={},statusHoldUntil=0;
+  const CANCEL_RUNNING_PROMPT='Stop this job now? The image being rendered is discarded; finished options in a batch are kept.';
   function setStatus(text,state){$('status-text').textContent=text;$('status').dataset.state=state;}
   function remainingLabel(seconds){
     if(seconds==null)return '';
@@ -44,6 +45,7 @@
  remove:'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6',
  clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
  close:'m6 6 12 12M18 6 6 18',
+ stop:'M7 7h10v10H7z',
  previous:'m14 6-6 6 6 6',next:'m10 6 6 6-6 6',
  resources:'M4 3v18h17M8 16v-5M13 16V7M18 16v-8',
  retry:'M3 10a9 9 0 1 1 1 8M3 4v6h6',
@@ -60,7 +62,8 @@ function queueLabel(control,icon,label){
     function queueControl(tag,label,icon,cls='secondary'){
       const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
     }
-    for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
+    for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
+    $('close-queue').replaceChildren(queueIcon('close'));
     $('open-queue').prepend(queueIcon('queue'));
     let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
     // The header and Queue modal switches both mirror the persisted pause flag from polling.
@@ -150,7 +153,7 @@ function queueLabel(control,icon,label){
       const detail=document.createElement('small'); detail.textContent=`${modelNames.get(job.model) || job.model} · ${job.status}${job.status==='queued' ? ' · Position '+job.queue_position : ''}${job.generate_immediately ? ' · Immediate priority' : ''} · ${job.request.size==='auto' || (!job.request.size && job.request.reference_image) ? 'Auto resolution' : job.request.size || '1024x1024'} · ${job.completed_images || 0}/${job.total_images || 1} images · Attempt ${job.attempts}`;
       copy.append(title,detail);
       if (job.blocked_reason || job.error) { const error=document.createElement('div'); error.className='queue-help queue-error'; error.textContent=job.blocked_reason || job.error; copy.append(error); }
-      if (job.status==='running') { const progress=document.createElement('div'); progress.className='queue-progress'; const label=document.createElement('small'); label.textContent=progressLabel(job.progress) || 'Starting'; progress.append(progressBar(job.progress,'Job progress'),label); copy.append(progress); }
+      if (job.status==='running') { const progress=document.createElement('div'); progress.className='queue-progress'; const label=document.createElement('small'); label.textContent=job.cancel_requested ? 'Stopping…' : progressLabel(job.progress) || 'Starting'; progress.append(progressBar(job.progress,'Job progress'),label); copy.append(progress); }
       row.dataset.jobId=job.id;
       if (job.status==='queued') {
         row.dataset.position=job.queue_position;
@@ -163,8 +166,15 @@ function queueLabel(control,icon,label){
       }
       row.append(copy);
       const actions=document.createElement('div'); actions.className='queue-actions';
-      const inspect=queueControl('button',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'play' : 'monitor','secondary queue-monitor'); inspect.type='button';
-      inspect.addEventListener('click',() => inspectJob(job)); actions.append(inspect);
+      // Each job opens in its own tab with its saved form, photo and preview; native link gestures keep working.
+      const inspect=queueControl('a',job.status==='succeeded' ? 'Open image' : 'Monitor',job.status==='succeeded' ? 'play' : 'monitor','secondary queue-monitor');
+      inspect.href='/?'+new URLSearchParams({job:job.id}); inspect.target='_blank'; inspect.rel='noopener'; inspect.title='Open this job in a new tab';
+      actions.append(inspect);
+      if (job.status==='running') {
+        const stop=queueControl('button',job.cancel_requested ? 'Stopping…' : 'Cancel','stop','secondary queue-remove'); stop.type='button'; stop.disabled=job.cancel_requested;
+        stop.title='Stop this job now. Finished options in a batch are kept.';
+        stop.addEventListener('click',() => { if (confirm(CANCEL_RUNNING_PROMPT)) queueAction('/v1/jobs/'+job.id,{method:'DELETE'}); }); actions.append(stop);
+      }
       if (job.status==='queued') {
         const run=queueControl('button','Run Now','play','secondary queue-run-now'); run.type='button';
         run.title='Run at the next free slot, even while paused; the active batch finishes first.';
@@ -219,6 +229,6 @@ function queueLabel(control,icon,label){
     $('queue-previous').addEventListener('click',() => { if (queuePrevious!==null) { queueOffset=queuePrevious; refreshQueue(); } });
 
   async function loadNames(){try{const catalog=await requestJSON('/v1/models');for(const model of catalog.data)modelNames.set(model.id,model.name);queueListVersion=null;}catch{/* Health still works when model discovery is temporarily unavailable. */}}
-  window.ImageGenShell={configure(options){callbacks={...callbacks,...options};},refresh:refreshQueue,requestJSON,updateHealth,setStatus,progressLabel,setProgressBar,resetOffset(){queueOffset=0;}};
+  window.ImageGenShell={configure(options){callbacks={...callbacks,...options};},refresh:refreshQueue,requestJSON,updateHealth,setStatus,progressLabel,setProgressBar,cancelRunningPrompt:CANCEL_RUNNING_PROMPT,resetOffset(){queueOffset=0;}};
   document.addEventListener('DOMContentLoaded',()=>{loadNames().then(refreshQueue);setInterval(refreshQueue,2000);setInterval(loadNames,15000);},{once:true});
 })();

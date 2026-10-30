@@ -248,7 +248,7 @@ In this table **Both** means the endpoint exists on each port. Both services man
 | PATCH `/v1/jobs/{identifier}` | Both | 200 | Replace a never-started waiting request. Generator: complete flat settings. Queue: `{request:{...}}`. Returns the updated job. |
 | POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
 | POST `/v1/jobs/{identifier}/run-now` | Both | 200 | No body. Move a waiting job to position 1 with immediate scheduling priority; returns that same job. |
-| DELETE `/v1/jobs/{identifier}` | Both | 200 | Cancel a waiting job; returns its cancelled record. No request body. |
+| DELETE `/v1/jobs/{identifier}` | Both | 200 | Cancel a waiting job, or ask the generator to stop a running one; returns the job record. No request body. |
 | DELETE `/v1/jobs` | Both | 200 | Cancel all waiting jobs across the shared queue; returns `{cancelled:integer}`. No body. |
 | POST `/v1/jobs/{identifier}/retry` | Both | 202 | Retry a failed/cancelled job as a new ordinary job. No body. Returns the new record, with `retry_of`. |
 | GET `/v1/queue` | Queue | 200 | Read global counts/pause state. On the generator, read `queue` in GET `/health`. |
@@ -301,11 +301,11 @@ curl --fail-with-body --request POST "http://localhost:55302/v1/jobs/$IMAGEGEN_J
 
 PATCH is a **complete replacement**, not a partial merge. It is allowed only when `status:"queued"` and `attempts:0`. Omitted settings use defaults when validated; include all settings you want to retain. ID and creation time stay the same. The model cannot change; priority and the idempotency comparison follow the new settings. Position stays the same unless `generate_immediately` changes: switching it on inserts before the first ordinary waiting job, switching it off appends to the queue. Running, previously attempted/interrupted and finished jobs return **409**.
 
-DELETE cancels waiting work only. Deleting a running/finished job returns **409**; an unknown ID returns **404**. Clear cancels all waiting work across all models (or an explicit clear filter), preserving active work, history and saved media. There is no permanent job-history or image-deletion API.
+DELETE cancels a waiting job immediately. For a running job it returns the job with `status:"running"` and `cancel_requested:true`; within about a second the generator stops the model runtime (including any native CLI child and prompt-expansion LLM), frees the GPU and records the job as `cancelled` with `error` explaining it, keeping any finished batch images as the partial result. The next job then starts as usual; a resident runtime reloads its weights. A cancel requested while the generator is stopped is applied when it next starts instead of retrying the job. Either service can request it. Deleting a finished job returns **409**; an unknown ID returns **404**. Clear cancels all waiting work across all models (or an explicit clear filter), preserving active work, history and saved media. There is no permanent job-history or image-deletion API.
 
 Retry is allowed only for failed/cancelled entries (**409** otherwise), with a new ID and ordinary priority. It reuses saved settings and any frozen seed. A retry is a new full batch; completed files from the old job remain. Restore missing references/adapters first. Generator-side retry can return **400/422** if those saved settings/inputs are unusable. Repeating the retry call intentionally creates another job; it has no idempotency header parameter.
 
-Pause persists across restarts and is shared by both services; either one can pause or resume it. The active batch finishes, then ordinary waiting jobs stay queued. Jobs admitted with `generate_immediately:true`, and jobs given Run Now, can still run while paused. No cancellation endpoint interrupts active inference. Read the current state from the generator's `/health` `queue.paused`, or from the queue's GET `/v1/queue` `paused`.
+Pause persists across restarts and is shared by both services; either one can pause or resume it. The active batch finishes, then ordinary waiting jobs stay queued. Jobs admitted with `generate_immediately:true`, and jobs given Run Now, can still run while paused. Pausing never stops active inference; to stop it, cancel that job with DELETE. Read the current state from the generator's `/health` `queue.paused`, or from the queue's GET `/v1/queue` `paused`.
 
 ```sh
 # Pause (either port: 5742 generator, 55302 queue)
@@ -334,6 +334,7 @@ curl --fail-with-body http://localhost:55302/v1/queue
 | `retry_of` | string or null | Original ID when this record was created by retry. |
 | `error` | string or null | Terminal failure or recovery message; inspect it together with status. |
 | `prompt_expansion` | object or null | Saved shared expansion; queue records can also hold raw batch-planning metadata. |
+| `cancel_requested` | boolean | True while a running job is being stopped after DELETE; false otherwise. |
 | `progress` | object or null | Running jobs: live completion described below. Succeeded jobs report `percent:100`, `phase:"done"`. Waiting, failed and cancelled jobs report null (the generator omits the field). |
 | `result` | object or null | Shape depends on the service below. |
 

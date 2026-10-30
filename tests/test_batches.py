@@ -131,7 +131,6 @@ class BatchAPI(unittest.TestCase):
                 self.assertEqual((job['completed_images'],job['total_images']),(1,2))
                 self.assertNotIn('result',job)
                 self.assertEqual(len(job['partial_result']['data']),1)
-                self.assertEqual(self.client.delete('/v1/jobs/'+admitted['id']).status_code,409)
             finally:release.set()
             until(lambda:self.store.get(admitted['id'])['status']=='succeeded')
 

@@ -9,6 +9,7 @@ import uuid
 from storage_paths import require_storage
 
 TERMINAL={'succeeded','failed','cancelled'}
+CANCELLED_WHILE_RUNNING='Cancelled while running; any finished images in a batch are kept'
 
 
 class QueueConflict(Exception):
@@ -94,6 +95,9 @@ class JobStore:
                 if 'progress' not in columns:
                     # Nullable live progress; older readers ignore it, so the schema version is unchanged.
                     migration.execute('ALTER TABLE jobs ADD COLUMN progress TEXT')
+                if 'cancel_requested' not in columns:
+                    # Set by either service; only the generator stops the runtime and records the cancellation.
+                    migration.execute('ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0')
                 migration.execute('CREATE INDEX IF NOT EXISTS queue_position_order ON jobs(status,queue_position,sequence)')
                 migration.execute('PRAGMA user_version=4')
 
@@ -153,6 +157,7 @@ class JobStore:
         item['result']=json.loads(item['result']) if item['result'] else None
         item['generate_immediately']=bool(item.pop('immediate'))
         item['progress']=JobStore.progress(item,item.get('progress'))
+        item['cancel_requested']=bool(item.get('cancel_requested'))
         for key in ['adapter_sha','idempotency_key','fingerprint','prepared']:
             item.pop(key,None)
         return item
@@ -241,8 +246,10 @@ class JobStore:
     def recover(self):
         # Called only after acquiring the process-wide worker lease.
         with self.connection(write=True) as db:
-            running=[row[0] for row in db.execute("SELECT id FROM jobs WHERE status='running' ORDER BY started,sequence")]
             waiting=[row['id'] for row in self._waiting(db)]
+            # A cancel requested before shutdown is honoured instead of retrying the job.
+            db.execute("UPDATE jobs SET status='cancelled',finished=?,error=?,cancel_requested=0 WHERE status='running' AND cancel_requested=1",(time.time(),CANCELLED_WHILE_RUNNING))
+            running=[row[0] for row in db.execute("SELECT id FROM jobs WHERE status='running' ORDER BY started,sequence")]
             changed=db.execute("UPDATE jobs SET status='queued',started=NULL,progress=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
             self._set_order(db,running+waiting)
             return changed
@@ -267,7 +274,7 @@ class JobStore:
         with self.connection(write=True) as db:
             row=self._eligible(db,loras_enabled,llm_enabled,eligible_models)
             if row is None:return None
-            db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL,progress=NULL WHERE id=?",(time.time(),row['id']))
+            db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL,progress=NULL,cancel_requested=0 WHERE id=?",(time.time(),row['id']))
             self._set_order(db,[item['id'] for item in self._waiting(db)])
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
             item['_adapter_sha']=row['adapter_sha'];item['_prepared']=bool(row['prepared'])
@@ -306,20 +313,32 @@ class JobStore:
         except (sqlite3.Error,OSError,ValueError):
             return False
 
-    def finish(self,identifier,*,result=None,error=None,error_status=None):
+    def cancel_requested(self,identifier,attempt):
+        with self.connection() as db:
+            row=db.execute("SELECT cancel_requested FROM jobs WHERE id=? AND status='running' AND attempts=?",(identifier,attempt)).fetchone()
+            return bool(row and row[0])
+
+    def finish(self,identifier,*,result=None,error=None,error_status=None,cancelled=False):
+        status='cancelled' if cancelled else 'failed' if error else 'succeeded'
+        error=CANCELLED_WHILE_RUNNING if cancelled else error
         with self.connection(write=True) as db:
-            db.execute("UPDATE jobs SET status=?,result=COALESCE(?,result),error=?,error_status=?,finished=? WHERE id=? AND status='running'",
-                ('failed' if error else 'succeeded',json.dumps(result,allow_nan=False) if result else None,error,error_status,time.time(),identifier))
+            # Cancelled jobs keep any saved batch checkpoint as their partial result.
+            db.execute("UPDATE jobs SET status=?,result=COALESCE(?,result),error=?,error_status=?,finished=?,cancel_requested=0 WHERE id=? AND status='running'",
+                (status,json.dumps(result,allow_nan=False) if result else None,error,error_status,time.time(),identifier))
 
     def cancel(self,identifier):
         with self.connection(write=True) as db:
             row=db.execute('SELECT status FROM jobs WHERE id=?',(identifier,)).fetchone()
             if not row:
                 raise FileNotFoundError('Unknown job ID')
-            if row['status']!='queued':
-                raise QueueConflict('Only waiting jobs can be cancelled; running inference is not interrupted')
-            db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE id=?",(time.time(),identifier))
-            self._set_order(db,[item['id'] for item in self._waiting(db)])
+            if row['status']=='running':
+                # The generator stops the runtime within about a second, then records the job as cancelled.
+                db.execute('UPDATE jobs SET cancel_requested=1 WHERE id=?',(identifier,))
+            elif row['status']!='queued':
+                raise QueueConflict('Only waiting or running jobs can be cancelled')
+            else:
+                db.execute("UPDATE jobs SET status='cancelled',queue_position=NULL,finished=? WHERE id=?",(time.time(),identifier))
+                self._set_order(db,[item['id'] for item in self._waiting(db)])
         return self.get(identifier)
 
     def clear(self,model=None):

@@ -62,12 +62,12 @@ def runtime_steps(project,job,index):
 
 
 class ProgressTracker:
-    """Polls the active job about once a second and saves its percentage in the shared queue."""
-    def __init__(self,store,worker,project,*,interval=1.0,steps=runtime_steps,clock=time.monotonic):
-        self.store,self.worker,self.project=store,worker,project
+    """Watches the active job about once a second: saves its percentage and stops it when either service asks to cancel it."""
+    def __init__(self,store,worker,project,*,interval=1.0,steps=runtime_steps,clock=time.monotonic,cancel=None):
+        self.store,self.worker,self.project,self.cancel=store,worker,project,cancel
         self.interval,self.steps,self.clock=interval,steps,clock
         self.stopping=threading.Event();self.thread=None
-        self.current=None;self.attempt=None;self.best=0;self.started={}
+        self.current=None;self.attempt=None;self.best=0;self.started={};self.stopping_job=False
 
     def start(self):
         self.thread=threading.Thread(target=self.run,name='job-progress',daemon=True);self.thread.start()
@@ -87,7 +87,9 @@ class ProgressTracker:
             self.attempt=None;return None
         key=(job['id'],job['attempts'])
         if key!=self.attempt:
-            self.attempt,self.current,self.best,self.started=key,None,0,{}
+            self.attempt,self.current,self.best,self.started,self.stopping_job=key,None,0,{},False
+        if self.cancel and not self.stopping_job and self.store.cancel_requested(*key):
+            self.stopping_job=True;self.cancel()
         progress=self.measure(job,self.worker.stage)
         if self.changed(progress):
             if self.store.save_live_progress(job['id'],job['attempts'],progress):self.current=progress

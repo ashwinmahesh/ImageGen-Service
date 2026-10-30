@@ -98,9 +98,15 @@ class QueueWorker:
                     if job is None:
                         if gpu: gpu.close()
                         raise
-                    log.exception('Job %s failed',job['id'])
-                    self.store.finish(job['id'],error=str(error)[:2000] or type(error).__name__,error_status=getattr(error,'http_status',500))
-                    observed_status='failed'
+                    if self.store.cancel_requested(job['id'],job['attempts']):
+                        # The runtime was stopped on request; keep saved batch options and free the GPU for the next job.
+                        log.info('Job %s cancelled while running',job['id'])
+                        self.store.finish(job['id'],cancelled=True)
+                        observed_status='interrupted'
+                    else:
+                        log.exception('Job %s failed',job['id'])
+                        self.store.finish(job['id'],error=str(error)[:2000] or type(error).__name__,error_status=getattr(error,'http_status',500))
+                        observed_status='failed'
                     if getattr(error,'fatal',False):raise
                 else:
                     # If this commit fails, leave it running for recovery from its saved artifact.

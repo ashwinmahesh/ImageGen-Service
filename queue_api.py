@@ -52,6 +52,7 @@ class QueueJob(BaseModel):
     error:str|None=None
     error_status:int|None=None
     prompt_expansion:dict|None=None
+    cancel_requested:bool=Field(default=False,description='True while a running job is being stopped after a cancel request.')
     progress:JobProgress|None=Field(default=None,description='Running jobs: percentage saved by the generator about once a second. Succeeded jobs report 100; waiting, failed and cancelled jobs report null.')
     result:dict|None=Field(default=None,description='Saved generator metadata/checkpoint. May contain partial batch images before success. Use status to distinguish complete success. Contains server-local paths; the generator provides download URLs.')
 
@@ -219,7 +220,8 @@ def create_app(project=PROJECT_ROOT):
         find(identifier)
         return record(store().run_now(identifier))
 
-    @app.delete('/v1/jobs/{identifier}',response_model=QueueJob,summary='Cancel a waiting job; preserve its record')
+    @app.delete('/v1/jobs/{identifier}',response_model=QueueJob,summary='Cancel a waiting or running job; preserve its record',
+                description='Waiting jobs are cancelled immediately. Running jobs return with cancel_requested:true; the generator stops the runtime within about a second and records the job as cancelled. Finished jobs return 409.')
     def cancel(identifier:str):
         find(identifier)
         return record(store().cancel(identifier))
