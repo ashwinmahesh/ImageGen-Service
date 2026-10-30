@@ -12,7 +12,7 @@ import re
 from prompt_policy import POLICY_VERSION, SYSTEM_PROMPT, VARIATION_SYSTEM_PROMPT, VARIATION_GOALS, EXAMPLE_USER, EXAMPLE_ASSISTANT, SAMPLING, GENERATION_JSON_INSTRUCTION, GENERATION_JSON_REPAIR, guidance_for, public_guidance, style_context, style_anchor, example_for
 from prompt_policy import EDIT_POLICY_VERSION, EDIT_SYSTEM_PROMPT, EDIT_EXAMPLE_USER, EDIT_EXAMPLE_ASSISTANT, edit_guidance_for
 from model_profiles import PROFILES
-from photo_workflows import supported_tasks, edit_prompt
+from photo_workflows import supported_tasks, edit_prompt_fits, MAX_PROMPT_CHARACTERS
 
 
 
@@ -46,9 +46,9 @@ def expansion_capability(enabled, image_model=None):
             'note': 'Keeps your description verbatim and appends visual detail. Does not inspect reference photos. Opt in with expand_prompt:true; add vary_prompt:true for distinct batch compositions. No automatic compression.'}
 
 
-def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None):
+def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None, masked=False):
     return _expand(prompt,project=project,image_model=image_model,image_weights=image_weights,
-                   selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve)
+                   selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve,masked=masked)
 
 
 def expand_batch(prompt, *, count, project, image_model, image_weights, selection=None, inherited_fds=()):
@@ -56,7 +56,7 @@ def expand_batch(prompt, *, count, project, image_model, image_weights, selectio
                    selection=selection,inherited_fds=inherited_fds)
 
 
-def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None, task='generate', preserve=None):
+def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None, task='generate', preserve=None, masked=False):
     if task not in ('generate','edit'):
         raise ValueError('Unknown expansion task')
     folder = check_assets(project)
@@ -67,6 +67,8 @@ def _expand(prompt, *, project, image_model, image_weights, selection=None, inhe
         if count is not None:
             raise ValueError('Photo edits cannot use composition variation')
         request.update(task='edit',preserve=preserve)
+        if masked:
+            request['masked']=True
     if count is not None:
         if type(count) is not int or not 2<=count<=5: raise ValueError('Variation count must be 2–5')
         request['variation_count']=count
@@ -102,7 +104,7 @@ def validate_expansion(original, data):
     expanded = data['expanded_prompt']
     if data['original_prompt'] != original or not expanded.startswith(original+'\n'):
         raise ValueError('Original description must be retained verbatim')
-    if not expanded[len(original):].strip() or len(expanded) > 4000 or '<lora:' in expanded.lower():
+    if not expanded[len(original):].strip() or len(expanded) > MAX_PROMPT_CHARACTERS or '<lora:' in expanded.lower():
         raise ValueError('Invalid expansion')
 
 
@@ -172,7 +174,7 @@ def image_token_count(prompt, request):
 
 def run_worker(request):
     original = request['prompt']
-    if not original.strip() or len(original) > 4000:
+    if not original.strip() or len(original) > MAX_PROMPT_CHARACTERS:
         raise ExpansionError('Prompt must contain 1–4000 characters.')
     if request.get('task')=='edit':
         return run_edit_worker(request)
@@ -298,6 +300,10 @@ def run_edit_worker(request):
     preserve=request.get('preserve')
     if preserve is not None and (not isinstance(preserve,str) or len(preserve)>1000):
         raise ExpansionError('Preservation requirements must be at most 1000 characters')
+    # A selected-area edit also gets up to eight location boxes appended later, so reserve their worst-case room.
+    masked=request.get('masked',False)
+    if not isinstance(masked,bool):
+        raise ExpansionError('Invalid selected-area flag')
     guidance=edit_guidance_for(identifier)
     messages=[{'role':'system','content':EDIT_SYSTEM_PROMPT+'\n\n'+guidance['instructions']},
               {'role':'user','content':EDIT_EXAMPLE_USER},
@@ -319,8 +325,8 @@ def run_edit_worker(request):
     try:validate_expansion(original,data)
     except (ValueError,TypeError,KeyError) as error:
         raise ExpansionError('The refined edit exceeds its prompt budget; shorten the instruction or disable Prompt expansion.') from error
-    if len(edit_prompt(data['expanded_prompt'],preserve))>4000:
-        raise ExpansionError('The refined edit and preservation requirements exceed the final prompt budget; shorten them or disable Prompt expansion.')
+    if not edit_prompt_fits(data['expanded_prompt'],preserve,masked=masked):
+        raise ExpansionError('The refined edit, preservation requirements'+(' and selected-area guidance' if masked else '')+' exceed the final prompt budget; shorten them or disable Prompt expansion.')
     import resource
     data.update(details=details,image_model=identifier,guidance_profile=guidance['id'],guidance_version=guidance['version'],
                 original_image_tokens=None,expanded_image_tokens=None,image_token_limit=None,
