@@ -91,6 +91,9 @@ class JobStore:
                     identifiers=[row[0] for row in migration.execute(
                         "SELECT id FROM jobs WHERE status='queued' ORDER BY immediate DESC,sequence")]
                     self._set_order(migration,identifiers)
+                if 'progress' not in columns:
+                    # Nullable live progress; older readers ignore it, so the schema version is unchanged.
+                    migration.execute('ALTER TABLE jobs ADD COLUMN progress TEXT')
                 migration.execute('CREATE INDEX IF NOT EXISTS queue_position_order ON jobs(status,queue_position,sequence)')
                 migration.execute('PRAGMA user_version=4')
 
@@ -149,9 +152,20 @@ class JobStore:
         item['prompt_expansion']=json.loads(item['prompt_expansion']) if item.get('prompt_expansion') else None
         item['result']=json.loads(item['result']) if item['result'] else None
         item['generate_immediately']=bool(item.pop('immediate'))
+        item['progress']=JobStore.progress(item,item.get('progress'))
         for key in ['adapter_sha','idempotency_key','fingerprint','prepared']:
             item.pop(key,None)
         return item
+
+    @staticmethod
+    def progress(item,saved):
+        if item['status']=='succeeded':
+            count=item['request'].get('n',1);count=count if type(count) is int and 1<=count<=5 else 1
+            return {'percent':100,'phase':'done','image':count,'total_images':count,'updated':item.get('finished')}
+        if item['status']!='running':return None
+        try:value=json.loads(saved) if saved else None
+        except ValueError:value=None
+        return value if isinstance(value,dict) else {'percent':0,'phase':'starting','total_images':item['request'].get('n',1)}
 
     def get(self,identifier):
         with self.connection() as db:
@@ -229,7 +243,7 @@ class JobStore:
         with self.connection(write=True) as db:
             running=[row[0] for row in db.execute("SELECT id FROM jobs WHERE status='running' ORDER BY started,sequence")]
             waiting=[row['id'] for row in self._waiting(db)]
-            changed=db.execute("UPDATE jobs SET status='queued',started=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
+            changed=db.execute("UPDATE jobs SET status='queued',started=NULL,progress=NULL,error='Interrupted by a previous shutdown; retrying' WHERE status='running'").rowcount
             self._set_order(db,running+waiting)
             return changed
 
@@ -253,7 +267,7 @@ class JobStore:
         with self.connection(write=True) as db:
             row=self._eligible(db,loras_enabled,llm_enabled,eligible_models)
             if row is None:return None
-            db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL WHERE id=?",(time.time(),row['id']))
+            db.execute("UPDATE jobs SET status='running',queue_position=NULL,started=?,attempts=attempts+1,error=NULL,progress=NULL WHERE id=?",(time.time(),row['id']))
             self._set_order(db,[item['id'] for item in self._waiting(db)])
             item=self.record(db.execute('SELECT * FROM jobs WHERE id=?',(row['id'],)).fetchone())
             item['_adapter_sha']=row['adapter_sha'];item['_prepared']=bool(row['prepared'])
@@ -283,6 +297,15 @@ class JobStore:
                           (json.dumps(result,allow_nan=False),identifier)).rowcount != 1:
                 raise QueueConflict('Cannot update progress for an inactive job')
 
+    def save_live_progress(self,identifier,attempt,progress):
+        """Best-effort percentage for the running attempt; returns False instead of raising."""
+        try:
+            with self.connection(write=True) as db:
+                return db.execute("UPDATE jobs SET progress=? WHERE id=? AND status='running' AND attempts=?",
+                                  (json.dumps(progress,allow_nan=False),identifier,attempt)).rowcount==1
+        except (sqlite3.Error,OSError,ValueError):
+            return False
+
     def finish(self,identifier,*,result=None,error=None,error_status=None):
         with self.connection(write=True) as db:
             db.execute("UPDATE jobs SET status=?,result=COALESCE(?,result),error=?,error_status=?,finished=? WHERE id=? AND status='running'",
@@ -308,7 +331,7 @@ class JobStore:
     def requeue(self,identifier):
         with self.connection(write=True) as db:
             waiting=[row['id'] for row in self._waiting(db)]
-            changed=db.execute("UPDATE jobs SET status='queued',started=NULL WHERE id=? AND status='running'",(identifier,)).rowcount
+            changed=db.execute("UPDATE jobs SET status='queued',started=NULL,progress=NULL WHERE id=? AND status='running'",(identifier,)).rowcount
             if changed:
                 self._set_order(db,[identifier]+waiting)
 

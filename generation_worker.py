@@ -21,6 +21,7 @@ class QueueWorker:
         self.error=None
         self.gpu_lock_file=Path(gpu_lock_file) if gpu_lock_file else None
         self.stage='idle'
+        self.job=None  # The claimed job while it runs; read by the progress tracker.
         self.observer=observer
         self.eligible_models=eligible_models
 
@@ -85,14 +86,14 @@ class QueueWorker:
                         if gpu: gpu.close()
                         continue
                     try:
-                        self.stage='generating'
+                        self.job=job;self.stage='generating'
                         self.observe('start_job',job)
                         job['_inherited_fds']=tuple(handle.fileno() for handle in [self.lease,gpu] if handle)
                         with self.busy:
                             result=self.execute(job)
                     finally:
                         if gpu: gpu.close()
-                        self.stage='idle'
+                        self.stage='idle';self.job=None
                 except Exception as error:
                     if job is None:
                         if gpu: gpu.close()

@@ -66,7 +66,7 @@ No body or query parameters.
 | `capabilities` | object | Backend/name, default/max steps, default size, dimension/prompt/count limits, adapter/LLM mode, queue URL and persistent/immediate support. The default model-ID key contains `prompt_expansion_guidance`. |
 | `queue` | object, when initialized | Counts/pause state below, plus `stage`, optional `blocked_reason` and consumer `error`. |
 | `queue_api` | object | Standalone queue availability: `available`, `url`, `recovery_command`, optional `error`. Its outage alone does not make the generator unready. |
-| `progress` | object, when supported | Backend-specific inference progress while busy. Its fields depend on the backend. |
+| `progress` | object, while a queue job runs | The running job's `progress` object, described under [Job progress](#job-progress). |
 
 The generator's `capabilities` object exposes these named controls:
 
@@ -320,9 +320,25 @@ curl --fail-with-body --request PATCH http://localhost:5742/v1/queue \
 | `retry_of` | string or null | Original ID when this record was created by retry. |
 | `error` | string or null | Terminal failure or recovery message; inspect it together with status. |
 | `prompt_expansion` | object or null | Saved shared expansion; queue records can also hold raw batch-planning metadata. |
+| `progress` | object or null | Running jobs: live completion described below. Succeeded jobs report `percent:100`, `phase:"done"`. Waiting, failed and cancelled jobs report null (the generator omits the field). |
 | `result` | object or null | Shape depends on the service below. |
 
 **Generator-specific fields:** `total_images` and `completed_images` are integers. `candidate_expansions[]` contains per-option plans for varied batches. Shared expansion instead uses `prompt_expansion`. `result` is present only for complete success; `partial_result` can contain saved options while running/failed. Neither pending state nor partial files establish full success.
+
+### Job progress
+
+While a job runs, the generator reads the step counter that each image runtime prints (mflux for Z-Image, FLUX.2 Klein and Qwen; stable-diffusion.cpp for Chroma). About once a second it saves the result in the shared SQLite queue, so both services return the same `progress`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `percent` | integer | 0–100 for the whole job. Each image in a batch counts equally; sampling fills 95% of an image and decoding/saving the rest. It never decreases within an attempt and stays at most 99 until the job succeeds. |
+| `phase` | string | `starting`, `waiting_for_accelerator`, `loading_model`, `expanding_prompt`, `planning_variations`, `sampling`, `finishing` (decoding and saving) or `done`. |
+| `image`, `total_images` | integers | One-based option rendering now (null before rendering starts) and batch size. |
+| `step`, `total_steps` | integers or null | Sampler step of the current image. Null while the runtime loads. |
+| `estimated_remaining_seconds` | integer or null | Rough estimate from the measured sampler speed, plus measured time per image for later batch options. Null until sampling starts. Native runtimes reload weights for every image, which the first estimate does not include. |
+| `updated` | number or null | Unix seconds when the generator last saved it. |
+
+Progress is informational. A retry or recovered attempt starts again from 0; check `status` for completion. If the generator stops, the last saved value remains until recovery requeues the job.
 
 **Queue-specific fields:** integer `sequence` records immutable admission order (use `queue_position` for waiting execution order), and nullable integer `error_status` records the failure's HTTP status. Raw `result` can hold a partial checkpoint before success. Queue responses do not provide the generator's candidate-count/partial-result wrapper. Always check **`status:"succeeded"`** before treating either response as complete.
 

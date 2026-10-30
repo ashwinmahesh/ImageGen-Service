@@ -24,6 +24,17 @@ Model=Literal[tuple(PROFILES)]
 Status=Literal['pending','queued','running','succeeded','failed','cancelled']
 
 
+class JobProgress(BaseModel):
+    percent:int=Field(ge=0,le=100,description='Whole-job completion. Each image in a batch counts equally; sampling fills 95% of an image and decoding/saving the rest. Stays at most 99 until the job succeeds.')
+    phase:Literal['starting','waiting_for_accelerator','loading_model','expanding_prompt','planning_variations','sampling','finishing','done']
+    image:int|None=Field(default=None,description='One-based batch option currently rendering.')
+    total_images:int
+    step:int|None=Field(default=None,description="Sampler step of the current image, read from the runtime's own step counter.")
+    total_steps:int|None=None
+    estimated_remaining_seconds:int|None=Field(default=None,description='Rough estimate from the measured sampler speed; null until sampling starts.')
+    updated:float|None=Field(default=None,description='Unix time the generator last saved this progress.')
+
+
 class QueueJob(BaseModel):
     id:str
     model:Model
@@ -41,6 +52,7 @@ class QueueJob(BaseModel):
     error:str|None=None
     error_status:int|None=None
     prompt_expansion:dict|None=None
+    progress:JobProgress|None=Field(default=None,description='Running jobs: percentage saved by the generator about once a second. Succeeded jobs report 100; waiting, failed and cancelled jobs report null.')
     result:dict|None=Field(default=None,description='Saved generator metadata/checkpoint. May contain partial batch images before success. Use status to distinguish complete success. Contains server-local paths; the generator provides download URLs.')
 
 

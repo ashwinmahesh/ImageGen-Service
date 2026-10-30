@@ -267,7 +267,7 @@ This screenshot uses simulated demonstration data.
 
 ## Manage the queue
 
-Open **Queue** in any page's header to see active and waiting jobs, saved history, pause/clear controls and pagination. **Monitor** follows a job in the preview without changing its place. Drag a waiting job by its left-hand grip to reorder it, or focus the grip and press ↑ / ↓. **Run Now** puts it in the next free slot, even when ordinary work is paused. An active batch always finishes first. Close the modal with **Close**, Escape or the backdrop.
+Open **Queue** in any page's header to see active and waiting jobs, saved history, pause/clear controls and pagination. **Monitor** opens the job in its **Generate** or **Edit photo** tab with the job's own prompt, model, settings, source photo and selected area, then follows it in the preview without changing its place. Editing those fields does not change the job; generating submits a new one. **Open image** does the same for a finished job and shows its results. A running job shows its percentage and a rough time left, both in its queue row and under the preview, from the model's own step counter. A batch counts each image equally, and the last few percent cover decoding and saving the image. Drag a waiting job by its left-hand grip to reorder it, or focus the grip and press ↑ / ↓. **Run Now** puts it in the next free slot, even when ordinary work is paused. An active batch always finishes first. Close the modal with **Close**, Escape or the backdrop.
 
 You can cancel waiting jobs, clear the waiting list and retry failed jobs. These actions keep generated images and history. Order and accepted jobs survive restarts. The generator reads/writes SQLite directly, so it remains usable if the standalone queue API stops.
 
