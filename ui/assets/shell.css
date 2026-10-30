@@ -47,7 +47,7 @@
     .queue-item.dragging{border-radius:8px;border-color:transparent;background:#ffffff06;outline:1px dashed #4a4d55;outline-offset:-2px}.queue-item.dragging>*{visibility:hidden}.queue-item.dragging+.queue-item{border-top-color:transparent}
     .queue-ghost{position:fixed;z-index:20;margin:0;box-sizing:border-box;padding-right:10px;pointer-events:none;border:1px solid #4a4d55;border-radius:10px;background:#26282d;box-shadow:0 16px 36px #000000a8,0 3px 8px #00000066;transform:scale(1.015);cursor:grabbing}.queue-ghost .queue-drag{color:var(--text)}
     /* A fixed action column keeps every row's text and buttons on the same edges, whatever its buttons. */
-    .queue-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;flex:0 0 288px}
+    .queue-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;flex:0 0 146px}
     @media(max-width:600px){.queue-item{flex-wrap:wrap}.queue-actions{margin-left:auto}.queue-drag.queue-drag{align-self:center}.queue-copy{min-width:150px}}
 
     .queue-panel[open]{display:flex;flex-direction:column}.queue-panel::backdrop{background:#07080bb8;backdrop-filter:blur(6px)}body:has(#queue-dialog[open]){overflow:hidden}
@@ -61,6 +61,7 @@
     .queue-drag.queue-drag{display:grid;place-items:center}
     .queue-actions .secondary{flex:0 0 auto;width:auto;min-width:92px;height:32px;padding:2px 6px;gap:6px;border-radius:6px;font-size:12px;line-height:1.1;text-align:center;white-space:nowrap}
     .queue-actions .secondary span{min-width:0}
+    .queue-actions .queue-icon-button{flex:0 0 32px;width:32px;min-width:0;padding:0}.queue-actions .queue-icon-button .queue-icon{width:16px;height:16px}
     .queue-actions .queue-monitor{background:#203044;border-color:#3a526c;color:#c1d1e0}
     .queue-actions .queue-monitor:hover:not(:disabled){background:#293d54;border-color:#536f8c;color:#dce8f4}
     .queue-actions .queue-monitor .queue-icon{color:#a4bcd3}
@@ -76,4 +77,4 @@
     .queue-dialog-actions.queue-dialog-actions{gap:16px}.queue-dialog-actions .help-control{gap:6px}
     .queue-panel .queue-clear{background:#3b2f24;border-color:#6b5139;color:#e6d3bf}.queue-panel .queue-clear:hover:not(:disabled){background:#4a3a2b;border-color:#8a6a4b;color:#f6e7d6}.queue-panel .queue-clear .queue-icon{color:#d1b597}
     .queue-panel .queue-close{width:34px;height:34px;padding:0}.queue-panel .queue-close .queue-icon{width:17px;height:17px}
-    @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1;flex-wrap:wrap}.queue-actions .secondary{min-width:0;font-size:11px;gap:5px;padding:2px 5px}}
+    @media(max-width:720px){.header-actions{gap:10px;flex-wrap:wrap}.queue-panel{padding:18px}.queue-dialog-actions{gap:7px}.queue-panel .queue-help{font-size:11px}.queue-panel .queue-item{flex-wrap:wrap}.queue-panel .queue-actions{margin-left:38px;justify-content:flex-start;flex:1;flex-wrap:wrap}.queue-actions .secondary{min-width:0;font-size:11px;gap:5px;padding:2px 5px}.queue-actions .queue-icon-button{padding:0}}
