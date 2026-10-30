@@ -41,7 +41,6 @@
  queue:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
  monitor:'M4 4h16v12H4zM8 21h8M12 16v5',
  play:'m8 5 11 7-11 7Z',
- pause:'M8 5v14M16 5v14',
  remove:'M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6',
  clear:'M3 6h18M3 12h9M3 18h9m5-6 5 6m0-6-5 6',
  close:'m6 6 12 12M18 6 6 18',
@@ -61,28 +60,28 @@ function queueLabel(control,icon,label){
     function queueControl(tag,label,icon,cls='secondary'){
       const control=document.createElement(tag);control.className=cls;return queueLabel(control,icon,label);
     }
-    for(const[id,icon,label]of [['pause-queue','pause','Pause queue'],['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
+    for(const[id,icon,label]of [['clear-queue','clear','Clear waiting'],['close-queue','close','Close'],['queue-previous','previous','Previous'],['queue-next','next','Next']])queueLabel($(id),icon,label);
     $('open-queue').prepend(queueIcon('queue'));
     let queueOffset = 0, queueNext = null, queuePrevious = null, queuePaused = false, pollingQueue = false, queueListVersion = null, queueDrag = null, queueMutating = false;
-    // The header switch and the modal button both mirror the persisted pause flag from polling.
+    // The header and Queue modal switches both mirror the persisted pause flag from polling.
     // Each pause/resume bumps the revision so a poll requested before it cannot undo the change.
     let queuePauseRevision = 0;
+    const queueSwitches=() => [$('queue-processing'),$('queue-processing-dialog')];
     function showQueuePaused(paused) {
       queuePaused=paused;
-      $('queue-processing').checked=!paused; $('queue-processing').disabled=false;
-      queueLabel($('pause-queue'),paused ? 'play' : 'pause',paused ? 'Resume queue' : 'Pause queue');
+      for (const toggle of queueSwitches()) { toggle.checked=!paused; toggle.disabled=false; }
     }
     async function setQueuePaused(paused) {
-      const toggle=$('queue-processing'); toggle.disabled=true; $('queue-switch-alert').textContent='';
-      if (queueMutating) { toggle.checked=!queuePaused; toggle.disabled=false; return; }
+      const toggles=queueSwitches(); toggles.forEach(toggle => { toggle.disabled=true; }); $('queue-switch-alert').textContent='';
+      if (queueMutating) { showQueuePaused(queuePaused); return; }
       queueMutating=true; queuePauseRevision++; $('queue-error').hidden=true;
       try { const state=await requestJSON('/v1/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})}); showQueuePaused(!!state.paused); }
       catch(error) {
         const message=`Could not ${paused ? 'pause' : 'resume'} the queue: ${error.message}`;
-        toggle.checked=!queuePaused; queueError(message); $('queue-switch-alert').textContent=message;
+        showQueuePaused(queuePaused); queueError(message); $('queue-switch-alert').textContent=message;
         setStatus(paused ? 'Pause failed' : 'Resume failed','offline'); statusHoldUntil=Date.now()+6000;
       }
-      finally { toggle.disabled=false; queueMutating=false; queuePauseRevision++; await refreshQueue(); }
+      finally { toggles.forEach(toggle => { toggle.disabled=false; }); queueMutating=false; queuePauseRevision++; await refreshQueue(); }
     }
     async function requestJSON(url, options = {}) {
       const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(10000),...options});
@@ -206,15 +205,14 @@ function queueLabel(control,icon,label){
         $('queue-next').disabled=queueNext===null; $('queue-previous').disabled=queuePrevious===null;
         $('queue-page').textContent=`Page ${Math.floor(queueOffset/10)+1} of ${Math.max(1,Math.ceil(list.total/10))} · ${list.total} jobs`;
         await callbacks.onRefresh?.(summary,health);
-      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; $('queue-processing').disabled=true; }
+      } catch(error) { $('queue-summary').textContent='Queue unavailable · retrying'; $('queue-badge').textContent='!'; $('queue-badge').hidden=false; queueSwitches().forEach(toggle => { toggle.disabled=true; }); }
       finally { pollingQueue=false; }
     }
     $('open-queue').addEventListener('click',() => { $('queue-error').hidden=true; $('queue-dialog').showModal(); refreshQueue(); });
     $('close-queue').addEventListener('click',() => $('queue-dialog').close());
     $('queue-dialog').addEventListener('close',clearQueueDrag);
     $('queue-dialog').addEventListener('click',event => { if (event.target!==$('queue-dialog')) return; const bounds=event.target.getBoundingClientRect(); if (event.clientX<bounds.left || event.clientX>bounds.right || event.clientY<bounds.top || event.clientY>bounds.bottom) event.target.close(); });
-    $('pause-queue').addEventListener('click',() => setQueuePaused(!queuePaused));
-    $('queue-processing').addEventListener('change',event => setQueuePaused(!event.target.checked));
+    for (const toggle of queueSwitches()) toggle.addEventListener('change',event => setQueuePaused(!event.target.checked));
     $('clear-queue').addEventListener('click',() => queueAction('/v1/jobs',{method:'DELETE'}));
     $('queue-filter').addEventListener('change',() => { queueOffset=0; refreshQueue(); });
     $('queue-next').addEventListener('click',() => { if (queueNext!==null) { queueOffset=queueNext; refreshQueue(); } });
