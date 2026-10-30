@@ -9,7 +9,7 @@
   <style>
 
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:wait;opacity:.5}
+    button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}
     :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}
 
 
@@ -487,7 +487,8 @@
     function clearPhoto() {
       if (workflow==='edit' && displayedBatch?.request.task==='edit') displayedBatch=null;
       $('reference-size').value='auto';
-      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; maskStrokes=[]; maskUpload=null; savedMaskPath=null; $('source-editor').hidden=true;
+      // A new or removed photo starts a fresh edit: no painted, uploaded or reused selection, whole-photo mode.
+      referenceFile = null; referenceUpload = null; referenceDimensions = null; $('reference-file').value = ''; maskStrokes=[]; maskUpload=null; savedMaskPath=null; savedMaskImage=null; $('edit-area').value='whole'; $('source-editor').hidden=true;
       if (referencePreviewURL) URL.revokeObjectURL(referencePreviewURL);
       referencePreviewURL = null; $('reference-preview').removeAttribute('src');
       $('reference-card').hidden = true; $('choose-photo').textContent = '＋ Choose photo';
