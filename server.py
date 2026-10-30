@@ -129,7 +129,7 @@ def initialize_service():
     job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,
         busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor,eligible_models=ready_models)
     job_worker.acquire(prepare=lambda:initialize_shared_queue(PROJECT_ROOT))
-    progress_tracker=ProgressTracker(job_store,job_worker,PROJECT_ROOT)
+    progress_tracker=ProgressTracker(job_store,job_worker,PROJECT_ROOT,cancel=model.interrupt)
     job_store.set_setting('default_model',API_MODEL)
     if observability_monitor:observability_monitor.recover_jobs()
     for identifier in ready_models():
@@ -945,6 +945,7 @@ class JobResponse(BaseModel):
     completed_images: int = 0
     total_images: int = 1
     blocked_reason: str | None=None
+    cancel_requested: bool=Field(default=False,description='True while a running job is being stopped after a cancel request.')
     progress: JobProgress | None=Field(default=None,description='Running jobs: whole-job percentage, phase, sampler step and a rough time estimate. Succeeded jobs report 100; waiting, failed and cancelled jobs omit it.')
     partial_result: GenerateResponse | None = None
     result: GenerateResponse | None=None
@@ -1043,8 +1044,8 @@ def run_job_now(identifier:str,request:Request):
     return job_response(item,request)
 
 
-@app.delete('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Cancel one waiting job',
-            description='Retains its cancelled record. Running inference cannot be cancelled and returns 409.')
+@app.delete('/v1/jobs/{identifier}',response_model=JobResponse,response_model_exclude_none=True,summary='Cancel a waiting or running job',
+            description='Retains its cancelled record. A waiting job is cancelled immediately. A running job returns with cancel_requested:true; within about a second the generator stops its runtime, frees the GPU and records it as cancelled, keeping any finished batch images as partial_result. Finished jobs return 409.')
 def cancel_job(identifier:str,request:Request):
     find_job(identifier)
     try:

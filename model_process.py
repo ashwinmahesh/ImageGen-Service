@@ -22,7 +22,7 @@ class ModelProcess:
     def __init__(self,project,*,loras_enabled=True,llm_enabled=True,stage=lambda value:None,command=None,observer=None):
         self.project=Path(project);self.loras_enabled=loras_enabled;self.llm_enabled=llm_enabled
         self.stage=stage;self.command=command;self.process=None;self.channel=None;self.active_model=None;self.loaded=False;self.closing=False
-        self.observer=observer;self.starting=None;self.pending_lifecycle={}
+        self.observer=observer;self.starting=None;self.pending_lifecycle={};self.cancelling=False
 
     def lifecycle(self,event,model,job=None):
         try:
@@ -49,6 +49,7 @@ class ModelProcess:
         finally:child.close()
 
     def execute(self,job):
+        self.cancelling=False
         try:
             record_event(self.project,job,'Selecting runtime: '+job['request']['model'])
             self.select(job['request']['model'],job)
@@ -70,9 +71,9 @@ class ModelProcess:
                 elif event['event']=='error':raise ModelProcessError(event['message'],event.get('http_status',500))
                 else:raise RuntimeError('Unknown model process event')
         except BaseException as error:
-            record_event(self.project,job,'Runtime execution failed',error=True)
+            record_event(self.project,job,'Runtime stopped to cancel the job' if self.cancelling else 'Runtime execution failed',error=not self.cancelling)
             if not getattr(error,'fatal',False):
-                try:self.close(reason='error',job=job)
+                try:self.close(reason='cancelled' if self.cancelling else 'error',job=job)
                 except BaseException:
                     record_event(self.project,job,'Runtime cleanup failed',error=True);raise
             raise
@@ -94,6 +95,15 @@ class ModelProcess:
             except psutil.NoSuchProcess:continue
             except psutil.AccessDenied:return True  # still potentially alive
         return False
+
+    def interrupt(self):
+        """Stop the running job by ending the owned runtime group; execute() then cleans up as after a crash."""
+        process=self.process
+        if process is None or process.poll() is not None:return False
+        self.cancelling=True
+        try:os.killpg(process.pid,signal.SIGTERM)
+        except ProcessLookupError:return False
+        return True
 
     def close(self,*,reason='shutdown',job=None):
         if self.starting:self.starting.finish('failed')
