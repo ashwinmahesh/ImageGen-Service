@@ -60,7 +60,8 @@ class StoreTest(unittest.TestCase):
 
     def test_clear_cancel_and_pagination_preserve_running_and_results(self):
         first=self.add(); active=self.store.claim(); self.add('second'); self.add('third')
-        with self.assertRaises(QueueConflict): self.store.cancel(active['id'])
+        stopping=self.store.cancel(active['id'])  # Running work is stopped by the generator, not cleared.
+        self.assertEqual((stopping['status'],stopping['cancel_requested']),('running',True))
         self.assertEqual(self.store.clear(),2)
         self.assertEqual(self.store.get(first['id'])['status'],'running')
         page,total=self.store.listing(limit=1,offset=1,status='cancelled')
@@ -232,7 +233,7 @@ class QueueAPITest(unittest.TestCase):
         retry=self.client.post('/v1/jobs/'+first['id']+'/retry')
         self.assertEqual(retry.status_code,400)  # Missing input must be restored before retry.
 
-    def test_immediate_waits_next_and_active_cannot_be_deleted(self):
+    def test_immediate_waits_next_and_active_is_not_preempted(self):
         entered=threading.Event(); release=threading.Event()
         original=self.fake.generate_image
         def blocked(**settings):
@@ -245,7 +246,6 @@ class QueueAPITest(unittest.TestCase):
             normal=self.enqueue(prompt='normal').json()
             urgent=self.enqueue(prompt='urgent',generate_immediately=True)
             self.assertEqual(urgent.status_code,202,urgent.text)
-            self.assertEqual(self.client.delete('/v1/jobs/'+first['id']).status_code,409)
             self.assertEqual(self.client.get('/health').json()['queue']['running'],1)
         finally: release.set()
         until(lambda:self.store.get(normal['id'])['status']=='succeeded')
