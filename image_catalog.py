@@ -2,12 +2,14 @@
 import hashlib
 import json
 import math
+import stat
 from pathlib import Path
 import re
 import tempfile
 import threading
 import time
 import unicodedata
+import uuid
 
 from PIL import Image, ImageOps
 from storage_paths import require_storage
@@ -16,6 +18,10 @@ IDENTIFIER = re.compile(r'[0-9a-f]{32}')
 MAX_METADATA_BYTES = 256 * 1024
 _thumbnail_slots = threading.BoundedSemaphore(2)
 _index_lock = threading.Lock()
+
+
+class ImageDeleteConflict(Exception):
+    pass
 
 
 def valid_identifier(value):
@@ -90,6 +96,8 @@ def write_index(root, identifier, path, tags):
     folder = root / 'image-index'
     require_storage(root)
     with _index_lock:
+        if not Path(path).is_file():
+            raise FileNotFoundError('Saved image is unavailable')
         folder.mkdir(parents=True, exist_ok=True)
         destination = folder / f'{identifier}.json'
         record = read_metadata(destination) or {}
@@ -112,6 +120,65 @@ def update_tags(root, image_dir, identifier, tags):
     path = resolve_image(root, image_dir, identifier)
     write_index(root, identifier, path, tags)
     return image_record(root, image_dir, identifier)
+
+
+def deletion_path(root, image_dir, identifier):
+    """Resolve the same gallery ID without following a leaf file symlink."""
+    path = resolve_image(root, image_dir, identifier)
+    default = image_dir / f'{identifier}.png'
+    if default.is_file() and default.resolve() != path:
+        raise ImageDeleteConflict('Several files use this image ID. Resolve the duplicate before deleting it.')
+    record = read_metadata(root / 'image-index' / f'{identifier}.json') or {}
+    candidates = [Path(record['file_path'])] if isinstance(record.get('file_path'), str) else []
+    candidates.append(image_dir / f'{identifier}.png')
+    for candidate in candidates:
+        if candidate.is_absolute() and candidate.resolve() == path:
+            if candidate.is_symlink():
+                raise ImageDeleteConflict('Cannot delete a linked image; its target was left unchanged.')
+            return path
+    raise FileNotFoundError('Saved image is unavailable')
+
+
+def delete_image(root, image_dir, identifier, *, expected_path):
+    """Hide a validated image's own files, then erase them; never accept caller paths."""
+    require_storage(root)
+    with _index_lock:
+        path = deletion_path(root, image_dir, identifier)
+        if path != expected_path:
+            raise ImageDeleteConflict('The saved image location changed; refresh before deleting it.')
+        targets = [path, path.with_suffix('.json'), root / 'image-index' / f'{identifier}.json']
+        targets.extend((root / 'cache' / 'thumbnails').glob(f'{identifier}-*.webp'))
+        targets = list(dict.fromkeys(targets))
+        existing = []
+        for target in targets:
+            require_storage(target.parent)
+            try:
+                info = target.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise ImageDeleteConflict('An image file or companion is not a regular file; nothing was deleted.')
+            existing.append(target)
+        # Stage in each original directory, including custom destinations on another
+        # volume. If staging fails, all originals are still available to restore.
+        staged = []
+        token = uuid.uuid4().hex
+        try:
+            for target in existing:
+                temporary = target.with_name(f'.delete-{token}-{target.name}')
+                target.rename(temporary)
+                staged.append((target, temporary))
+        except OSError:
+            for original, temporary in reversed(staged):
+                temporary.replace(original)
+            raise
+        pending = []
+        for _, temporary in staged:
+            try:
+                temporary.unlink()
+            except OSError:
+                pending.append(str(temporary))
+        return {'id': identifier, 'deleted': True, 'cleanup_pending': pending}
 
 
 def _number(value, integer=False):
@@ -220,7 +287,14 @@ def thumbnail(root, image_dir, identifier):
             temporary = Path(stream.name)
         try:
             preview.save(temporary, format='WEBP', quality=82)
-            temporary.replace(destination)
+            with _index_lock:
+                # A thumbnail started before deletion must not republish a cache
+                # file after the PNG and its old previews have been removed.
+                current = resolve_image(root, image_dir, identifier)
+                now = current.stat()
+                if current != path or (now.st_mtime_ns, now.st_size) != (stat.st_mtime_ns, stat.st_size):
+                    raise FileNotFoundError('Saved image changed while preparing its preview')
+                temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)
     return destination

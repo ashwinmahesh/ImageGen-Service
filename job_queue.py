@@ -157,6 +157,21 @@ class JobStore:
         with self.connection() as db:
             return self.record(db.execute('SELECT * FROM jobs WHERE id=?',(identifier,)).fetchone())
 
+    @contextmanager
+    def guard_artifact_deletion(self, path, owner_job_id=None):
+        """Keep pending-reference checks and filesystem deletion ordered with CRUD."""
+        path = Path(path).resolve()
+        with self.connection(write=True) as db:
+            for row in db.execute("SELECT id,payload FROM jobs WHERE status IN ('queued','running')"):
+                if row['id'] == owner_job_id:
+                    raise QueueConflict('This image belongs to an unfinished job. Wait for it to finish before deleting it.')
+                payload = json.loads(row['payload'])
+                for field in ('reference_image', 'mask_image'):
+                    value = payload.get(field)
+                    if isinstance(value, str) and value.strip() and Path(value).expanduser().resolve() == path:
+                        raise QueueConflict('A queued or running job uses this image. Finish or cancel that job before deleting it.')
+            yield
+
     def existing(self,key,request_fingerprint):
         if key is None:
             return None

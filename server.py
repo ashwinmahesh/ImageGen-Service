@@ -122,7 +122,7 @@ def initialize_service():
     check_model_assets(PROJECT_ROOT,API_MODEL)
     job_store=JobStore(QUEUE_DATABASE)
     model=ModelProcess(PROJECT_ROOT,loras_enabled=app.state.loras_enabled,llm_enabled=app.state.llm_enabled,
-                       stage=lambda value:setattr(job_worker,'stage',value))
+                       stage=lambda value:setattr(job_worker,'stage',value),observer=observability_monitor)
     job_worker=QueueWorker(job_store,execute_job,loras_enabled=lambda:app.state.loras_enabled,llm_enabled=lambda:app.state.llm_enabled,
         busy=busy,gpu_lock_file=GPU_LOCK_FILE,observer=observability_monitor,eligible_models=ready_models)
     job_worker.acquire(prepare=lambda:initialize_shared_queue(PROJECT_ROOT))
@@ -1250,6 +1250,47 @@ def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request,
         raise HTTPException(503, "Cannot save image tags. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     return catalog_urls(record, request)
+
+
+class ImageDeleteResponse(BaseModel):
+    id: str
+    deleted: Literal[True] = True
+    cleanup_pending: list[str] = Field(default_factory=list, description='Normally empty. Private staged files that could not be erased; check storage permissions and remove these paths manually.')
+
+
+@app.delete('/v1/images/{identifier}', response_model=ImageDeleteResponse,
+            summary='Permanently delete a saved image',
+            responses={404: {'description': 'Unknown or already deleted image'}, 409: {'description': 'Image is in use, ambiguous, or has nonregular files'}, 503: {'description': 'Image or queue storage is unavailable'}},
+            description='Deletes the gallery PNG, adjacent JSON sidecar, editable-tag index and cached thumbnails. Accepts only a gallery image ID, including indexed custom output folders. The UI asks for confirmation; API callers authorize deletion by sending DELETE. Queued/running reference users and unfinished generating jobs block deletion with 409. Job history and uploaded references remain unchanged. Successful responses include cleanup_pending (normally empty); listed private staged files need manual cleanup if storage refused erasure. No GPU inference or queue HTTP call is performed.')
+def delete_saved_image(identifier: str, response: Response):
+    queue_ready(require_worker=False)
+    try:
+        require_storage(ROOT)
+        folder, images, _ = image_location(identifier)
+        path = image_catalog.deletion_path(folder, images, identifier)
+        # Reject ambiguous IDs rather than reveal another file under the same ID
+        # after deleting the first copy from the cross-model gallery.
+        for other in catalog_roots().values():
+            other_images = IMAGE_DIR if other == ROOT else other / 'images'
+            try:
+                duplicate = image_catalog.resolve_image(other, other_images, identifier)
+            except (OSError, ValueError):
+                continue
+            if duplicate != path:
+                raise image_catalog.ImageDeleteConflict('Several files use this image ID. Resolve the duplicate before deleting it.')
+        metadata = image_catalog.read_metadata(path.with_suffix('.json')) or {}
+        with job_store.guard_artifact_deletion(path, metadata.get('job_id') or identifier):
+            result = image_catalog.delete_image(folder, images, identifier, expected_path=path)
+        if result['cleanup_pending']:
+            log.warning('Image %s removed from gallery; cleanup required for %s', identifier, result['cleanup_pending'])
+    except FileNotFoundError:
+        raise HTTPException(404, 'Saved image is unavailable') from None
+    except image_catalog.ImageDeleteConflict as error:
+        raise HTTPException(409, str(error)) from None
+    except (OSError, RuntimeError):
+        raise HTTPException(503, 'Cannot delete this image. Check image storage and permissions, then refresh the gallery.') from None
+    response.headers['Cache-Control'] = 'no-store'
+    return result
 
 
 @app.get("/thumbnails/{identifier}.webp", name="image_thumbnail", include_in_schema=False)

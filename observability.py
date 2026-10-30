@@ -11,6 +11,7 @@ import uuid
 from resource_probe import FIELDS,ResourceProbe
 
 WINDOWS={'5m':300,'30m':1800,'1h':3600,'6h':21600,'24h':86400,'3d':259200,'7d':604800}
+LIFECYCLE_WINDOWS={'24h':86400,'7d':7*86400,'30d':30*86400,'90d':90*86400,'all':None}
 JOB_WINDOWS={'full':None,'1m':60,'5m':300,'15m':900}
 RETENTION_SECONDS=8*86400
 log=logging.getLogger('image-observability')
@@ -45,7 +46,7 @@ class MetricStore:
         database_path(self.project)
         self.path.parent.mkdir(parents=True,exist_ok=True)
         with closing(sqlite3.connect(self.path,timeout=.25)) as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (0,1):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (0,1,2):
                 raise RuntimeError('Unsupported observability database version')
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript('''
@@ -54,12 +55,19 @@ class MetricStore:
                     started REAL NOT NULL,finished REAL,status TEXT NOT NULL,summary TEXT,PRIMARY KEY(session,job_id,attempt));
                 CREATE INDEX IF NOT EXISTS run_time ON runs(started);
                 CREATE INDEX IF NOT EXISTS run_job ON runs(model,job_id);
+                CREATE TABLE IF NOT EXISTS lifecycle_events(
+                    id TEXT PRIMARY KEY,session TEXT NOT NULL,model TEXT NOT NULL,action TEXT NOT NULL,scope TEXT NOT NULL,
+                    reason TEXT NOT NULL,job_id TEXT,attempt INTEGER,started REAL NOT NULL,finished REAL,
+                    status TEXT NOT NULL,duration_seconds REAL);
+                CREATE INDEX IF NOT EXISTS lifecycle_time ON lifecycle_events(started);
+                CREATE INDEX IF NOT EXISTS lifecycle_model ON lifecycle_events(model,started);
+                CREATE INDEX IF NOT EXISTS lifecycle_job ON lifecycle_events(job_id,started);
             ''')
             db.execute('CREATE TABLE IF NOT EXISTS samples(t REAL NOT NULL,session TEXT NOT NULL,model TEXT NOT NULL,job_id TEXT,attempt INTEGER,stage TEXT NOT NULL,'+
                        ','.join(name+' REAL' for name in FIELDS)+',process_count INTEGER,process_tree_partial INTEGER NOT NULL)')
             db.execute('CREATE INDEX IF NOT EXISTS sample_time ON samples(t)')
             db.execute('CREATE INDEX IF NOT EXISTS sample_job ON samples(job_id,model,t)')
-            db.execute('PRAGMA user_version=1')
+            db.execute('PRAGMA user_version=2')
             db.commit()
 
     def session(self,identifier,model,pid,started):
@@ -148,6 +156,44 @@ class MetricStore:
         result.update(job_id=identifier,runs=runs)
         return result
 
+    def lifecycle(self,session,model,event,job=None):
+        with self.connection() as db:
+            if event['phase']=='started':
+                db.execute('INSERT OR IGNORE INTO lifecycle_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (event['id'],session,model,event['action'],event['scope'],event['reason'],
+                     job['id'] if job else None,job['attempts'] if job else None,event['started'],None,'running',None))
+            else:
+                db.execute("UPDATE lifecycle_events SET finished=?,status=?,duration_seconds=? WHERE id=? AND session=? AND status='running'",
+                    (event['finished'],event['status'],event['duration_seconds'],event['id'],session))
+
+    def recover_lifecycle(self,session):
+        # Only after owning the global consumer lease. A crash supplies no reliable
+        # finish boundary or duration, so never fabricate one from restart time.
+        with self.connection() as db:
+            db.execute("UPDATE lifecycle_events SET status='interrupted' WHERE status='running' AND session<>?",(session,))
+
+    def lifecycle_history(self,*,start=None,end=None,model=None,job_id=None,action=None,scope=None,limit=20,offset=0):
+        parts=[];args=[]
+        if start is not None:
+            parts.append("(started>=? OR finished>=? OR status='running')");args.extend([start,start])
+        for field,value,op in [('started',end,'<='),('model',model,'='),('job_id',job_id,'='),('action',action,'='),('scope',scope,'=')]:
+            if value is not None:parts.append(field+op+'?');args.append(value)
+        where=' WHERE '+' AND '.join(parts) if parts else ''
+        with self.connection() as db:
+            # One read snapshot keeps totals, aggregates and page coherent while
+            # the runtime appends/finishes events on another connection.
+            db.execute('BEGIN')
+            totals=db.execute('SELECT COUNT(*),MIN(started) FROM lifecycle_events'+where,args).fetchone()
+            rows=db.execute('SELECT * FROM lifecycle_events'+where+' ORDER BY started DESC,id DESC LIMIT ? OFFSET ?',[*args,limit,offset]).fetchall()
+            summary=db.execute("""SELECT model,action,scope,COUNT(*) AS total,
+                SUM(status='running') AS running,SUM(status='succeeded') AS succeeded,
+                SUM(status='failed') AS failed,SUM(status='interrupted') AS interrupted,
+                AVG(CASE WHEN status='succeeded' THEN duration_seconds END) AS mean_seconds,
+                MAX(CASE WHEN status='succeeded' THEN duration_seconds END) AS peak_seconds
+                FROM lifecycle_events"""+where+' GROUP BY model,action,scope ORDER BY model,action,scope',args).fetchall()
+        return {'data':[dict(row) for row in rows],'summary':[dict(row) for row in summary],
+                'first_started':totals[1],'total':totals[0],'limit':limit,'offset':offset,'has_more':offset+len(rows)<totals[0]}
+
     def prune(self,now):
         with self.connection() as db:db.execute('DELETE FROM samples WHERE t<?',(now-RETENTION_SECONDS,))
 
@@ -161,7 +207,7 @@ class ResourceMonitor:
         self.clock=clock;self.session=uuid.uuid4().hex;self.started=clock()
         self.lock=threading.RLock();self.stopping=threading.Event();self.wake=threading.Event();self.thread=None;self.active=None
         self.ready=False;self.last_error=None;self.last_sample=None;self.next_prune=0
-        self.last_tick=0
+        self.last_tick=0;self.lifecycle_error=None
 
     def ensure_store(self):
         if not self.ready:
@@ -198,7 +244,17 @@ class ResourceMonitor:
                 from model_profiles import PROFILES
                 self.ensure_store()
                 for identifier in PROFILES:self.store.recover(identifier)
+                self.store.recover_lifecycle(self.session)
             except Exception:self.last_error='Could not reconcile old resource attempts; inference continues.'
+
+    def lifecycle(self,event,model,job=None):
+        with self.lock:
+            try:
+                self.ensure_store();self.store.lifecycle(self.session,model,event,job)
+                self.lifecycle_error=None
+            except Exception:
+                if self.lifecycle_error is None:log.warning('Lifecycle history unavailable; runtime continues',exc_info=True)
+                self.lifecycle_error='Model lifecycle history unavailable; check project state permissions and disk space.'
 
     def start_job(self,job):
         with self.lock:
@@ -226,4 +282,4 @@ class ResourceMonitor:
     def status(self):
         return {'recording':self.thread is not None and self.thread.is_alive(),'session':self.session,'model':self.model,
                 'last_sample':self.last_sample,'error':self.last_error,'sources':dict(self.probe.status),
-                'idle_interval_seconds':5,'job_interval_seconds':1,'retention_days':8}
+                'lifecycle_error':self.lifecycle_error,'lifecycle_retention':'Retained until locally removed','idle_interval_seconds':5,'job_interval_seconds':1,'retention_days':8}

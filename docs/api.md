@@ -1,6 +1,6 @@
 # ImageGen API reference
 
-This is the human-readable reference for **all HTTP endpoints in ImageGen-Service**. Use it to build a client, submit images from another tool, manage saved work or browse results. For your first request, follow the [quick-start walkthrough](../QUICKSTART.md#5-generate-through-the-api).
+This is the human-readable reference for **all HTTP endpoints in ImageGen-Service**. Use it to build a client, submit images from another tool, manage saved work or browse results. For your first request, follow the [quick-start walkthrough](../QUICKSTART.md#5-use-the-api).
 
 ## Contents
 
@@ -370,7 +370,7 @@ Values above are illustrative. `created` is integer Unix seconds; `generation_se
 
 Set `n` to 2–5. The first seed is random if omitted, then persisted; option `i` uses `(first_seed + i) % 4294967296` for zero-based `i`. Images render sequentially in one durable job. With `expand_prompt:true`, expansion is shared unless `vary_prompt:true` requests distinct composition plans.
 
-All candidate prompts are committed before rendering and reused after interruption. Recovery adopts completed files and renders missing options only. Explicit retry creates a new full batch. Different seeds/prompts can still give similar layouts for constrained prompts or strongly preserved references. See the [README example](../README.md#explore-multiple-options).
+All candidate prompts are committed before rendering and reused after interruption. Recovery adopts completed files and renders missing options only. Explicit retry creates a new full batch. Different seeds/prompts can still give similar layouts for constrained prompts or strongly preserved references. See the [manual example](../MANUAL.md#explore-multiple-options).
 
 ## Independent queue API (generator may be off)
 
@@ -492,6 +492,7 @@ The gallery's **Edit photo** action opens the generator webpage at `/?generation
 | GET `/v1/images` | Generator | 200 | Search/list saved images across model roots and indexed custom locations. |
 | GET `/v1/images/{identifier}` | Generator | 200 | Read one image's settings, paths and URLs. |
 | PATCH `/v1/images/{identifier}/tags` | Generator | 200 | Replace its editable tags; returns the updated detail. |
+| DELETE `/v1/images/{identifier}` | Generator | 200 | Permanently delete an image and its own saved settings, tags and previews. |
 
 ### GET /v1/images
 
@@ -524,13 +525,39 @@ Response has `object:"list"`, `data[]`, matching `total`, `limit`, `offset`, `ha
 | `lora` | object, optional | Adapter `id`, `name` and `strength` when recorded. |
 | `metadata` | object, detail only | Full saved JSON generation record, when readable. Not included by the list schema. |
 
-GET detail returns **404** for unknown/missing images. PATCH tags requires `{"tags":["Winter","Campaign"]}`; `{"tags":[]}` clears them. It uses the same normalization/limits as initial tags. Changes are stored atomically in the owning model's image index without modifying PNG/sidecar. Unknown images return **404**, invalid tags **422**, and unwritable storage **503**. No endpoint deletes images.
+GET detail returns **404** for unknown/missing images. PATCH tags requires `{"tags":["Winter","Campaign"]}`; `{"tags":[]}` clears them. It uses the same normalization/limits as initial tags. Changes are stored atomically in the owning model's image index without modifying PNG/sidecar. Unknown images return **404**, invalid tags **422**, and unwritable storage **503**.
 
 ```sh
 curl --fail-with-body --request PATCH \
   http://localhost:5742/v1/images/0123456789abcdef0123456789abcdef/tags \
   -H 'Content-Type: application/json' -d '{"tags":["Winter","Campaign"]}'
 ```
+
+### DELETE /v1/images/{identifier}
+
+Permanently deletes the gallery PNG, adjacent JSON settings, editable-tag index and all cached thumbnail versions. Use the image `id` from the gallery API, not a batch job ID. Indexed custom output locations work too. No body, model parameter or file path is accepted. This is a generator-only endpoint: no inference or standalone queue HTTP connection is needed. Sending DELETE authorizes deletion; the webpage presents a confirmation popup first.
+
+```sh
+# Replace this example ID with the gallery image you intend to delete.
+curl --fail-with-body --request DELETE \
+  http://localhost:5742/v1/images/0123456789abcdef0123456789abcdef
+```
+
+```json
+{"id":"0123456789abcdef0123456789abcdef","deleted":true,"cleanup_pending":[]}
+```
+
+A **200** response removes the image from the catalog and its media routes. Uploaded references, other generated images and durable job/observability history are preserved; old history can consequently point to unavailable media. There is no undo. Files are first renamed in their own directories; an ordinary staging failure restores files already moved before returning an error. This is not a cross-file crash-recovery transaction.
+
+`cleanup_pending` is normally empty. If storage allows renaming but refuses final erasure, the image is removed from the gallery and the response lists private `.delete-...` files needing manual cleanup. The server log and webpage report this condition; check permissions and erase only those listed files. Do not mistake it for completed disk cleanup.
+
+| Status | Meaning / recovery |
+| --- | --- |
+| **404** | Invalid, unknown, missing or already deleted image ID. A repeated DELETE returns 404. |
+| **409** | A queued/running job references the PNG as a source/mask, or its generating batch is unfinished. Finish or cancel the relevant job first. Ambiguous duplicate IDs and nonregular files such as leaf symlinks also block deletion without following their targets. |
+| **503** | Image storage/permissions failed, the queue is not initialized, or local SQLite is unavailable. SQLite failures use `code:queue_storage_unavailable` and `Retry-After:2`. |
+
+The pending-job check and deletion serialize with shared SQLite queue mutations; stale tag saves and in-flight thumbnails cannot recreate an index/preview after successful removal. After a timeout or lost response, refresh the gallery or GET its detail before retrying: the server may already have deleted the image. Browser Cancel/Escape dismisses confirmation without issuing DELETE. Search, tag filters, sort and page size remain selected after success; an emptied last page moves back to the last available page.
 
 ## Observability
 
@@ -540,6 +567,7 @@ These read-only endpoints are on the **generator (5742)**, with a webpage at `/o
 | --- | --- |
 | GET `/v1/observability` | Sampler `recording`, startup `model`, session ID, `last_sample`, optional error, source availability, cadence/retention, model IDs/names, window IDs and measurement definitions. |
 | GET `/v1/observability/metrics` | `window`: `5m` (default), `30m`, `1h`, `6h`, `24h`, `3d`, `7d`. Optional `model=<id>` filters history; omission includes all models/sessions. Optional `end` is a finite current/past Unix timestamp (default now). `max_points`: 30–1200, default 600. |
+| GET `/v1/observability/lifecycle` | Discrete load/unload event history, long-range filters, successful-operation summaries and pagination; see [model lifecycle events](#model-lifecycle-events). |
 | GET `/v1/observability/jobs` | Paginated measured **attempts**, newest first. Optional `model`; `limit` 1–100 (default 20), `offset` >=0 (default 0). Returns `data`, `total`, `limit`, `offset`, `has_more`. Waiting/unmeasured jobs do not appear. |
 | GET `/v1/observability/jobs/{identifier}` | One job’s recorded attempts, plus its graph. Optional `model` disambiguates the model. `window`: `full` (default), `1m`, `5m`, `15m`; `max_points` as above. Short windows end at the latest completion, or now during execution. Only execution is sampled; waiting/restart intervals between attempts appear as gaps. |
 | GET `/v1/observability/jobs/{identifier}/logs` | Available generation-log tails for a persisted queue job, independent of resource sampling. Optional `model` must match the job; `max_bytes` 1024–262144, default 65536 total raw bytes. At most ten runtime attempts and five native image logs. |
@@ -550,6 +578,7 @@ Example requests:
 curl 'http://127.0.0.1:5742/v1/observability'
 curl 'http://127.0.0.1:5742/v1/observability/metrics?window=30m&model=z-image-turbo&max_points=300'
 curl 'http://127.0.0.1:5742/v1/observability/jobs?limit=20&offset=0'
+curl 'http://127.0.0.1:5742/v1/observability/lifecycle?window=30d&model=z-image-turbo&limit=20&offset=0'
 curl "http://127.0.0.1:5742/v1/observability/jobs/$JOB_ID?model=z-image-turbo&window=full"
 curl "http://127.0.0.1:5742/v1/observability/jobs/$JOB_ID/logs?max_bytes=65536"
 ```
@@ -573,6 +602,42 @@ Samples are taken every **1s during a job / 5s idle**, plus execution boundaries
 GPU counters are best-effort read-only IORegistry diagnostics, verified locally without sudo. Unavailable counters remain blank and are retried with backoff. Summed RSS can double-count shared pages; CPU snapshots can miss short-lived children and 1s sampling can miss brief spikes. Per-job plots correlate measured resources with execution and are not an exclusive GPU/cost profiler. The page’s tooltips state these limitations. [psutil documentation](https://psutil.io/) describes process/system readings; the GPU [collector example](https://github.com/XReyRobert/macos-telegraf-gpumonitoring) documents the driver counter names.
 
 Bad models/windows/ranges return **422**. An unknown/unmeasured job returns **404**, including jobs still waiting or predating instrumentation. A missing sampler or unavailable telemetry store returns **503** with `detail.code: observability_unavailable` and `Retry-After: 2`. These failures are independent of queue storage and do not change generator readiness or prevent generation. `/health.observability` reports sampler/source availability when initialized, or a startup error if sampling could not start.
+
+### Model lifecycle events
+
+GET **`/v1/observability/lifecycle`** is generator-only and read-only. It uses boundary timers rather than the sampled resource graphs. `/v1/observability` also returns `lifecycle_windows` and `lifecycle_scopes`; health/status includes a separate `lifecycle_error` and lifecycle retention description. A lifecycle write failure does not fail inference, queue work or resource sampling. No model is loaded by a history request.
+
+| Query | Default | Meaning |
+| --- | --- | --- |
+| `window` | `30d` | `24h`, `7d`, `30d`, `90d`, `all`. Independent of resource graph windows; `all` has no lower time bound. |
+| `model` | omitted | Known model ID; omitted includes every model, including old history for a model no longer set up. |
+| `job_id` | omitted | Exactly 32 lowercase hexadecimal characters. Filters events triggered by that job, including releasing the previous model. No recorded matches returns 200 with an empty list. |
+| `action` | omitted | `load` or `unload`. |
+| `scope` | omitted | `process` or `weights`. |
+| `end` | now | Positive finite current/past Unix timestamp; the same five-second clock tolerance as metric reads. |
+| `limit`, `offset` | 20, 0 | Integer limit 1–100, nonnegative offset. Newest start first, then stable event ID. |
+
+```sh
+curl 'http://127.0.0.1:5742/v1/observability/lifecycle?window=all&action=load&scope=weights&limit=20'
+curl "http://127.0.0.1:5742/v1/observability/lifecycle?window=all&job_id=$JOB_ID"
+```
+
+Response fields are `window`, nullable `start` (`all`), `end`, nullable `first_started`, `data[]`, `summary[]`, matching `total`, echoed `limit`/`offset` and `has_more`. Filtering includes events starting in or overlapping the range and still-running operations. Status is the latest recorded state, not a reconstructed snapshot as of `end`. Summary aggregates cover **all matching events**, independent of pagination, and a single SQLite read snapshot keeps rows/counts/summary coherent.
+
+Each event has `id`, generator `session`, image `model`, `action`, `scope`, `reason`, nullable triggering `job_id`/`attempt`, Unix `started`/nullable `finished`, `status` and nullable `duration_seconds`. Reasons include `cold_start`, `model_switch`, `shutdown`, `error`, `initial_load` and `adapter_change`. Status is `running`, `succeeded`, `failed` or `interrupted`. Shutdown normally has no triggering job. A switch's unload belongs to the previous model but is attributed to the incoming job; omit `model` on job-history reads if you want both sides of that switch.
+
+| Scope | Measured boundary |
+| --- | --- |
+| `process` | Load: spawning the managed model child through its startup/import-ready IPC event, before prompt planning/weight construction. Unload: stop request through confirmed owned-process-group exit, including cleanup, reaping and escalation if required. This is runtime startup/shutdown, **not a claim about individual CLI weight phases**. |
+| `weights` | Resident Z-Image factory/constructor or adapter replacement and old-model Python/cache release. Does not include first-inference compilation, an explicit GPU synchronization or exact OS-reported memory reclamation. Chroma/Klein/Qwen per-image CLI weight boundaries are currently unavailable. |
+
+Elapsed seconds use a **monotonic** clock; Unix timestamps are for display/filtering and can move with the system clock. These scopes may overlap, so **do not sum them**. Warm reuse produces no duplicate load event. Reconciled completed artifacts can start a runtime without loading weights. A failed operation preserves its measured duration; a running operation or one interrupted without a finish boundary has null duration. After abrupt child exit or restart, do not infer elapsed time from downtime. Only the exclusive generator consumer reconciles old running events; reading history never does.
+
+Each summary groups by `model`, `action`, `scope` and contains `total`, status counts (`running`, `succeeded`, `failed`, `interrupted`), nullable `mean_seconds` and `peak_seconds`. Duration aggregates include successful operations only. Failed attempts remain visible and are excluded from successful-load/unload comparisons; unknown timing is never zero.
+
+Events are retained until locally removed in the existing **project-local** `state/observability/metrics.sqlite3`, independently of eight-day raw-sample pruning. Schema 2 upgrades schema 1 additively without discarding resource/job history. There is no backfill. Restart an already running generator to load instrumentation. Bad parameters return **422**; absent/unreadable observability storage returns **503** with `detail.code:observability_unavailable` and `Retry-After:2`. No lifecycle route exists on the queue API.
+
+The webpage has its own 30-day default and 24h/7d/30d/90d/all menu. The sparse timeline/table show the current page; per-model summaries cover all matches. Job view uses all job-attributed events, independent of the short resource graph window. Previous-model release is shown even if its model differs from the requested job model.
 
 ### Generation-log response
 
