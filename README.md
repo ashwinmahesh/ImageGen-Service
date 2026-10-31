@@ -2,7 +2,7 @@
 
 Generate and edit images on your Apple Silicon Mac, using a webpage or API. Your models and images stay local, with a gallery to find your favourites and a queue for work you want to run later.
 
-![ImageGen webpage](docs/screenshots/generator.png)
+![ImageGen generator following a running job at 63%, with its live preview](docs/screenshots/generator.png)
 
 ## Get started
 
@@ -22,11 +22,13 @@ Open **[localhost:5742](http://localhost:5742/)** to generate your first image. 
 ## What you can do
 
 - **Generate options:** make 1–5 images from a description and compare the results.
+- **Watch it render:** a percentage and time left show under the preview, in the header and in the queue. Switch on **Live preview** to watch the image form, or choose **Stop generating** to cancel it.
 - **Develop your prompt:** an optional local language model adds detail about lighting, style and composition. Preview its suggestions or turn it off.
-- **Edit photos:** use Klein or Qwen to change an existing image. Qwen also supports selecting an area to edit.
+- **Edit photos:** use Klein or Qwen to change an existing image. With Qwen, paint over the area to change; the model is also told where your selection is.
 - **Try styles:** add compatible LoRA adapters with [`make setup-lora`](MANUAL.md#add-your-own-lora).
-- **Keep your favourites:** search the gallery by prompt or tags, download images, reuse settings or delete unwanted results with confirmation.
-- **Queue work:** save requests for later, drag jobs into order or choose **Run Now**. Waiting work survives restarts.
+- **Keep your favourites:** search the gallery by prompt or tags, open an image to view it fitted or full-window, download it, reuse settings or delete it with confirmation.
+- **Queue work:** save requests for later, drag jobs into order or choose **Run Now**. **Monitor** opens a job in a new tab with its settings filled in. Switch off **Process queue** to pause; waiting work survives restarts.
+- **Save reloads:** the gear icon opens **Settings**. **Keep image weights loaded between generations** keeps FLUX.2 Klein or Qwen-Image in memory for back-to-back images of the same model, then releases it.
 - **See resource use:** view CPU, memory, GPU, job logs and model load/unload history in Observability.
 
 Available models: **Z-Image Turbo**, **Chroma1-HD**, **Chroma1-Flash**, **FLUX.2 Klein 4B/9B** and **Qwen-Image 2.1 Turbo**. Set up the ones you want; the generator switches between them as jobs run. See [model details and licences](docs/setup.md#models-and-effective-settings) before commercial use.
@@ -52,12 +54,12 @@ For AI tools: [operating skill](skill/image-model-server/SKILL.md). For contribu
 <details>
 <summary>More screenshots</summary>
 
-![Compare image options](docs/screenshots/image-options.png)
+![Compare three image options](docs/screenshots/image-options.png)
 
 ![Search the gallery](docs/screenshots/gallery.png)
 
-![Manage the queue](docs/screenshots/queue.png)
+![Queue window with a running job's progress and waiting jobs](docs/screenshots/queue.png)
 
-Generator, gallery and queue screenshots use simulated demo data. The image-options screenshot is from a real Z-Image test; timings are not benchmarks.
+All screenshots use simulated demo data and fake rendering; percentages and timings are not benchmarks.
 
 </details>
