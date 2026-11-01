@@ -152,6 +152,8 @@ The LLM is instructed to keep framing and other details you've explicitly specif
 
 ![Multiple generated options with selectable previews](docs/screenshots/image-options.png)
 
+This screenshot uses simulated demonstration images; its timing is not a benchmark.
+
 ### Guide the result with a reference or style adapter
 
 A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, paint or drag rectangles on the source preview to switch automatically to a selected-area edit; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
@@ -268,7 +270,7 @@ The importer checks file format and model-family hints; it cannot guarantee exac
 
 The gallery brings together results from all supported models, including images saved to custom output folders. Search by prompt or tags, sort and browse pages, and open an image to see its settings, download it, edit its tags or use it as a starting point for another generation. Choose **Edit photo** to open the selected image directly in the Edit preview, even when a different model created it. The action is available whenever a setup model supports editing. Choose an editor if prompted, describe the change and submit; your original file stays unchanged. **Make a variation** and **Reuse settings** remain separate actions.
 
-Open **[Gallery](http://localhost:5742/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
+Open **[Gallery](http://localhost:5742/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Click a thumbnail or its caption to open an image: the viewer fits the whole photo, and the expand button in its corner fills the browser window (Escape or the same button returns to the details). Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
 
 To delete a result, open it in **Gallery**, choose **Delete image** below its file path, then review the thumbnail and prompt in the confirmation popup. **Cancel** or Escape keeps it; **Delete image** permanently removes the PNG, its JSON settings, tags and cached previews, including files in custom save folders. There is no undo. Uploaded references, other images and job history stay saved. If a waiting or running job uses the image, finish or cancel that job first. The gallery refreshes after deletion and moves back a page if necessary.
 

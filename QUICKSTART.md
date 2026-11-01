@@ -38,7 +38,7 @@ Keep this terminal open, wait for startup to finish, then open **[http://localho
 
 1. In **Generate**, enter: **A watercolor fox in a snowy forest, soft morning light**.
 2. Choose **Quick draft · 512 × 512**, keep **Number of images** at **1**, and leave the other settings at their defaults.
-3. Click **Generate image**. Follow progress in the preview, then view or download the result. Your image is also saved automatically.
+3. Click **Generate image**. A percentage and time left appear under the preview and in the header. Switch on **Live preview** before generating to watch the image form, or choose **Stop generating** to cancel. When it finishes, view or download the result; it's also saved automatically.
 
 Grey question-mark icons explain the controls. These are the main choices to try next:
 
@@ -49,13 +49,14 @@ Grey question-mark icons explain the controls. These are the main choices to try
 | **Number of images** | Makes 1–5 options with different seeds. |
 | **Prompt expansion** | Adds descriptive detail. Use **Preview expansion** to review it first. |
 | **Different compositions with LLM** | Explores different compositions for a multi-image batch with expansion enabled. |
+| **Live preview** | Shows the image as it renders. Off by default because each preview adds decoding time. |
 | **Generate immediately** | Runs next after the active batch; switch off to join the ordinary queue. |
 
-Open **Queue** in the header to follow jobs, drag waiting items into order or choose **Run Now**. An active batch always finishes first.
+Open **Queue** in the header to see each job's progress, drag waiting jobs into order or choose **Run Now**; an active batch always finishes first. **Monitor** opens a job in a new tab with its prompt and settings filled in. Switch off **Process queue** in the header to pause waiting work. The gear icon opens **Settings**; see the [manual](MANUAL.md#settings) before turning on **Keep image weights loaded between generations**.
 
 ## 4. Find images and edit photos
 
-Open **Gallery** to search by prompt or tags, download results and reuse settings. **Delete image** asks for confirmation. The generator footer shows the default save folder; use **Save location** to choose another folder for a request.
+Open **Gallery** to search by prompt or tags. Click an image or its caption to open it, then download it, reuse its settings or expand it to fill the window. **Delete image** asks for confirmation. The generator footer shows the default save folder; use **Save location** to choose another folder for a request.
 
 To edit a photo, stop the app with Ctrl+C, add an editing model with `make setup MODEL=flux2-klein-4b`, then run `make serve` again. Choose **Edit photo**, select the editor, upload a photo and describe the change. Leave resolution on **Auto** to follow the source size. You can also choose **Edit photo** from a gallery image. See [photo editing](MANUAL.md#edit-an-existing-photo) for Qwen selected-area edits and preservation controls.
 
@@ -78,7 +79,13 @@ IMAGEGEN_JOB_ID="paste-the-returned-id-here"
 curl --fail-with-body "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID"
 ```
 
-When `status` is `succeeded`, open a `result.data[]` image's `url`, or find its saved `file_path`. On failure, read `error`. See the [API reference](docs/api.md) for all settings and endpoints.
+While it runs, `progress.percent` shows how far it has got. When `status` is `succeeded`, open a `result.data[]` image's `url`, or find its saved `file_path`. On failure, read `error`. To cancel a waiting or running job:
+
+```sh
+curl --fail-with-body -X DELETE "http://localhost:5742/v1/jobs/$IMAGEGEN_JOB_ID"
+```
+
+See the [API reference](docs/api.md) for all settings and endpoints.
 
 ## 6. Stop and come back later
 
