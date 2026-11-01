@@ -76,6 +76,32 @@ class SharedShellTest(unittest.TestCase):
         # Editing a new source, including a previous edit's result, starts without the old selection.
         for reset in ('maskStrokes=[]','maskUpload=null','savedMaskPath=null','savedMaskImage=null',"$('edit-area').value='whole'"):self.assertIn(reset,clear)
 
+    def test_header_buttons_are_styled_by_the_shared_stylesheet_on_every_page(self):
+        header=re.search(r'<header\b.*?</header>',(PROJECT/'ui/partials/header.html').read_text(),re.S).group()
+        styles=re.sub(r'/\*.*?\*/','',(PROJECT/'ui/assets/shell.css').read_text(),flags=re.S)
+        rules=[(selectors.split(','),body) for selectors,body in re.findall(r'([^{}]+)\{([^}]*)\}',styles)]
+        def declarations(selector):return ';'.join(body for selectors,body in rules if selector in (item.strip() for item in selectors))
+        buttons=re.findall(r'<button class="secondary[^"]*" id="([^"]+)"',header)
+        self.assertEqual(buttons,['open-queue','open-settings'])
+        # Only the Generator page defines .secondary, so Gallery and Observability rely on these rules alone.
+        for identifier in buttons:
+            look=declarations('.app-header #'+identifier)
+            for declaration in ('border:1px solid var(--control-line)','background:var(--control)','border-radius:8px','color:var(--text)'):self.assertIn(declaration,look)
+            self.assertIn('background:var(--control-hover)',declarations('.app-header #%s:hover:not(:disabled)'%identifier))
+        # The icon-only gear keeps its square size instead of the Queue button's text padding.
+        self.assertNotIn('padding',declarations('.app-header #open-settings'))
+
+    def test_opening_a_job_replaces_the_restored_watcher_for_its_workflow(self):
+        page=(PROJECT/'ui/index.html').read_text()
+        inspect=page[page.index('async function inspectQueueJob('):page.index('async function refreshWatchedJobs(')]
+        # A ?job= link opened while this browser follows another job shows only the chosen job; the other keeps running.
+        detach="if(watchingJobs[owner]!==current.id){watchingJobs[owner]=null;workflowStates[owner].pendingJob=null;workflowStates[owner].progressText='';persistWatchers();}"
+        self.assertIn(detach,inspect)
+        self.assertLess(inspect.index(detach),inspect.index('loadJobIntoWorkflow(current)'))
+        self.assertNotIn("method:'DELETE'",inspect)
+        # Restored watchers load first, so the linked job is the one that replaces them.
+        self.assertIn('await restoreWatchers(); await importSavedImage(); await importQueueJob();',page)
+
     def test_shared_assets_are_local_uncached_and_paths_are_not_arbitrary(self):
         client=TestClient(server.app,base_url='http://127.0.0.1')
         try:

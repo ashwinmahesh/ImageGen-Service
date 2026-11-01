@@ -821,11 +821,13 @@
     const requestJSON=window.ImageGenShell.requestJSON;
     async function inspectQueueJob(job){
       try{
-        const current=await requestJSON('/v1/jobs/'+job.id);
-        if(generating || previewingExpansion)setWorkflow(jobWorkflow(current));else loadJobIntoWorkflow(current);
+        const current=await requestJSON('/v1/jobs/'+job.id),owner=jobWorkflow(current);
+        // The opened job replaces this tab's earlier followed job in its workflow (that job keeps running), so its progress or result cannot cover this one.
+        if(watchingJobs[owner]!==current.id){watchingJobs[owner]=null;workflowStates[owner].pendingJob=null;workflowStates[owner].progressText='';persistWatchers();}
+        if(generating || previewingExpansion)setWorkflow(owner);else loadJobIntoWorkflow(current);
         if(current.status==='succeeded' || current.partial_result)await displayJob(current);
         if(['failed','cancelled'].includes(current.status))showError(current.error || 'This job was cancelled.');
-        else if(current.status!=='succeeded'){followJob(job.id,jobWorkflow(current));await refreshQueue();}
+        else if(current.status!=='succeeded'){followJob(job.id,owner);await refreshQueue();}
       }catch(error){showError(error.message);}
     }
     async function refreshWatchedJobs(summary){
