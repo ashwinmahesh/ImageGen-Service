@@ -101,7 +101,7 @@ Both accept optional query `model`; omission uses the shared saved default. An u
 | Generator | `{object:"list", model, enabled:boolean, data:[...]}`. `NO_LORAS=1` returns `enabled:false` and an empty list. |
 | Queue | `{object:"list", model, directory, data:[...]}`. `directory` is the absolute adapter folder. No `enabled` flag: generator mode is independent. |
 
-Each entry describes `id`, `name`, `filename`, compatible `models[]`, `available`, optional `default_strength`, `trigger_prompt`, `source` and `sha256`; creator metadata may add fields. Select an entry with **`available:true`** and send its `id` as `lora`. Null/omitted `lora` uses the base model.
+Each entry describes `id`, `name`, `filename`, compatible `models[]`, `available`, optional `default_strength`, `trigger_prompt`, `source` and `sha256`; creator metadata may add fields. Select an entry with **`available:true`** and send its `id` as `lora`, or several IDs in `loras` to stack them. Null/omitted `lora` uses the base model.
 
 Availability checks file presence and recorded checksum metadata. Inference verifies the actual checksum. Discovery does not load/hash weights or download files. Entries installed with `make setup-lora` come from ignored per-model `loras/custom.json` and are merged with the shipped catalog; an existing legacy local `catalog.json` still overrides the public part. Custom entries have `custom:true` and IDs beginning `custom-`; optional provenance includes `repository`, pinned `revision`, `remote_filename` and `bytes`. Compatible missing files remain listed as unavailable. Install/download is a local Make/CLI operation, not an HTTP endpoint; see [custom adapter setup](setup.md#custom-lora-downloads-and-imports). Chroma HD and Flash share the HD adapter directory with compatibility filtering. Queue discovery returns **422** for unknown models and **503** for an unavailable configured volume or invalid/unreadable catalog; independent queue CRUD remains available.
 
@@ -130,8 +130,9 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `output_dir` | string | `<store>/<requested-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
 | `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. |
 | `image_strength` | number | Z-Image/Chroma variations only: default 0.6, [0,1), higher preserves more. Only send with a reference. Klein/Qwen reject this field even if set to 0.6; omit it for instruction edits. |
-| `lora` | string or null | Omitted/null for none. Compatible installed catalog ID; lowercase letters, digits and hyphens, starting alphanumeric, max 80 characters. One adapter. |
+| `lora` | string or null | Omitted/null for none. Compatible installed catalog ID; lowercase letters, digits and hyphens, starting alphanumeric, max 80 characters. One adapter; use `loras` to stack several. |
 | `lora_strength` | number or null | Requires `lora`; 0–2. Omit/null for its catalog default (Realism: 0.8). |
+| `loras` | array or null | Stack 1–4 different installed adapters for the request model instead of `lora`/`lora_strength`: `[{"id":"custom-ink","strength":0.6},{"id":"realism"}]`. Applied together in order; omitted `strength` uses the catalog default and is frozen on the job when it starts. Each trigger is added once. Effects add up, so lower each strength (about 0.4–0.7). Works for photo edits on Klein/Qwen too. Chroma adapters must share one LoRA folder. |
 | `tags` | array of strings | `[]`. Up to 32 labels, each 1–64 characters after whitespace normalization. No commas/control characters; case-insensitive duplicates are removed. |
 
 | Model | Default steps | Allowed steps | Effective runtime sampling |
@@ -484,7 +485,7 @@ The same shape works for `qwen-image-2.1-turbo` when that model is serving. Its 
 | --- | --- | --- | --- |
 | POST `/v1/prompts/expand` | Generator | 200 | Preview an expanded description without creating an image job. |
 
-Body: required `prompt` (nonblank string, max 4000 characters), optional `lora` (ID/null), `lora_strength` (0–2/null, requires a LoRA), `task` (`generate` default or `edit`) and `preserve` (edit only, max 1000 characters). Other fields are rejected. Adapter selection accounts for its configured trigger in token budgeting.
+Body: required `prompt` (nonblank string, max 4000 characters), optional `lora` (ID/null), `lora_strength` (0–2/null, requires a LoRA) or `loras` (stack, as for generation), `task` (`generate` default or `edit`) and `preserve` (edit only, max 1000 characters). Other fields are rejected. Adapter selection accounts for its configured trigger in token budgeting.
 
 ```sh
 curl --fail-with-body http://localhost:5742/v1/prompts/expand \
@@ -559,7 +560,8 @@ Response has `object:"list"`, `data[]`, matching `total`, `limit`, `offset`, `ha
 | `prompt`, `model`, `size` | strings, optional | Saved generation details. |
 | `width`, `height`, `seed`, `steps` | integers, optional | Image dimensions and saved generation settings. |
 | `generation_seconds` | number, optional | Saved render time. |
-| `lora` | object, optional | Adapter `id`, `name` and `strength` when recorded. |
+| `lora` | object, optional | Adapter `id`, `name` and `strength` when one was recorded. |
+| `loras` | array, optional | Each stacked adapter's `id`, `name` and `strength`, in order, when several were used. |
 | `metadata` | object, detail only | Full saved JSON generation record, when readable. Not included by the list schema. |
 
 GET detail returns **404** for unknown/missing images. PATCH tags requires `{"tags":["Winter","Campaign"]}`; `{"tags":[]}` clears them. It uses the same normalization/limits as initial tags. Changes are stored atomically in the owning model's image index without modifying PNG/sidecar. Unknown images return **404**, invalid tags **422**, and unwritable storage **503**.

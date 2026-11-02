@@ -72,7 +72,7 @@ class QueuePage(BaseModel):
 
 class LoRAEntry(BaseModel):
     model_config=ConfigDict(extra='allow')
-    id:str=Field(description='Adapter ID to pass as request.lora. Use null or omit lora for the base model.')
+    id:str=Field(description='Adapter ID to pass as request.lora, or as {"id":...} items of request.loras to stack up to 4. Omit both for the base model.')
     name:str
     filename:str
     models:list[str]

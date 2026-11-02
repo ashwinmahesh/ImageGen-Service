@@ -158,7 +158,7 @@ This screenshot uses simulated demonstration images; its timing is not a benchma
 
 A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, paint or drag rectangles on the source preview to switch automatically to a selected-area edit; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
 
-Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters). To download or import your own compatible LoRA, run `make setup-lora`; its weights and personal catalog stay outside tracked code, so you can keep updating with `git pull`. Follow [Add your own LoRA](#add-your-own-lora).
+Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Select **＋ Add another LoRA** to stack up to four, applied in order with their own strengths; their effects add up, so lower each one (about 0.4–0.7) when combining. The same picker appears when editing photos with Klein or Qwen. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters). To download or import your own compatible LoRA, run `make setup-lora`; its weights and personal catalog stay outside tracked code, so you can keep updating with `git pull`. Follow [Add your own LoRA](#add-your-own-lora).
 
 ### Make iteration easier to compare and repeat
 
@@ -195,7 +195,7 @@ The API names below map to the webpage controls.
 | Seed | `seed` | Leave blank/omit for random. Reuse a returned seed to compare setting changes; a seed alone does not guarantee the same image across models/settings. |
 | Reference photo | `reference_image` | One absolute path on the server's Mac. The UI also uploads photos for you. Upload limits: 20 MiB and 40 megapixels. |
 | Keep the original | `image_strength` | Z-Image/Chroma variations only: [0,1), default 0.6; higher preserves more. Omit for Klein/Qwen instruction editing; the webpage hides it. All references require at least 2 steps. |
-| Style adapter | `lora`, `lora_strength` | Optional compatible installed LoRA; strength 0–2. Choose an ID from the API catalog. Configured trigger words are added automatically. |
+| Style adapter | `lora`, `lora_strength`, or `loras` | Optional compatible installed LoRA; strength 0–2. Choose an ID from the API catalog, or send up to 4 as `loras:[{"id":…,"strength":…}]` to stack them. Configured trigger words are added automatically. |
 | Tags | `tags` | Optional labels for gallery search. UI: comma-separated text. API: an array such as `["Forest","Watercolor"]`. Editable later. |
 | Save location | `output_dir` | Absolute folder or `~/...` on the server's Mac. Omit to use the model's images folder. |
 | Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false to join the end of the queue. |
@@ -239,7 +239,7 @@ For an optional Realism LoRA on Z-Image, run `make download-realism MODEL=z-imag
 
 You can download a LoRA from Hugging Face or import one you already have. Your adapters and their settings are saved separately from project code, so `git pull` keeps them intact.
 
-1. Run `make setup` for the base model first. The custom importer currently supports **Z-Image Turbo, Chroma HD and Chroma Flash**; Klein/Qwen adapter formats are not supported by this installer.
+1. Run `make setup` for the base model first. The custom importer supports **Z-Image Turbo, Chroma HD/Flash, FLUX.2 Klein 4B/9B and Qwen-Image 2.1 Turbo**. Klein and Qwen adapters also work when editing photos. Qwen-Image 2.1 needs LoRAs trained for 2.1 in the PEFT/diffusers `lora_A`/`lora_B` format; adapters for the original Qwen-Image or Qwen-Image-Edit do not fit. Klein 4B and 9B adapters are not interchangeable.
 2. Find a **LoRA `.safetensors` file trained for that model**. Check the creator's license, trigger words and recommended strength. A LoRA for a different model family will not work just because it has the same file extension.
 3. In the project folder, run:
 

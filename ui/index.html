@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2313b2ba%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23082c30%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%23082c30%22%2F%3E%3C%2Fsvg%3E">
   <style>
 
+    .lora-stack{display:grid;gap:8px;margin-top:10px}.lora-stack:empty{display:none}.lora-row{display:grid;grid-template-columns:minmax(0,1fr) 80px 42px;gap:8px;align-items:center}.lora-row .lora-remove{height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center}.lora-remove svg{width:16px;height:16px}.add-lora{margin-top:10px}.add-lora[hidden]{display:none}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}
     :focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit}
@@ -59,10 +60,12 @@
         </section>
         <details id="expanded-details" hidden><summary id="expanded-title">Expanded description</summary><p id="expanded-text" style="white-space:pre-wrap;color:var(--muted)"></p><p class="hint" id="expanded-info"></p><button type="button" class="secondary" id="use-expansion">Use this description</button></details>
         <div class="field" id="lora-section">
-          <div class="help-label"><label for="lora">Style LoRA</label><button type="button" class="help-button" aria-label="Help with Style LoRA" data-help="A LoRA is an optional model adapter that influences the image’s style or appearance. Choose None to use the original model."><span aria-hidden="true">?</span></button></div>
+          <div class="help-label"><label for="lora">Style LoRA</label><button type="button" class="help-button" aria-label="Help with Style LoRA" data-help="A LoRA is an optional model adapter that influences the image’s style or appearance. Choose None to use the original model, or add up to 4 to combine them; they apply in order."><span aria-hidden="true">?</span></button></div>
           <select id="lora" aria-describedby="lora-hint"><option value="">None — original model</option></select>
           <p class="hint" id="lora-hint">Loading local styles…</p>
           <div id="lora-options" hidden><div class="help-label"><label for="lora-strength">LoRA strength</label><button type="button" class="help-button" aria-label="Help with LoRA strength" data-help="Higher values strengthen the selected adapter’s influence (0–2). Start with its default and adjust gradually."><span aria-hidden="true">?</span></button></div><input id="lora-strength" type="number" min="0" max="2" step="0.05" value="0.8"><p class="hint">Lower values give a lighter style influence. Separate from keeping a reference photo.</p></div>
+          <div id="lora-stack" class="lora-stack"></div>
+          <button type="button" class="secondary add-lora" id="add-lora" hidden>＋ Add another LoRA</button>
         </div>
         <section class="reference-section" id="reference-section" aria-label="Reference photo">
           <div class="help-label"><h2 class="reference-title" id="reference-title">Reference photo <span class="optional">(optional)</span></h2><button type="button" class="help-button" id="reference-help" aria-label="Help with reference photo" data-help="Use a photo as the starting point for a variation. The result keeps its aspect ratio; precise localized edits and exact identity are not guaranteed."><span aria-hidden="true">?</span></button></div>
@@ -133,12 +136,13 @@
     function newWorkflowState(owner){
       const fields=structuredClone(initialWorkflowFields);fields['model-choice'].value='';
       if(owner==='edit'){fields.lora.value='';fields['reference-size'].value='auto';fields.steps.value='';}
-      return {initialized:false,fields,details:{},referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,maskStrokes:[],maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
+      return {initialized:false,fields,details:{},extraLoras:[],referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,referenceSrc:null,referenceHidden:true,referenceName:'',referenceInfo:'',usingReferenceSizing:false,maskStrokes:[],maskUpload:null,savedMaskPath:null,batch:null,selectedOption:0,lastSeed:null,expansionPreview:null,expansionHidden:true,expansionOpen:false,pendingJob:null,progressText:'',notices:{error:{text:'',hidden:true},'import-note':{text:'',hidden:true},announcement:{text:'',hidden:false}}};
     }
     const workflowStates={generate:newWorkflowState('generate'),edit:newWorkflowState('edit')};
     function captureWorkflow(){
       const state=workflowStates[workflow];state.initialized=true;state.fields=readWorkflowFields();
       if(pendingLora){state.fields.lora.value=pendingLora.id;state.fields['lora-strength'].value=pendingLora.strength;}
+      state.extraLoras=pendingLora ? [...(pendingLora.extra || [])] : readExtraLoras();
       state.details=Object.fromEntries([...$('form').querySelectorAll('details')].map(detail=>[detail.dataset.workflowDetail,detail.open]));
       Object.assign(state,{referenceFile,referenceUpload,referencePreviewURL,referenceDimensions,usingReferenceSizing,maskStrokes:structuredClone(maskStrokes),maskUpload,savedMaskPath,batch:displayedBatch,selectedOption,lastSeed,expansionPreview,expansionHidden:$('expanded-details').hidden,expansionOpen:$('expanded-details').open,referenceSrc:$('reference-preview').getAttribute('src'),referenceHidden:$('reference-card').hidden,referenceName:$('reference-name').textContent,referenceInfo:$('reference-info').textContent});
       for(const id of Object.keys(state.notices))state.notices[id]={text:$(id).textContent,hidden:$(id).hidden};
@@ -169,7 +173,7 @@
       for(const [id,notice] of Object.entries(state.notices)){$(id).textContent=notice.text;$(id).hidden=notice.hidden;}
       expansionPreview=state.expansionPreview;$('expanded-details').hidden=true;$('expanded-details').open=state.expansionOpen;
       if(expansionPreview && !state.expansionHidden){showExpansion(expansionPreview);$('expanded-details').open=state.expansionOpen;}
-      loadLoRAs({id:sameModel?state.fields.lora.value:'',strength:state.fields['lora-strength'].value});
+      loadLoRAs({id:sameModel?state.fields.lora.value:'',strength:state.fields['lora-strength'].value,extra:sameModel?state.extraLoras:[]});
       updateReferenceSizing();updateVariationControls();updateSourceCanvas();updateWorkflowPreview();
       if(displayedBatch){renderImageOptions();selectImageOption(Math.min(selectedOption,displayedBatch.result.data.length-1),true).catch(error=>{if(workflow===owner && workflowVersion===version)showError(error.message);});}
     }
@@ -256,7 +260,7 @@
       $('preview-expansion').textContent=next==='edit' ? 'Preview refinement' : 'Preview expansion';
       $('use-expansion').textContent=next==='edit' ? 'Use this instruction' : 'Use this description';
       $('image-count-hint').textContent=next==='edit' ? 'Alternate attempts at the same edit. The source framing and requested changes stay the same.' : 'Same prompt, different seeds. Options render one at a time and appear together for comparison.';
-      $('lora-section').hidden=next==='edit' || !lorasEnabled; $('base-only-mode').hidden=next==='edit' || lorasEnabled;
+      $('lora-section').hidden=!lorasEnabled; $('base-only-mode').hidden=lorasEnabled;
       restoreWorkflow();
     }
     $('mode-generate').addEventListener('click',()=>setWorkflow('generate'));
@@ -407,20 +411,71 @@
     let loraCatalog = [], lorasEnabled = true, expansionEnabled = null, previewingExpansion = false, expansionPreview = null;
     function setLoRAMode(enabled) {
       lorasEnabled = enabled;
-      $('lora-section').hidden = !enabled || workflow === 'edit';
-      $('base-only-mode').hidden = enabled || workflow==='edit';
-      if (!enabled) { $('lora').value = ''; $('lora-options').hidden = true; }
+      $('lora-section').hidden = !enabled;
+      $('base-only-mode').hidden = enabled;
+      if (!enabled) { $('lora').value = ''; $('lora-options').hidden = true; $('lora-stack').replaceChildren(); $('add-lora').hidden = true; }
+    }
+    // The main picker is the first adapter; "Add another LoRA" rows stack more after it, in order.
+    const MAX_LORAS = 4;
+    function readExtraLoras(){return [...$('lora-stack').children].map(row=>({id:row.querySelector('select').value,strength:row.querySelector('input').value})).filter(item=>item.id);}
+    function chosenLoras(){
+      if(!lorasEnabled || $('lora-section').hidden || !$('lora').value)return [];
+      return [{id:$('lora').value,strength:Number($('lora-strength').value)},...readExtraLoras().map(item=>({id:item.id,strength:Number(item.strength)}))];
+    }
+    function addLoraFields(payload){
+      const stack=chosenLoras();
+      if(stack.length===1){payload.lora=stack[0].id;payload.lora_strength=stack[0].strength;}
+      else if(stack.length)payload.loras=stack;
+    }
+    function requestLoras(request){return request?.loras ? request.loras.map(item=>({id:item.id,strength:item.strength})) : request?.lora ? [{id:request.lora,strength:request.lora_strength}] : [];}
+    function galleryLoras(item){return (item.loras || (item.lora ? [item.lora] : [])).map(entry=>({id:entry.id,strength:entry.strength}));}
+    function trashIcon(){
+      const icon=document.createElementNS('http://www.w3.org/2000/svg','svg'),path=document.createElementNS(icon.namespaceURI,'path');
+      for(const [key,value] of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.6','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))icon.setAttribute(key,value);
+      path.setAttribute('d','M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6');icon.append(path);return icon;
+    }
+    function addLoraRow(choice={}){
+      const row=document.createElement('div'),select=document.createElement('select'),strength=document.createElement('input'),remove=document.createElement('button');
+      row.className='lora-row';select.append(new Option('Choose a LoRA',''));
+      for(const item of loraCatalog)select.append(new Option(item.name+(item.available ? '' : ' (download required)'),item.id));
+      select.value=loraCatalog.some(item=>item.id===choice.id && item.available) ? choice.id : '';
+      Object.assign(strength,{type:'number',min:'0',max:'2',step:'0.05'});
+      const adapter=loraCatalog.find(item=>item.id===select.value);
+      strength.value=Number.isFinite(Number(choice.strength)) && choice.strength!=='' && choice.strength!=null ? choice.strength : adapter?.default_strength ?? 0.6;
+      remove.type='button';remove.className='secondary lora-remove';remove.title='Remove this LoRA';remove.append(trashIcon());
+      select.addEventListener('change',()=>{const item=loraCatalog.find(entry=>entry.id===select.value);if(item)strength.value=item.default_strength;updateLoRA(false);});
+      remove.addEventListener('click',()=>{const next=row.nextElementSibling?.querySelector('select');row.remove();updateLoRA(false);(next || ($('add-lora').hidden ? $('lora') : $('add-lora'))).focus();});
+      row.append(select,strength,remove);$('lora-stack').append(row);return select;
+    }
+    // Select a saved stack; false when some of its adapters are not installed for this model.
+    function applyLoraStack(stack=[]){
+      const usable=stack.filter(choice=>loraCatalog.some(item=>item.id===choice.id && item.available)).slice(0,MAX_LORAS);
+      $('lora-stack').replaceChildren();$('lora').value=usable[0]?.id || '';
+      const first=loraCatalog.find(item=>item.id===usable[0]?.id);
+      if(first)$('lora-strength').value=Number.isFinite(usable[0].strength) ? usable[0].strength : first.default_strength;
+      for(const choice of usable.slice(1))addLoraRow(choice);
+      updateLoRA(false);return usable.length===stack.length;
     }
     function updateLoRA(reset = true) {
       const selected = loraCatalog.find(item => item.id === $('lora').value);
       $('lora-options').hidden = !selected;
       if (selected && reset) $('lora-strength').value = selected.default_strength;
-      $('lora-hint').textContent = selected ? `${selected.trigger_prompt ? 'Added to prompt automatically: ' + selected.trigger_prompt + '.' : 'The selected LoRA is loaded directly. No prompt keyword is configured.'} ${selected.note || ''}` :
-        loraCatalog.some(item => !item.available) ? 'Downloaded styles appear here. Import the compatible Z-Image weights first.' : 'Choose an installed style, or use the original model.';
+      if (!selected) $('lora-stack').replaceChildren();
+      const rows=[...$('lora-stack').children], selects=[$('lora'),...rows.map(row=>row.querySelector('select'))], chosen=selects.map(select=>select.value);
+      // Each adapter can appear once in a stack.
+      for (const [index,select] of selects.entries())
+        for (const option of select.options) { const item=loraCatalog.find(entry=>entry.id===option.value); if (item) option.disabled=!item.available || chosen.some((id,position)=>position!==index && id===option.value); }
+      rows.forEach((row,index)=>{const label=`LoRA ${index+2}`;row.querySelector('select').setAttribute('aria-label',label);row.querySelector('input').setAttribute('aria-label',label+' strength');row.querySelector('button').setAttribute('aria-label','Remove '+label);});
+      $('add-lora').hidden=!selected || rows.length>=MAX_LORAS-1 || !loraCatalog.some(item=>item.available && !chosen.includes(item.id));
+      const stack=selects.map(select=>loraCatalog.find(item=>item.id===select.value)).filter(Boolean), triggers=[...new Set(stack.map(item=>item.trigger_prompt).filter(Boolean))];
+      $('lora-hint').textContent = !selected ? (!chosenModel() ? 'Choose a model to see its LoRAs.' : !loraCatalog.length ? 'No LoRAs are installed for this model yet. Add one with make setup-lora.' : loraCatalog.some(item => !item.available) ? 'Downloaded styles appear here. Import the compatible weights first.' : 'Choose an installed style, or use the original model.') :
+        stack.length>1 ? `${stack.length} LoRAs stacked, applied in this order. ${triggers.length ? 'Added to prompt automatically: '+triggers.join(', ')+'.' : 'No prompt keywords are configured.'} Their effects add up, so lower each strength (around 0.4–0.7) if results look overdone.` :
+        `${selected.trigger_prompt ? 'Added to prompt automatically: ' + selected.trigger_prompt + '.' : 'The selected LoRA is loaded directly. No prompt keyword is configured.'} ${selected.note || ''}`;
     }
-    async function loadLoRAs(preferred={id:$('lora').value,strength:$('lora-strength').value}) {
+    $('add-lora').addEventListener('click',()=>{addLoraRow();updateLoRA(false);$('lora-stack').lastElementChild.querySelector('select').focus();});
+    async function loadLoRAs(preferred={id:$('lora').value,strength:$('lora-strength').value,extra:readExtraLoras()}) {
       const selected=chosenModel(), owner=workflow, version=++loraRequestVersion; pendingLora=preferred;
-      $('lora').replaceChildren(new Option('None — original model','')); loraCatalog=[]; updateLoRA();
+      $('lora').replaceChildren(new Option('None — original model','')); $('lora-stack').replaceChildren(); loraCatalog=[]; updateLoRA();
       if (!selected) { pendingLora=null; return; }
       try {
         const response = await fetch('/v1/loras?'+new URLSearchParams({model:selected}), {cache: 'no-store', signal: AbortSignal.timeout(5000)});
@@ -436,6 +491,9 @@
         }
         if (loraCatalog.some(item=>item.id===preferred.id && item.available)) $('lora').value=preferred.id;
         if (preferred.strength!==undefined) $('lora-strength').value=preferred.strength;
+        const restored=new Set([$('lora').value]);
+        for (const choice of $('lora').value ? preferred.extra || [] : [])
+          if (restored.size<MAX_LORAS && !restored.has(choice.id) && loraCatalog.some(item=>item.id===choice.id && item.available)) { restored.add(choice.id); addLoraRow(choice); }
         pendingLora=null;updateLoRA(false);
       } catch { if(version===loraRequestVersion && workflow===owner){ pendingLora=null;$('lora-hint').textContent = 'Could not load styles. Reload after checking the server.'; } }
     }
@@ -577,7 +635,7 @@
       $('reference-card').hidden=false;$('reference-preview').src=result.url;$('choose-photo').textContent='Change photo';$('strength').value='0.6';
       $('prompt').value=workflow==='edit' ? '' : result.prompt;
       if(result.expanded)$('expand-prompt').checked=false;
-      $('lora').value=workflow==='generate' ? result.lora : '';updateLoRA(false);if(result.lora)$('lora-strength').value=result.lora_strength;
+      applyLoraStack(result.loras);
       $('reference-size').value='auto';updateReferenceSizing();updateVariationControls();updateSourceCanvas();
       $('announcement').textContent='Image selected for editing. Describe the changes, then create a new version.';
       $('prompt').focus();$('prompt').select();
@@ -593,7 +651,7 @@
       if (varyingCompositions()) payload.vary_prompt=true;
       if ($('live-preview').checked) payload.live_preview=true;
       payload.tags = $('tags').value.split(',').map(tag => tag.trim()).filter(Boolean);
-      if (workflow!=='edit' && lorasEnabled && $('lora').value) { payload.lora = $('lora').value; payload.lora_strength = Number($('lora-strength').value); }
+      addLoraFields(payload);
       const selectedFile = referenceFile, savedReference = referenceUpload, referencePath = $('reference').value.trim();
       if (workflow==='edit' && !selectedFile && !referencePath) { showError('Choose the photo to edit first.'); return; }
       if ((selectedFile || referencePath) && payload.steps < 2) { showError('Use at least 2 steps with a reference photo.'); $('steps').closest('details').open = true; $('steps').focus(); return; }
@@ -604,6 +662,7 @@
       generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
       for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = true;
+      for (const control of $('lora-stack').querySelectorAll('select,input,button')) control.disabled = true; $('add-lora').disabled = true;
       $('announcement').textContent = 'Saving your image request…';
       try {
         if (selectedFile) {
@@ -635,6 +694,7 @@
         $('error').hidden = false;
       } finally {
         for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = false;
+        for (const control of $('lora-stack').querySelectorAll('select,input,button')) control.disabled = false; $('add-lora').disabled = false; updateLoRA(false);
         generating = false; updateButton(); await checkHealth();
       }
     });
@@ -659,7 +719,7 @@
       if (!prompt) { showError('Describe the image before previewing expansion.'); return; }
       const payload={prompt,model:chosenModel()};
       if (workflow==='edit') { payload.task='edit'; if ($('preserve').value.trim()) payload.preserve=$('preserve').value.trim(); }
-      if (workflow!=='edit' && lorasEnabled && $('lora').value) { payload.lora=$('lora').value; payload.lora_strength=Number($('lora-strength').value); }
+      addLoraFields(payload);
       previewingExpansion=true; $('preview-expansion').disabled=true; updateButton(); $('error').hidden=true;
       $('preview-expansion').textContent=workflow==='edit' ? 'Refining…' : 'Expanding…';
       try {
@@ -694,7 +754,8 @@
       set('prompt',request.prompt);set('preserve',owner==='edit' ? request.preserve || '' : '');
       set('image-count',request.n || 1);set('steps',request.steps ?? '');set('seed',request.seed ?? '');
       set('tags',(request.tags || []).join(', '));set('output-dir',request.output_dir || '');
-      set('lora',owner==='edit' ? '' : request.lora || '');set('lora-strength',request.lora_strength);set('strength',request.image_strength);
+      const loras=requestLoras(request);
+      set('lora',loras[0]?.id || '');set('lora-strength',loras[0]?.strength);state.extraLoras=loras.slice(1);set('strength',request.image_strength);
       fields['expand-prompt'].checked=!!request.expand_prompt;fields['vary-prompt'].checked=!!request.vary_prompt;
       fields['generate-immediately'].checked=!!job.generate_immediately;fields['live-preview'].checked=!!request.live_preview;
       const size=request.size || (reference ? 'auto' : '1024x1024'),edge=/^(\d+)x\1$/.exec(size);
@@ -786,7 +847,7 @@
       for (const [position,card] of [...$('image-options').children].entries()) card.setAttribute('aria-pressed',String(position===index));
       lastSeed=item.seed;
       $('edit').textContent=modelCatalog.find(profile=>profile.id===item.model)?.reference_mode==='edit' ? 'Edit image' : 'Make a variation';
-      lastResult={model:item.model,file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,lora:payload.lora || '',lora_strength:payload.lora_strength};
+      lastResult={model:item.model,file_path:item.file_path,url:url.href,prompt:item.prompt_expansion?.expanded_prompt || payload.prompt,expanded:!!item.prompt_expansion,size:item.size,loras:requestLoras(payload)};
       if(!preserveExpansion){if(item.prompt_expansion)showExpansion(item.prompt_expansion);else{$('expanded-details').hidden=true;expansionPreview=null;}}
       const count=batch.request.n || 1;
       $('result-info').textContent=(count>1 ? `Option ${item.candidate_index || index+1} of ${count} · ` : '')+`${item.size.replace('x',' × ')} · ${batch.result.generation_seconds}s${count>1 ? ' total' : ''} · Seed ${lastSeed}`;
@@ -891,7 +952,7 @@
           referenceDimensions=[item.width,item.height].every(value=>Number.isFinite(value) && value>0) ? [item.width,item.height] : null;
           $('reference-name').textContent='Gallery photo';$('reference-info').textContent=(item.size || 'PNG')+' · ready for editing';
           $('reference-card').hidden=false;$('reference-preview').src=url.href;$('choose-photo').textContent='Change photo';
-          $('prompt').value='';$('preserve').value='';$('seed').value='';$('image-count').value='1';$('edit-area').value='whole';$('lora').value='';
+          $('prompt').value='';$('preserve').value='';$('seed').value='';$('image-count').value='1';$('edit-area').value='whole';applyLoraStack([]);
           $('tags').value=(item.tags || []).join(', ');$('reference-size').value='auto';
           expansionPreview=null;$('expanded-details').hidden=true;
           updateReferenceSizing();updateVariationControls();updateSourceCanvas();updateWorkflowPreview();
@@ -916,13 +977,9 @@
         if (Number.isInteger(item.seed) && item.seed >= 0 && item.seed <= 4294967295) $('seed').value = item.seed;
         if (sameModel && Number.isInteger(item.steps) && item.steps >= 1 && item.steps <= maxSteps) $('steps').value = item.steps;
         if (metadata.requested_size!=='auto' && ![metadata.requested_size, metadata.generation_size, item.size].some(selectSize)) warnings.push('Saved dimensions are unavailable; using the current size.');
-        $('lora').value = '';
-        if (sameModel && item.lora) {
-          const adapter = loraCatalog.find(entry => entry.id === item.lora.id && entry.available);
-          if (lorasEnabled && adapter) { $('lora').value = adapter.id; if (Number.isFinite(item.lora.strength)) $('lora-strength').value = item.lora.strength; }
-          else warnings.push('The saved style is unavailable in this server mode; the original model is selected.');
-        }
-        updateLoRA(false);
+        const savedLoras = sameModel ? galleryLoras(item) : [];
+        if (!applyLoraStack(lorasEnabled ? savedLoras : []) || (savedLoras.length && !lorasEnabled))
+          warnings.push(savedLoras.length>1 ? 'Some saved styles are unavailable in this server mode; only the available ones are selected.' : 'The saved style is unavailable in this server mode; the original model is selected.');
         clearPhoto();
         if (mode === 'reference') {
           $('reference').value = item.file_path; referenceDimensions = [item.width, item.height].every(n => Number.isFinite(n) && n > 0) ? [item.width, item.height] : null;
@@ -944,7 +1001,7 @@
         updateReferenceSizing();
         if (mode === 'settings') {
           // Preview the image whose settings were reused.
-          const batch={id:metadata.job_id || null,request:{prompt:item.prompt || '',n:1,task:metadata.task==='edit' ? 'edit' : 'generate',lora:item.lora?.id,lora_strength:item.lora?.strength},
+          const batch={id:metadata.job_id || null,request:{prompt:item.prompt || '',n:1,task:metadata.task==='edit' ? 'edit' : 'generate',loras:galleryLoras(item)},
             result:{generation_seconds:item.generation_seconds ?? metadata.seconds ?? 0,data:[{model:item.model,file_path:item.file_path,url:url.href,seed:item.seed,size:item.size || `${item.width}x${item.height}`,prompt_expansion:metadata.prompt_expansion || null,candidate_index:1}]}};
           displayedBatch=batch;selectedOption=0;shownJobs[workflow]=batch.id;renderImageOptions();
           await selectImageOption(0,true);

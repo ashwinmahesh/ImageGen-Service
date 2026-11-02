@@ -46,6 +46,12 @@ def expansion_capability(enabled, image_model=None):
             'note': 'Keeps your description verbatim and appends visual detail. Does not inspect reference photos. Opt in with expand_prompt:true; add vary_prompt:true for distinct batch compositions. No automatic compression.'}
 
 
+def adapter_triggers(selection):
+    """Trigger words of one adapter or a stack, each once, for the expansion guidance."""
+    adapters = selection if isinstance(selection, list) else [selection] if selection else []
+    return ', '.join(dict.fromkeys(adapter['trigger_prompt'] for adapter in adapters if adapter.get('trigger_prompt')))
+
+
 def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None, masked=False):
     return _expand(prompt,project=project,image_model=image_model,image_weights=image_weights,
                    selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve,masked=masked)
@@ -62,7 +68,7 @@ def _expand(prompt, *, project, image_model, image_weights, selection=None, inhe
     folder = check_assets(project)
     command = [sys.executable, str(Path(__file__).with_name('prompt_expander.py')), '--worker']
     request = {'prompt': prompt, 'weights': str(folder), 'image_model': image_model,
-               'image_weights': str(image_weights), 'trigger': (selection or {}).get('trigger_prompt', '')}
+               'image_weights': str(image_weights), 'trigger': adapter_triggers(selection)}
     if task=='edit':
         if count is not None:
             raise ValueError('Photo edits cannot use composition variation')

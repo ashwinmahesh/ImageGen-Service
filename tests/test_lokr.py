@@ -73,7 +73,8 @@ class LoKrTest(unittest.TestCase):
     def test_importer_accepts_z_image_lokr_but_not_for_chroma(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'lighting.safetensors'
-            save_file(lokr_tensors(), str(path), metadata={'ss_base_model_version': 'zimage'})
+            # Real Z-Image width: 8x8 ⊗ 480x480 factors make a 3840-wide projection.
+            save_file(lokr_tensors(rows=(8, 480), cols=(8, 480)), str(path), metadata={'ss_base_model_version': 'zimage'})
             self.assertEqual(inspect_adapter(path, 'z-image-turbo')['tensor_count'], 3)
             with self.assertRaisesRegex(ValueError, 'does not contain LoRA tensors'):
                 inspect_adapter(path, 'chroma1-hd')

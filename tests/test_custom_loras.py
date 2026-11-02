@@ -117,7 +117,7 @@ class CustomLoRATest(unittest.TestCase):
     def test_input_validation_and_unvalidated_models_fail_before_writing(self):
         for options in [{'identifier':'../escape'},{'name':'Bad\nName'},{'strength':'nan'},{'strength':2.1},{'expected_sha256':'short'},{'provenance':{'id':'realism'}}]:
             with self.subTest(options=options),self.assertRaises(ValueError):self.install(**options)
-        with self.assertRaisesRegex(ValueError,'Unsupported'):lora_setup.register(self.project,'qwen-image-2.1-turbo',self.source,identifier='ink',name='Ink')
+        with self.assertRaisesRegex(ValueError,'Unsupported'):lora_setup.register(self.project,'flux1-dev',self.source,identifier='ink',name='Ink')
         self.assertFalse(self.store.exists())
         for value in ['https://example.com/model.safetensors','https://huggingface.co/org/repo/blob/main/../bad.safetensors','https://huggingface.co/org/repo/blob/main/bad.safetensors?token=secret']:
             with self.subTest(value=value),self.assertRaises(ValueError):lora_setup.parse_source(value)

@@ -31,7 +31,7 @@ from model_profiles import PROFILES, model_details
 from photo_workflows import supported_tasks, edit_prompt, edit_prompt_fits, describe_mask_boxes, MAX_PROMPT_CHARACTERS, PROMPT_TOO_LONG
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
-from lora_catalog import list_loras, resolve_lora, effective_prompt
+from lora_catalog import list_loras, resolve_lora, effective_prompt, adapter_list, adapter_identity
 from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL, KEEP_WEIGHTS_SETTING
@@ -117,8 +117,39 @@ def ready_or_error(identifier):
     except ValueError as error:raise HTTPException(422,str(error)) from None
 
 
+MAX_STACKED_LORAS=4
+
+
+def wants_lora(payload):
+    return payload.lora is not None or bool(payload.loras)
+
+
+def resolve_adapters(payload,**options):
+    """One adapter as a dict, a stack (loras) as a list in request order, or None."""
+    if payload.loras:
+        return [resolve_lora(item.id,item.strength,**options) for item in payload.loras]
+    return resolve_lora(payload.lora,payload.lora_strength,**options)
+
+
 def resolve_for_model(payload):
-    return resolve_lora(payload.lora,payload.lora_strength,**({'model':payload.model} if payload.model!=API_MODEL else {}))
+    return resolve_adapters(payload,**({'model':payload.model} if payload.model!=API_MODEL else {}))
+
+
+def check_adapter_fields(payload):
+    if payload.lora is None and payload.lora_strength is not None:
+        raise ValueError('lora_strength requires lora')
+    if payload.loras is not None:
+        if payload.lora is not None:
+            raise ValueError('Use lora for one adapter or loras to stack several, not both')
+        identifiers=[item.id for item in payload.loras]
+        if len(set(identifiers))!=len(identifiers):
+            raise ValueError('Each stacked LoRA must be a different adapter')
+
+
+class LoraChoice(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Installed adapter ID from GET /v1/loras for the request model.")
+    strength: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False, description="Adapter influence, 0–2. Omit/null to use the catalog default.")
 
 
 def initialize_service():
@@ -228,8 +259,9 @@ class GenerateRequest(BaseModel):
     steps: int = Field(default=PROFILE["steps"], ge=1, le=max(item["max_steps"] for item in PROFILES.values()), strict=True, description="Sampling steps; omitted uses the requested model default. GET /v1/models provides each model’s default_steps and max_steps; values beyond that model’s limit are rejected.")
     seed: int | None = Field(default=None, ge=0, le=2**32 - 1, strict=True, description="Omit or use null for a random seed. The actual seed is returned per image. With n>1 this is the first seed; later options increment it modulo 2^32.")
     response_format: Literal["b64_json", "url"] = "b64_json"
-    lora: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Optional installed adapter ID from GET /v1/loras. Requires /health loras_enabled=true; base-only servers reject non-null adapters. Omit or use null for no LoRA. One adapter per request; model families are not interchangeable.", examples=["realism"])
+    lora: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,79}$", description="Optional installed adapter ID from GET /v1/loras. Requires /health loras_enabled=true; base-only servers reject non-null adapters. Omit or use null for no LoRA. Use loras instead to stack several; model families are not interchangeable.", examples=["realism"])
     lora_strength: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False, description="Adapter influence, 0–2. Requires lora. Omit/null to use the catalog default (Realism: 0.8). This is separate from reference-photo preservation strength.")
+    loras: list[LoraChoice] | None = Field(default=None, min_length=1, max_length=MAX_STACKED_LORAS, description="Stack up to 4 installed adapters for the request model, applied together in this order, each with its own strength. Use instead of lora/lora_strength. Each adapter's trigger words are added to the prompt once. Strengths add up, so lower them (about 0.4–0.7 each) when stacking. Chroma adapters must share one LoRA folder.")
     output_dir: str = Field(
         default=str(IMAGE_DIR), min_length=1, max_length=4096,
         description=("Directory on the server's Mac in which to save the PNG and JSON metadata. "
@@ -288,8 +320,7 @@ class GenerateRequest(BaseModel):
             raise ValueError("Reference-image generation requires at least 2 steps")
         if self.reference_image is None and "image_strength" in self.model_fields_set:
             raise ValueError("image_strength requires reference_image")
-        if self.lora is None and self.lora_strength is not None:
-            raise ValueError("lora_strength requires lora")
+        check_adapter_fields(self)
         if self.vary_prompt and (not self.expand_prompt or self.n<2):
             raise ValueError('vary_prompt requires expand_prompt:true and n>=2')
         return self
@@ -310,7 +341,7 @@ class GenerateRequest(BaseModel):
         if not value.strip():
             raise ValueError("Prompt must contain text")
         if "<lora:" in value.lower():
-            raise ValueError("Select LoRAs with the lora and lora_strength fields, not prompt tags")
+            raise ValueError("Select LoRAs with the lora or loras fields, not prompt tags")
         return value
 
     @field_validator("size")
@@ -507,10 +538,10 @@ def generate(payload, job=None):
 
 def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
     try:
-        if payload.lora is not None and not app.state.loras_enabled:
+        if wants_lora(payload) and not app.state.loras_enabled:
             raise ValueError("LoRAs are disabled for this server; restart without --no-loras to enable them")
-        selection = resolve_lora(payload.lora, payload.lora_strength) if app.state.loras_enabled else None
-        if job and selection and selection["sha256"]!=job.get("_adapter_sha"):
+        selection = resolve_adapters(payload) if app.state.loras_enabled else None
+        if job and selection and adapter_identity(selection)!=job.get("_adapter_sha"):
             raise ValueError("The queued adapter changed; re-submit with the intended adapter")
     except (ValueError, OSError) as exc:
         raise LocalFileError(str(exc)) from exc
@@ -573,6 +604,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             composite_edit(path,geometry.image_path,mask_path)
         geometry.finish(path)
         elapsed = round(time.monotonic() - started, 2)
+        adapters = adapter_list(selection)
         metadata = {
             "backend": PROFILE["backend"], **PROFILE.get("applied", {}),
             "model": API_MODEL, "source": MODEL_ID, "revision": MODEL_REVISION,
@@ -584,7 +616,8 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             "file_path": str(final_path), "metadata_path": str(final_path.with_suffix(".json")),
             "reference_image": payload.reference_image,
             "image_strength": payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
-            "vae_tiling": tiled, "lora": selection,
+            "vae_tiling": tiled, "lora": adapters[0] if len(adapters)==1 else None,
+            **({"loras": adapters} if len(adapters)>1 else {}),
             "effective_prompt": effective_prompt(rendering_prompt, selection),
             "loras_enabled": app.state.loras_enabled,
         }
@@ -710,6 +743,7 @@ class ExpandPromptRequest(BaseModel):
     prompt: str = Field(min_length=1,max_length=MAX_PROMPT_CHARACTERS)
     lora: str | None = None
     lora_strength: float | None = Field(default=None,ge=0,le=2,allow_inf_nan=False)
+    loras: list[LoraChoice] | None = Field(default=None,min_length=1,max_length=MAX_STACKED_LORAS)
     task: Literal['generate','edit'] = 'generate'
     preserve: str | None = Field(default=None,max_length=1000)
 
@@ -720,8 +754,7 @@ class ExpandPromptRequest(BaseModel):
 
     @model_validator(mode='after')
     def strength_requires_adapter(self):
-        if self.lora is None and self.lora_strength is not None:
-            raise ValueError('lora_strength requires lora')
+        check_adapter_fields(self)
         if self.task=='edit' and 'edit' not in supported_tasks(PROFILES[self.model]):
             raise ValueError('Photo-edit instruction refinement requires an editing model')
         if self.task!='edit' and self.preserve is not None:
@@ -743,7 +776,7 @@ def expand_prompt(payload:ExpandPromptRequest):
     gpu=None
     inference_owned=False
     try:
-        if payload.lora and not app.state.loras_enabled:
+        if wants_lora(payload) and not app.state.loras_enabled:
             raise HTTPException(422,'LoRAs are disabled for this server.')
         selection=resolve_for_model(payload)
         # Same order as the image worker: accelerator, then inference lock.
@@ -796,6 +829,8 @@ def normalized_request(payload):
         data.pop('expand_prompt')
     if not data['vary_prompt']:
         data.pop('vary_prompt')
+    if data['loras'] is None:
+        data.pop('loras')
     if data['reference_image'] is None or PROFILES[payload.model].get('reference_mode')=='edit':
         data.pop('image_strength',None)
     return data
@@ -843,7 +878,7 @@ def submit_job(payload,key=None,retry_of=None):
     try:
         existing=job_store.existing(key,request_hash)
         if existing: return existing
-        if payload.lora is not None and not app.state.loras_enabled:
+        if wants_lora(payload) and not app.state.loras_enabled:
             raise HTTPException(422,'LoRAs are disabled for this server; restart without --no-loras to enable them.')
         if payload.expand_prompt and not app.state.llm_enabled:
             raise HTTPException(422,'Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion or set expand_prompt:false.')
@@ -865,7 +900,7 @@ def submit_job(payload,key=None,retry_of=None):
                 read_mask(payload.mask_image,ImageOps.exif_transpose(photo).size)
         selection=resolve_for_model(payload)
         record=job_store.enqueue(data,request_hash,key=key,
-            adapter_sha=selection['sha256'] if selection else None,retry_of=retry_of)
+            adapter_sha=adapter_identity(selection),retry_of=retry_of)
         job_worker.wake.set()
         return record
     except QueueConflict as error:
@@ -910,8 +945,8 @@ def committed_candidate(payload,job,identifier,index):
 
 
 def prepare_job_prompt(payload,job):
-    selection=resolve_for_model(payload) if payload.lora else None
-    if selection and selection['sha256']!=job.get('_adapter_sha'):
+    selection=resolve_for_model(payload) if wants_lora(payload) else None
+    if selection and adapter_identity(selection)!=job.get('_adapter_sha'):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if payload.expand_prompt:
         if not app.state.llm_enabled:
@@ -931,8 +966,8 @@ def prepare_candidate_prompts(payload,job):
     if not payload.vary_prompt:
         prepared=prepare_job_prompt(payload,job)
         return [prepared]*payload.n,[job.get('prompt_expansion')]*payload.n
-    selection=resolve_for_model(payload) if payload.lora else None
-    if selection and selection['sha256']!=job.get('_adapter_sha'):
+    selection=resolve_for_model(payload) if wants_lora(payload) else None
+    if selection and adapter_identity(selection)!=job.get('_adapter_sha'):
         raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
     if not app.state.llm_enabled:
         raise LocalFileError('Prompt expansion is disabled; restart with make serve and choose Yes for LLM expansion')
@@ -966,10 +1001,12 @@ def execute_job_now(job):
         data=normalized_request(payload)
         data['seed']=payload.seed if payload.seed is not None else secrets.randbelow(2**32)
         selection=resolve_for_model(payload)
-        if selection and job.get('_adapter_sha') and selection['sha256']!=job['_adapter_sha']:
+        if selection and job.get('_adapter_sha') and adapter_identity(selection)!=job['_adapter_sha']:
             raise LocalFileError('The queued adapter changed; re-submit with the intended adapter')
-        if selection: data['lora_strength']=selection['strength']
-        frozen=job_store.prepare(job['id'],data,selection['sha256'] if selection else None)
+        # Freeze catalog-default strengths so a retry renders the same stack.
+        if isinstance(selection,list): data['loras']=[{'id':item['id'],'strength':item['strength']} for item in selection]
+        elif selection: data['lora_strength']=selection['strength']
+        frozen=job_store.prepare(job['id'],data,adapter_identity(selection))
         job.update(frozen)
         payload=GenerateRequest.model_validate(job['request'])
     rendered=[]
@@ -1048,7 +1085,7 @@ def job_response(job,request,*,include_result=True,ready=None):
     if job['status']=='queued':
         if item['model'] not in (ready_models() if ready is None else ready):item['blocked_reason']='Model not set up or storage unavailable; run make setup MODEL='+item['model']
         elif job['request'].get('expand_prompt') and not app.state.llm_enabled:item['blocked_reason']='Prompt expansion is disabled for this run'
-        elif job['request'].get('lora') and not app.state.loras_enabled:item['blocked_reason']='LoRAs are disabled for this run'
+        elif (job['request'].get('lora') or job['request'].get('loras')) and not app.state.loras_enabled:item['blocked_reason']='LoRAs are disabled for this run'
     if job.get('prompt_expansion') and job['prompt_expansion'].get('mode')=='vary':
         item['candidate_expansions']=job['prompt_expansion']['candidates']
         item['prompt_expansion']=None
@@ -1240,6 +1277,7 @@ class CatalogImage(BaseModel):
     steps: int | None = None
     generation_seconds: float | None = None
     lora: dict | None = None
+    loras: list[dict] | None = None
     file_size: int
 
 

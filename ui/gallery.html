@@ -90,6 +90,8 @@
     }
     $('edit-photo').addEventListener('click',event=>{if($('edit-photo').getAttribute('aria-disabled')==='true')event.preventDefault();});
     let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, deleting = false, pendingDelete = null, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
+    // A stacked image lists every adapter in order; older images have one lora.
+    function styles(item) { return item.loras || (item.lora ? [item.lora] : []); }
     function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
     function localURL(value) { const url = new URL(value, location.origin); if (url.origin !== location.origin) throw new Error('Unexpected image URL.'); return url.href; }
     function dateLabel(created, short = false) { const date = new Date(created * 1000); if (!Number.isFinite(date.getTime())) return 'Saved image'; return new Intl.DateTimeFormat(undefined, short ? {month:'short', day:'numeric'} : {dateStyle:'medium', timeStyle:'short'}).format(date); }
@@ -114,7 +116,7 @@
       // The caption opens the photo too; tag chips keep filtering. The thumbnail stays the keyboard control.
       body.addEventListener('click', event => { if (!event.target.closest('button, a')) openImage(index); });
       const line = element('div', 'card-data'); line.append(element('span', '', item.size ? item.size.replace('x',' × ') : 'PNG'), element('time', '', dateLabel(item.created, true))); body.append(line);
-      body.append(element('span', 'style', (item.model || 'Unknown model') + (item.lora ? ' · ' + item.lora.name : '')));
+      body.append(element('span', 'style', (item.model || 'Unknown model') + (styles(item).length ? ' · ' + styles(item).map(entry => entry.name).join(' + ') : '')));
       renderTags(item, body); card.append(button, body); $('grid').append(card);
     }
     function updatePagination() {
@@ -165,7 +167,7 @@
       $('settings').replaceChildren();
       addSetting('Size', item.size?.replace('x',' × ')); addSetting('Seed', item.seed === undefined ? null : String(item.seed));
       addSetting('Steps', item.steps === undefined ? null : String(item.steps)); addSetting('Generation time', item.generation_seconds === undefined ? null : `${item.generation_seconds}s`);
-      addSetting('Style', item.lora ? item.lora.name + (item.lora.strength == null ? '' : ` · ${item.lora.strength}`) : 'Original model'); addSetting('Saved', dateLabel(item.created));
+      addSetting(styles(item).length > 1 ? 'Styles' : 'Style', styles(item).length ? styles(item).map(entry => entry.name + (entry.strength == null ? '' : ` · ${entry.strength}`)).join(', ') : 'Original model'); addSetting('Saved', dateLabel(item.created));
       $('file-path').textContent = item.file_path;
       $('variation').href = '/?generation=' + item.id + '&mode=reference'; $('reuse').href = '/?generation=' + item.id + '&mode=settings'; $('reuse').hidden = !item.prompt;
       updateEditAction();
