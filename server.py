@@ -33,6 +33,7 @@ from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt, adapter_list, adapter_identity
 from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
+import gallery_store
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL, KEEP_WEIGHTS_SETTING
 from generation_worker import QueueWorker
@@ -169,6 +170,8 @@ def initialize_service():
         license=PROFILES[identifier].get('license',{})
         if license.get('notice'):log.warning('%s: %s %s',PROFILES[identifier]['name'],license['notice'],license['url'])
     log.info('Generator ready for all setup models; default %s. Models load on demand.',API_MODEL)
+    # Part of real startup only (tests replace initialize_service): imports touch the live image folders.
+    threading.Thread(target=prepare_gallery,name='gallery-import',daemon=True).start()
 
 
 @asynccontextmanager
@@ -186,7 +189,6 @@ async def lifespan(app):
         await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
         job_worker.start(executor)
         if progress_tracker:progress_tracker.start()
-        threading.Thread(target=warm_gallery,name='gallery-index',daemon=True).start()
         yield
     finally:
         try:
@@ -650,8 +652,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
         if job:
             path.replace(final_path)
         path=final_path
-        # Persist custom output locations so their image URLs survive a server restart.
-        image_catalog.write_index(ROOT, identifier, path, payload.tags)
+        gallery_db().register(identifier, root=ROOT, origin=API_MODEL, path=path, metadata=metadata, tags=payload.tags)
         return path, metadata
     except Exception:
         if path.exists() and path.stat().st_size == 0:
@@ -954,8 +955,8 @@ def committed_candidate(payload,job,identifier,index):
         if image.format!='PNG' or list(image.size)!=list(map(int,metadata['size'].split('x'))):
             raise LocalFileError('Saved output is invalid; it was left untouched')
         image.verify()
-    if not (ROOT/'image-index'/(identifier+'.json')).is_file():
-        image_catalog.write_index(ROOT,identifier,path,metadata['tags'])
+    if gallery_db().get(identifier) is None:
+        gallery_db().register(identifier,root=ROOT,origin=API_MODEL,path=path,metadata=metadata,tags=metadata['tags'])
     return metadata
 
 
@@ -1253,37 +1254,45 @@ def catalog_roots():
     return MODEL_ROOTS
 
 
-def warm_gallery():
-    """Build the gallery's in-memory index at startup so the first visit does not read every sidecar."""
-    for origin,folder in catalog_roots().items():
-        try:
-            if folder.is_dir():image_catalog.list_images(folder,IMAGE_DIR if folder==ROOT else folder/'images',limit=1)
-        except (OSError,ValueError,RuntimeError):
-            log.warning('Could not index saved images for %s; the gallery will retry when opened',origin,exc_info=True)
+def gallery_db():
+    """The gallery database: every saved image's settings, tags and location."""
+    return gallery_store.GalleryStore(gallery_store.gallery_database(PROJECT_ROOT))
+
+
+def prepare_gallery():
+    """Once per model folder, import images saved before the gallery database; show again images whose files are back."""
+    try:
+        roots={origin:(folder,IMAGE_DIR if folder==ROOT else folder/'images') for origin,folder in catalog_roots().items()}
+        added=gallery_store.import_library(gallery_db(),roots)
+        if added:log.info('Added %d saved images to the gallery database',added)
+        gallery_db().recheck_missing()
+    except (OSError,ValueError,RuntimeError,sqlite3.Error):
+        log.warning('Could not import saved images into the gallery; rerun python gallery_store.py',exc_info=True)
 
 
 def image_location(identifier):
-    for identifier_model,folder in catalog_roots().items():
-        images=IMAGE_DIR if folder==ROOT else folder/'images'
-        try:
-            path=image_catalog.resolve_image(folder,images,identifier)
-            return folder,images,path
-        except (OSError,ValueError):
-            continue
-    raise FileNotFoundError('Saved image is unavailable')
+    """(model folder, PNG path) of a gallery image, from the database; missing files are hidden from listings."""
+    row=gallery_db().get(identifier) if image_catalog.valid_identifier(identifier) else None
+    if row is None:
+        raise FileNotFoundError('Saved image is unavailable')
+    path=Path(row['file_path'])
+    if not path.is_file():
+        gallery_db().mark_missing([identifier])
+        raise FileNotFoundError('Saved image is unavailable')
+    return Path(row['root']),path,row
 
 
 @app.get("/images/{identifier}.png", name="image")
 def image(identifier: str):
     try:
-        _, _, path = image_location(identifier)
-    except (OSError, ValueError):
+        _, path, _ = image_location(identifier)
+    except (OSError, ValueError, sqlite3.Error):
         raise HTTPException(404, "Saved image is unavailable") from None
     return FileResponse(path, media_type="image/png")
 
 
 class CatalogImage(BaseModel):
-    tags: list[str] = Field(default_factory=list, description="Current editable image tags, stored in the local image index.")
+    tags: list[str] = Field(default_factory=list, description="Current editable image tags, stored in the gallery database.")
     id: str
     created: int = Field(description="Saved timestamp in Unix seconds; older files use their modification time.")
     url: str
@@ -1335,7 +1344,7 @@ def gallery():
 
 @app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
          summary="Browse saved generations",
-         description="Lists saved PNGs in the default images folder and custom locations recorded in image-index/. Reference uploads are excluded. Search matches prompts, tags, seeds, dimensions, models and adapter labels. Repeated tag parameters require all exact labels (case-insensitive). Pagination uses limit/offset and returns totals and previous/next offsets. Missing files are skipped; images without readable metadata remain browsable. No GPU inference is performed.")
+         description="Lists images from the gallery database (every image the service saved, in any output folder). Reference uploads are excluded. Search q matches whole words or word starts, in any order, across prompts, tags, seeds, dimensions, models and adapter labels. Repeated tag parameters require all exact labels (case-insensitive). Pagination uses limit/offset and returns totals and previous/next offsets. Images whose file is gone are hidden (only the returned page is checked) and reappear if the file comes back; images without readable metadata remain browsable. No GPU inference is performed.")
 def saved_images(request: Request, response: Response,
                  limit: int = Query(default=24, ge=1, le=100),
                  offset: int = Query(default=0, ge=0),
@@ -1343,22 +1352,25 @@ def saved_images(request: Request, response: Response,
                  sort: Literal["newest", "oldest"] = "newest",
                  tag: list[str] | None = Query(default=None, max_length=32, description="Optional exact tag filters; repeat tag to require all labels. Combined with q.")):
     try:
-        records=[]
         require_storage(ROOT)
-        for origin,folder in catalog_roots().items():
-            if not folder.is_dir():
-                if folder==ROOT:
-                    raise OSError('Active storage is unavailable')
-                continue
-            images=IMAGE_DIR if folder==ROOT else folder/'images'
-            items,_=image_catalog.list_images(folder,images,q,sort,2**63-1,0,tag)
-            records.extend({**item,'model':item['model'] or origin} for item in items)
-        records.sort(key=lambda item:(item['created'],item['id']),reverse=sort=='newest')
-        total=len(records)
-        records=records[offset:offset+limit]
+        if not ROOT.is_dir():
+            raise OSError('Active storage is unavailable')
+        # Only the shown page's files are checked; images whose file is gone are hidden and the page refilled.
+        for _ in range(5):
+            rows,total=gallery_db().search(q,tag or [],sort,limit,offset)
+            shown,missing=[],[]
+            for row in rows:
+                try:
+                    shown.append(gallery_store.public_record(row,Path(row['file_path']).stat()))
+                except OSError:
+                    missing.append(row['id'])
+            if not missing:
+                break
+            gallery_db().mark_missing(missing)
+        records=shown
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, sqlite3.Error):
         raise HTTPException(503, "Cannot read the image library. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     next_offset = offset + len(records)
@@ -1373,9 +1385,9 @@ def saved_images(request: Request, response: Response,
          summary="Read a saved generation", description="Returns saved settings, actual file paths, and local preview/download URLs for a gallery image.")
 def saved_image(identifier: str, request: Request, response: Response):
     try:
-        folder,images,_=image_location(identifier)
-        record = image_catalog.image_record(folder,images,identifier)
-    except (OSError, ValueError):
+        _,path,row=image_location(identifier)
+        record=gallery_store.public_record(row,path.stat(),detail=True)
+    except (OSError, ValueError, sqlite3.Error):
         raise HTTPException(404, "Saved image is unavailable") from None
     response.headers['Cache-Control'] = 'no-store'
     return catalog_urls(record, request)
@@ -1393,14 +1405,17 @@ class ImageTagsRequest(BaseModel):
 
 @app.patch("/v1/images/{identifier}/tags", response_model=CatalogDetail, response_model_exclude_none=True,
            summary="Replace a saved image's tags",
-           description="Stores editable tags atomically in the local image index. Original PNG and generation sidecar remain unchanged. Works for older default-folder images and indexed custom destinations. No inference is performed.")
+           description="Stores editable tags in the gallery database. Original PNG and generation sidecar remain unchanged. No inference is performed.")
 def set_image_tags(identifier: str, payload: ImageTagsRequest, request: Request, response: Response):
     try:
-        folder,images,_=image_location(identifier)
-        record = image_catalog.update_tags(folder,images,identifier,payload.tags)
+        _,path,_=image_location(identifier)
+        row=gallery_db().set_tags(identifier,payload.tags)
+        if row is None:
+            raise FileNotFoundError('Saved image is unavailable')
+        record=gallery_store.public_record(row,path.stat(),detail=True)
     except FileNotFoundError:
         raise HTTPException(404, "Saved image is unavailable") from None
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, sqlite3.Error):
         raise HTTPException(503, "Cannot save image tags. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     return catalog_urls(record, request)
@@ -1415,26 +1430,16 @@ class ImageDeleteResponse(BaseModel):
 @app.delete('/v1/images/{identifier}', response_model=ImageDeleteResponse,
             summary='Permanently delete a saved image',
             responses={404: {'description': 'Unknown or already deleted image'}, 409: {'description': 'Image is in use, ambiguous, or has nonregular files'}, 503: {'description': 'Image or queue storage is unavailable'}},
-            description='Deletes the gallery PNG, adjacent JSON sidecar, editable-tag index and cached thumbnails. Accepts only a gallery image ID, including indexed custom output folders. The UI asks for confirmation; API callers authorize deletion by sending DELETE. Queued/running reference users and unfinished generating jobs block deletion with 409. Job history and uploaded references remain unchanged. Successful responses include cleanup_pending (normally empty); listed private staged files need manual cleanup if storage refused erasure. No GPU inference or queue HTTP call is performed.')
+            description='Deletes the gallery PNG, adjacent JSON sidecar, its gallery database entry (tags included) and cached thumbnails. Accepts only a gallery image ID, in any output folder. The UI asks for confirmation; API callers authorize deletion by sending DELETE. Queued/running reference users and unfinished generating jobs block deletion with 409. Job history and uploaded references remain unchanged. Successful responses include cleanup_pending (normally empty); listed private staged files need manual cleanup if storage refused erasure. No GPU inference or queue HTTP call is performed.')
 def delete_saved_image(identifier: str, response: Response):
     queue_ready(require_worker=False)
     try:
         require_storage(ROOT)
-        folder, images, _ = image_location(identifier)
-        path = image_catalog.deletion_path(folder, images, identifier)
-        # Reject ambiguous IDs rather than reveal another file under the same ID
-        # after deleting the first copy from the cross-model gallery.
-        for other in catalog_roots().values():
-            other_images = IMAGE_DIR if other == ROOT else other / 'images'
-            try:
-                duplicate = image_catalog.resolve_image(other, other_images, identifier)
-            except (OSError, ValueError):
-                continue
-            if duplicate != path:
-                raise image_catalog.ImageDeleteConflict('Several files use this image ID. Resolve the duplicate before deleting it.')
-        metadata = image_catalog.read_metadata(path.with_suffix('.json')) or {}
+        folder, path, row = image_location(identifier)
+        metadata = json.loads(row['metadata']) if row['metadata'] else {}
         with job_store.guard_artifact_deletion(path, metadata.get('job_id') or identifier):
-            result = image_catalog.delete_image(folder, images, identifier, expected_path=path)
+            result = image_catalog.delete_image(folder, identifier, path)
+            gallery_db().remove(identifier)
         if result['cleanup_pending']:
             log.warning('Image %s removed from gallery; cleanup required for %s', identifier, result['cleanup_pending'])
     except FileNotFoundError:
@@ -1450,9 +1455,9 @@ def delete_saved_image(identifier: str, response: Response):
 @app.get("/thumbnails/{identifier}.webp", name="image_thumbnail", include_in_schema=False)
 def image_thumbnail(identifier: str):
     try:
-        folder,images,_=image_location(identifier)
-        path = image_catalog.thumbnail(folder,images,identifier)
-    except (OSError, ValueError):
+        folder,original,_=image_location(identifier)
+        path = image_catalog.thumbnail(folder,identifier,original)
+    except (OSError, ValueError, sqlite3.Error):
         raise HTTPException(404, "Image preview is unavailable") from None
     return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
 
@@ -1460,13 +1465,16 @@ def image_thumbnail(identifier: str):
 @app.get("/images/{identifier}.json", name="image_metadata", include_in_schema=False)
 def image_metadata(identifier: str):
     try:
-        _,_,original=image_location(identifier)
+        _,original,row=image_location(identifier)
         path=original.with_suffix('.json')
-        if image_catalog.read_metadata(path) is None:
+        if row['metadata'] is None:
             raise FileNotFoundError()
-    except (OSError, ValueError):
+    except (OSError, ValueError, sqlite3.Error):
         raise HTTPException(404, "Saved metadata is unavailable") from None
-    return FileResponse(path, media_type="application/json", filename=path.name)
+    if image_catalog.read_metadata(path) is not None:
+        return FileResponse(path, media_type="application/json", filename=path.name)
+    # The sidecar is a portable copy; the gallery database keeps the settings if it was removed.
+    return Response(row['metadata'], media_type="application/json", headers={'Content-Disposition': f'attachment; filename="{identifier}.json"'})
 
 
 configure_schema(app,PROJECT_ROOT,['GenerateRequest','SyncGenerateRequest','EditRequest','ExpandPromptRequest'],selected_default)

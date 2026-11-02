@@ -234,7 +234,10 @@ class CrossModelGalleryTest(unittest.TestCase):
                 identifier=f'{number:032x}'; ids.append(identifier)
                 photo=images/(identifier+'.png'); Image.new('RGB',(32,24),'green').save(photo)
                 photo.with_suffix('.json').write_text(json.dumps({'prompt':'A fox '+name,'model':name,'created':number,'tags':['Forest']}))
-            with patch.object(server,'ROOT',roots[config.API_MODEL]),patch.object(server,'IMAGE_DIR',roots[config.API_MODEL]/'images'),patch.object(server,'MODEL_ROOTS',roots):
+            with patch.object(server,'ROOT',roots[config.API_MODEL]),patch.object(server,'IMAGE_DIR',roots[config.API_MODEL]/'images'),patch.object(server,'MODEL_ROOTS',roots), \
+                 patch.object(server,'PROJECT_ROOT',Path(temporary)):
+                # Images saved before the gallery database are imported from every model folder.
+                server.prepare_gallery()
                 client=TestClient(server.app,base_url='http://127.0.0.1')
                 listing=client.get('/v1/images?limit=2&q=fox&tag=forest').json()
                 self.assertEqual(listing['total'],len(roots))

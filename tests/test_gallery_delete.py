@@ -26,11 +26,15 @@ class GalleryDeleteTest(unittest.TestCase):
         for item in reversed(self.patches):item.stop()
         self.temp.cleanup()
 
-    def save(self,identifier='a'*32,folder=None,metadata=None,index=True):
+    def save(self,identifier='a'*32,folder=None,metadata=None,index=True,register=True):
+        """A saved image in the gallery database; index=True also leaves a pre-database image-index/ entry behind."""
         folder=folder or self.images;folder.mkdir(parents=True,exist_ok=True);path=folder/(identifier+'.png')
         Image.new('RGB',(128,80),'steelblue').save(path)
-        path.with_suffix('.json').write_text(json.dumps(metadata or {'prompt':'A lighthouse','tags':['coast']}))
-        if index:image_catalog.write_index(self.root,identifier,path,['favorite'])
+        metadata=metadata or {'prompt':'A lighthouse','tags':['coast']}
+        path.with_suffix('.json').write_text(json.dumps(metadata))
+        if index:
+            legacy=self.root/'image-index'/(identifier+'.json');legacy.parent.mkdir(exist_ok=True);legacy.write_text(json.dumps({'file_path':str(path),'tags':['favorite']}))
+        if register:server.gallery_db().register(identifier,root=self.root,origin=server.API_MODEL,path=path,metadata=metadata,tags=['favorite'])
         return path
 
     def delete(self,identifier='a'*32):return self.client.delete('/v1/images/'+identifier)
@@ -76,8 +80,8 @@ class GalleryDeleteTest(unittest.TestCase):
     def test_pending_references_masks_and_own_batch_block_deletion_but_unrelated_work_does_not(self):
         for field in ['reference_image','mask_image','owner']:
             with self.subTest(field=field):
-                path=self.save();job=self.enqueue(**({field:str(path)} if field!='owner' else {}))
-                if field=='owner':path.with_suffix('.json').write_text(json.dumps({'job_id':job['id']}))
+                path=self.images/('a'*32+'.png');job=self.enqueue(**({field:str(path)} if field!='owner' else {}))
+                self.save(metadata={'job_id':job['id']} if field=='owner' else None)
                 self.assertEqual(self.delete().status_code,409);self.assertTrue(path.exists())
                 claimed=self.store.claim();self.assertEqual(claimed['id'],job['id']);self.assertEqual(self.delete().status_code,409)
                 self.store.finish(job['id'],result={});self.assertEqual(self.delete().status_code,200)
@@ -107,20 +111,20 @@ class GalleryDeleteTest(unittest.TestCase):
             result=self.delete();self.assertEqual(result.status_code,200,result.text)
         pending=result.json()['cleanup_pending'];self.assertEqual(len(pending),1);self.assertTrue(Path(pending[0]).is_file());self.assertFalse(path.exists());self.assertEqual(self.client.get('/v1/images').json()['total'],0)
 
-    def test_duplicate_ids_do_not_reveal_or_delete_a_different_copy(self):
-        original=self.save();other=self.save(folder=self.root/'custom');self.assertEqual(self.delete().status_code,409);self.assertTrue(original.is_file());self.assertTrue(other.is_file())
-        # Cross-model duplicates receive the same protection.
-        root2=self.root/'other-model';root2.mkdir();other2=root2/'images';other2.mkdir();Image.new('RGB',(16,16)).save(other2/('a'*32+'.png'))
-        other.unlink();(self.root/'image-index'/('a'*32+'.json')).unlink()
-        with patch.object(server,'MODEL_ROOTS',{server.API_MODEL:self.root,'chroma1-flash':root2}):self.assertEqual(self.delete().status_code,409)
-        self.assertTrue(original.exists());self.assertTrue((other2/('a'*32+'.png')).exists())
+    def test_a_stray_copy_with_the_same_id_is_never_shown_or_deleted(self):
+        other=self.save(folder=self.root/'custom',index=False,register=False);original=self.save(index=False)
+        root2=self.root/'other-model';(root2/'images').mkdir(parents=True);stray=root2/'images'/('a'*32+'.png');Image.new('RGB',(16,16)).save(stray)
+        with patch.object(server,'MODEL_ROOTS',{server.API_MODEL:self.root,'chroma1-flash':root2}):
+            self.assertEqual(self.delete().status_code,200)
+            self.assertEqual(self.client.get('/v1/images/'+'a'*32).status_code,404)
+        self.assertFalse(original.exists());self.assertTrue(other.is_file());self.assertTrue(stray.is_file())
 
-    def test_concurrent_delete_is_once_only_and_stale_tag_updates_cannot_recreate_index(self):
+    def test_concurrent_delete_is_once_only_and_stale_tag_updates_cannot_recreate_the_entry(self):
         path=self.save()
         with ThreadPoolExecutor(max_workers=2) as executor:responses=list(executor.map(lambda _:self.delete(),range(2)))
         self.assertEqual(sorted(r.status_code for r in responses),[200,404])
-        with self.assertRaises(FileNotFoundError):image_catalog.write_index(self.root,'a'*32,path,['stale'])
-        self.assertFalse((self.root/'image-index'/('a'*32+'.json')).exists())
+        self.assertEqual(self.client.patch('/v1/images/'+'a'*32+'/tags',json={'tags':['stale']}).status_code,404)
+        self.assertIsNone(server.gallery_db().get('a'*32));self.assertFalse(path.exists())
 
     def test_thumbnail_finishing_after_delete_cannot_republish_cache(self):
         self.save();save=Image.Image.save

@@ -43,7 +43,7 @@ override LORA_SHA256 := $(value LORA_SHA256)
 export LORA_SHA256
 export NONINTERACTIVE
 
-.PHONY: storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test setup-lora install-lora download-loras download-realism download-llm queue stop-queue
+.PHONY: import-gallery storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test setup-lora install-lora download-loras download-realism download-llm queue stop-queue
 help:
 	@echo 'Setup reuses compatible Python, or installs it inside the project; serving stays offline'
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
@@ -61,6 +61,7 @@ help:
 	@echo 'make setup     Choose a model, install dependencies and download image + prompt models (safe to rerun)'
 	@echo 'Setup: q cancels at the model menu; Ctrl-C cancels at any time and keeps existing downloads'
 	@echo 'make setup-lora  Add your own compatible LoRA from a file or Hugging Face; local catalog survives git pull'
+	@echo 'make import-gallery  Add PNGs copied into a model images/ folder by hand to the gallery'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
 	@echo 'Choose a default: make serve MODEL=chroma1-flash (all setup models remain available)'
 	@echo 'Photo editing models: flux2-klein-4b, flux2-klein-9b, qwen-image-2.1-turbo'
@@ -70,6 +71,10 @@ download-realism:
 
 download-loras:
 	"$(PYTHON)" download_loras.py
+
+import-gallery:
+	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }
+	"$(PYTHON)" gallery_store.py
 
 setup-lora:
 	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }

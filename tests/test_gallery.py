@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import gallery_store
 import image_catalog
 import server
 
@@ -30,7 +31,9 @@ class GalleryTest(unittest.TestCase):
             item.stop()
         self.temp.cleanup()
 
-    def save(self, identifier, metadata=None, folder=None, index=False, size=(1024, 640)):
+    def save(self, identifier, metadata=None, folder=None, index=False, size=(1024, 640), register=True):
+        """Write a saved image; register=True adds it to the gallery database as generation does.
+        index=True writes a pre-database image-index/ entry instead, for import tests."""
         folder = folder or self.images
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f'{identifier}.png'
@@ -41,17 +44,31 @@ class GalleryTest(unittest.TestCase):
             records = self.root / 'image-index'
             records.mkdir(exist_ok=True)
             (records / f'{identifier}.json').write_text(json.dumps({'file_path': str(path)}))
+        if register:
+            self.register(identifier, path)
         return path
 
-    def test_discovery_custom_folders_deduplication_and_exclusions(self):
+    def register(self, identifier, path):
+        metadata = image_catalog.read_metadata(path.with_suffix('.json'))
+        server.gallery_db().register(identifier, root=self.root, origin=server.API_MODEL, path=path,
+                                     metadata=metadata, tags=image_catalog.read_tags(None, metadata or {}))
+
+    def test_import_of_pre_database_images_custom_folders_and_exclusions(self):
         a, b, c = 'a' * 32, 'b' * 32, 'c' * 32
-        self.save(a, {'prompt': 'Misty castle', 'created': 100}, index=True)
-        self.save(b, {'prompt': 'Quiet forest', 'created': 200}, folder=self.root / 'custom', index=True)
-        self.save(c, folder=self.root / 'references')
-        self.save('not-a-generation')
+        self.save(a, {'prompt': 'Misty castle', 'created': 100}, index=True, register=False)
+        self.save(b, {'prompt': 'Quiet forest', 'created': 200}, folder=self.root / 'custom', index=True, register=False)
+        self.save(c, folder=self.root / 'references', register=False)
+        self.save('not-a-generation', register=False)
         (self.images / ('d' * 32 + '.png')).touch()
         (self.root / 'image-index' / ('e' * 32 + '.json')).write_text('{broken')
-        (self.root / 'image-index' / ('f' * 32 + '.json')).write_text(json.dumps({'file_path': '/missing/' + 'f' * 32 + '.png'}))
+        (self.root / 'image-index' / ('f' * 32 + '.json')).write_text(json.dumps({'file_path': '/missing/' + 'f' * 32 + '.png', 'tags': ['Kept']}))
+        (self.root / 'image-index' / (b + '.json')).write_text(json.dumps({'file_path': str(self.root / 'custom' / (b + '.png')), 'tags': ['Edited']}))
+        self.assertEqual(self.client.get('/v1/images').json()['total'], 0)
+        server.prepare_gallery()
+        # The old index is kept as a backup and never read again.
+        self.assertFalse((self.root / 'image-index').exists())
+        self.assertTrue((self.root / 'image-index.imported' / (b + '.json')).is_file())
+        server.prepare_gallery()
         response = self.client.get('/v1/images')
         self.assertEqual(response.status_code, 200, response.text)
         data = response.json()
@@ -60,6 +77,11 @@ class GalleryTest(unittest.TestCase):
         self.assertNotIn('metadata', data['data'][0])
         self.assertEqual(response.headers['cache-control'], 'no-store')
         self.assertEqual(self.client.get(data['data'][0]['url']).content, (self.root / 'custom' / (b + '.png')).read_bytes())
+        self.assertEqual(data['data'][0]['tags'], ['Edited'])
+        # Files copied in by hand are picked up by an explicit rescan.
+        self.save('9' * 32, {'prompt': 'Copied in'}, register=False)
+        gallery_store.import_library(server.gallery_db(), {server.API_MODEL: (self.root, self.images)}, rescan=True)
+        self.assertEqual(self.client.get('/v1/images?q=copied').json()['total'], 1)
 
     def test_search_sort_and_pagination(self):
         self.save('a' * 32, {'prompt': 'Misty CASTLE', 'seed': 0, 'created': 10, 'size': '1024x640'})
@@ -72,13 +94,17 @@ class GalleryTest(unittest.TestCase):
         second = self.client.get('/v1/images?sort=oldest&limit=1&offset=1').json()
         self.assertEqual(second['data'][0]['id'], 'b' * 32)
         self.assertFalse(second['has_more'])
-        for query, expected in [('castle', 'a'), ('  CASTLE  ', 'a'), ('Painterly', 'b'), ('42', 'b')]:
+        for query, expected in [('castle', 'a'), ('  CASTLE  ', 'a'), ('cast', 'a'), ('castle misty', 'a'), ('Painterly', 'b'), ('42', 'b'), ('forest quiet', 'b')]:
             with self.subTest(query=query):
                 result = self.client.get('/v1/images', params={'q': query}).json()
                 self.assertEqual(result['total'], 1)
                 self.assertEqual(result['data'][0]['id'], expected * 32)
         # Seed zero must remain searchable even though it is falsy in Python.
         self.assertEqual(self.client.get('/v1/images?q=0').json()['total'], 1)
+        # Every word must match; text inside a word does not; punctuation alone matches everything.
+        for query, total in [('castle forest', 0), ('astle', 0), ('"castle', 1), ('*', 2), ('-', 2)]:
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get('/v1/images', params={'q': query}).json()['total'], total)
         for query in ['limit=0', 'limit=101', 'offset=-1', 'sort=invalid']:
             self.assertEqual(self.client.get('/v1/images?' + query).status_code, 422)
 
@@ -121,7 +147,7 @@ class GalleryTest(unittest.TestCase):
         self.assertEqual(self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': [], 'prompt': 'changed'}).status_code, 422)
         self.assertEqual(self.client.patch('/v1/images/' + 'b' * 32 + '/tags', json={'tags': ['test']}).status_code, 404)
         self.assertEqual(self.client.get('/v1/images', params={'tag': 'x' * 65}).status_code, 422)
-        with patch.object(image_catalog, 'write_index', side_effect=PermissionError('read only')):
+        with patch.object(gallery_store.GalleryStore, 'set_tags', side_effect=__import__('sqlite3').OperationalError('locked')):
             self.assertEqual(self.client.patch('/v1/images/' + identifier + '/tags', json={'tags': ['test']}).status_code, 503)
         self.assertEqual(self.client.get('/v1/images/' + identifier).json()['tags'], ['Legacy'])
 
@@ -170,10 +196,11 @@ class GalleryTest(unittest.TestCase):
 
     def test_legacy_or_corrupt_sidecar_remains_browsable(self):
         for identifier, content in [('a' * 32, None), ('b' * 32, '{invalid'), ('c' * 32, '{"created":1e999}'), ('d' * 32, '[1,2]')]:
-            path = self.save(identifier)
+            path = self.save(identifier, register=False)
             if content:
                 path.with_suffix('.json').write_text(content)
             os.utime(path, (100, 100))
+            self.register(identifier, path)
             detail = self.client.get('/v1/images/' + identifier).json()
             self.assertFalse(detail['metadata_available'])
             self.assertNotIn('metadata_url', detail)
