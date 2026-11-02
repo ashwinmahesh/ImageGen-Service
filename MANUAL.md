@@ -281,6 +281,8 @@ The gallery brings together results from all supported models, including images 
 
 Open **[Gallery](http://localhost:5742/gallery)** to search saved images by prompt or tags, browse pages, edit tags and reuse settings. Click a thumbnail or its caption to open an image: the viewer fits the whole photo, and the expand button in its corner fills the browser window (Escape or the same button returns to the details). Images and JSON settings are saved automatically in `<storage folder>/<model>/images`. The webpage footer shows the default save folder; **Save location** lets you override it for a request.
 
+Search lists exact matches first, then **Similar images**: pictures that fit your words even when their prompt said it differently, or was an edit instruction like "make the dress red". A divider marks where they start, best match first. Open any image and choose **More like this** to see the images that look most like it; **Clear ×** returns to the whole library. Subjects that aren't in your library return no similar images rather than random ones. Similar search uses a small SigLIP 2 model on the CPU (never the GPU), downloaded by `make setup` or `make download-search`. It starts loading when you open the gallery and indexes new images in the background; right after setup, older images join the results as indexing finishes (a couple of minutes for about 1,500 images). Without the model the gallery keeps exact search.
+
 To delete a result, open it in **Gallery**, choose **Delete image** below its file path, then review the thumbnail and prompt in the confirmation popup. **Cancel** or Escape keeps it; **Delete image** permanently removes the PNG, its JSON settings, tags and cached previews, including files in custom save folders. There is no undo. Uploaded references, other images and job history stay saved. If a waiting or running job uses the image, finish or cancel that job first. The gallery refreshes after deletion and moves back a page if necessary.
 
 ![Searchable image gallery](docs/screenshots/gallery.png)
@@ -440,6 +442,7 @@ Pictures and settings live in your chosen storage folder; queue databases live i
 - **Interrupted download:** rerun `make setup MODEL=<model-id>` to reuse or resume it.
 - **External drive missing:** reconnect it; the generator won't silently download to another location.
 - **Missing prompt LLM:** run `make download-llm`, or start with `make serve NO_LLM=1`.
+- **No similar images or More like this:** run `make download-search`, then restart the generator.
 - **Port conflict:** use `make serve PORT=5733` and open that port in the browser.
 - **Slow generation or memory pressure:** try smaller images or fewer options and close other GPU-heavy apps.
 
