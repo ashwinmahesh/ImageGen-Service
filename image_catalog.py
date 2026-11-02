@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import os
 import stat
 from pathlib import Path
 import re
@@ -120,7 +121,7 @@ def write_index(root, identifier, path, tags):
             temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)
-    forget_library(root)
+    forget_library(root, identifier)
 
 
 def update_tags(root, image_dir, identifier, tags):
@@ -179,7 +180,7 @@ def delete_image(root, image_dir, identifier, *, expected_path):
             for original, temporary in reversed(staged):
                 temporary.replace(original)
             raise
-        forget_library(root)
+        forget_library(root, identifier)
         pending = []
         for _, temporary in staged:
             try:
@@ -248,14 +249,6 @@ def image_record(root, image_dir, identifier):
     }
 
 
-def _stamp(path):
-    try:
-        info = path.stat()
-    except OSError:
-        return None
-    return info.st_mtime_ns, info.st_size
-
-
 def _folder_stamp(folder):
     try:
         return folder.stat().st_mtime_ns
@@ -263,71 +256,86 @@ def _folder_stamp(folder):
         return None
 
 
-def _record_stamp(root, image_dir, identifier, path):
-    """Every file an image's record is read from: its index entry, the default PNG, and the resolved PNG and sidecar."""
-    files = [root / 'image-index' / f'{identifier}.json', image_dir / f'{identifier}.png']
-    if path is not None:
-        files += [path, path.with_suffix('.json')]
-    return tuple(_stamp(item) for item in files)
+def _folder_names(folder):
+    try:
+        return frozenset(os.listdir(folder))
+    except OSError:
+        return frozenset()
 
 
 def _library_entry(root, image_dir, identifier):
-    path = resolve_image(root, image_dir, identifier)
-    # Stamped before reading, so a file replaced mid-read is read again next time.
-    stamp = _record_stamp(root, image_dir, identifier, path)
     record = image_record(root, image_dir, identifier)
     searchable = ' '.join(str(record[key]) for key in ['prompt', 'seed', 'size', 'model'] if record[key] is not None)
     searchable += ' ' + ' '.join(record['tags'])
     for item in record['loras'] or ([record['lora']] if record['lora'] else []):
         searchable += ' ' + item['id'] + ' ' + item['name']
-    return {'record': record, 'path': Path(record['file_path']), 'stamp': stamp,
+    return {'record': record, 'path': Path(record['file_path']),
             'search': searchable.casefold(), 'tags': {tag.casefold() for tag in record['tags']}}
+
+
+def _snapshot(state, folder, now):
+    """Remember a folder's time and file names; returns the names added or removed since the last snapshot."""
+    stamp = _folder_stamp(folder)  # Before listing, so a change during the listing is seen next time.
+    names = _folder_names(folder)
+    previous = state['folders'].get(folder)
+    state['folders'][folder] = {'stamp': stamp, 'names': names, 'settled': stamp is not None and now - stamp > SETTLE_NS}
+    return names ^ previous['names'] if previous else names
 
 
 def _library(root, image_dir):
     """Every saved image's record, newest first, kept in memory between requests.
 
-    Writers replace files (temporary file + rename), so an unchanged modification time on
-    every watched folder means nothing was added, rewritten or removed: the cached list is
-    returned without touching any file. Otherwise each image is checked with stat calls and
-    only new or changed ones are read again.
+    Saved images are never rewritten in place: generation, tagging and deletion add, replace
+    (temporary file + rename) or remove files, and folder modification times change with them.
+    Each request therefore stats only the watched folders (images/, image-index/ and the custom
+    output folders in use). A folder whose time changed is listed again, and only the images
+    whose file names appeared or disappeared there are read again. Tags and deletes made through
+    this process mark their image directly (forget_library). Stat calls are slow on the exFAT
+    (FSKit) drive this usually runs on, so unchanged images are never checked file by file.
     """
     key = (str(root), str(image_dir))
+    index_dir = root / 'image-index'
     with _library_lock:
-        state = _libraries.get(key) or {'signature': None, 'entries': {}, 'ordered': []}
-        folders = {root / 'image-index', image_dir, *(entry['path'].parent for entry in state['entries'].values())}
-        signature = {str(folder): _folder_stamp(folder) for folder in folders}
-        if state['signature'] == signature:
-            return state['ordered']
+        state = _libraries.setdefault(key, {'folders': {}, 'entries': {}, 'dirty': set(), 'ordered': []})
         now = time.time_ns()
-        identifiers = set()
-        for folder, pattern in [(image_dir, '*.png'), (root / 'image-index', '*.json')]:
-            if folder.is_dir():
-                identifiers.update(path.stem for path in folder.glob(pattern) if valid_identifier(path.stem))
-        entries = {}
-        for identifier in identifiers:
-            previous = state['entries'].get(identifier)
-            if previous and _record_stamp(root, image_dir, identifier, previous['path']) == previous['stamp']:
-                entries[identifier] = previous
+        watched = {image_dir, index_dir, *(entry['path'].parent for entry in state['entries'].values())}
+        changed = [folder for folder in watched
+                   if folder not in state['folders'] or not state['folders'][folder]['settled']
+                   or state['folders'][folder]['stamp'] != _folder_stamp(folder)]
+        if not changed and not state['dirty']:
+            return state['ordered']
+        affected = set(state['dirty'])
+        for folder in changed:
+            affected.update(name.rsplit('.', 1)[0] for name in _snapshot(state, folder, now)
+                            if name.endswith(('.png', '.json')) and valid_identifier(name.rsplit('.', 1)[0]))
+        identifiers = {name[:-4] for name in state['folders'][image_dir]['names'] if name.endswith('.png') and valid_identifier(name[:-4])}
+        identifiers |= {name[:-5] for name in state['folders'][index_dir]['names'] if name.endswith('.json') and valid_identifier(name[:-5])}
+        entries = state['entries']
+        for identifier in affected:
+            entries.pop(identifier, None)
+            if identifier not in identifiers:
                 continue
             try:
-                entries[identifier] = _library_entry(root, image_dir, identifier)
+                entry = _library_entry(root, image_dir, identifier)
             except (OSError, ValueError):
                 continue
-        for entry in entries.values():
-            signature.setdefault(str(entry['path'].parent), _folder_stamp(entry['path'].parent))
-        settled = all(stamp is None or now - stamp > SETTLE_NS for stamp in signature.values())
-        ordered = sorted(entries.values(), key=lambda entry: (entry['record']['created'], entry['record']['id']), reverse=True)
-        _libraries[key] = {'signature': signature if settled else None, 'entries': entries, 'ordered': ordered}
-        return ordered
+            entries[identifier] = entry
+            if entry['path'].parent not in state['folders']:
+                # A newly used custom folder: watch it from now on.
+                _snapshot(state, entry['path'].parent, now)
+        state['dirty'] = set()
+        if not affected:
+            return state['ordered']
+        state['ordered'] = sorted(entries.values(), key=lambda entry: (entry['record']['created'], entry['record']['id']), reverse=True)
+        return state['ordered']
 
 
-def forget_library(root):
-    """Make the next listing recheck every image under root (after this process changes its files)."""
+def forget_library(root, identifier):
+    """Read this image again on the next listing (after this process changed its files)."""
     with _library_lock:
         for (cached_root, _), state in _libraries.items():
             if cached_root == str(root):
-                state['signature'] = None
+                state['dirty'].add(identifier)
 
 
 def list_images(root, image_dir, query='', order='newest', limit=24, offset=0, tags=None):

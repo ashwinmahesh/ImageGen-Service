@@ -54,36 +54,41 @@ class GalleryIndexTest(unittest.TestCase):
         self.assertEqual(self.listing(tags=['Fantasy', 'dawn']), ([ids[2]], 1))
         self.assertEqual(self.listing(query='castle', order='oldest', limit=1), ([ids[0]], 2))
 
-    def test_unchanged_library_reads_no_files_and_changes_reread_only_what_changed(self):
+    def test_unchanged_library_reads_nothing_and_changes_reread_only_what_changed(self):
         a, b, c = 'a' * 32, 'b' * 32, 'c' * 32
         self.save(a, 'Misty castle', 100); self.save(b, 'Quiet forest', 200, folder=self.custom)
         self.assertEqual(self.listing(), ([b, a], 2))
         self.settle()
-        self.listing()  # Records the settled folder times.
+        self.listing()  # Records the settled folders.
         with patch.object(image_catalog, 'image_record', wraps=image_catalog.image_record) as reads, \
-             patch.object(image_catalog, '_record_stamp', wraps=image_catalog._record_stamp) as stats:
+             patch.object(image_catalog.os, 'listdir', wraps=os.listdir) as listings:
             self.assertEqual(self.listing(query='forest'), ([b], 1))
-            self.assertEqual((reads.call_count, stats.call_count), (0, 0))
-            # A new image and a rewritten sidecar elsewhere: only the new or changed ones are read again.
+            self.assertEqual((reads.call_count, listings.call_count), (0, 0))
+            # A new image is the only one read; a tag edit through the service rereads only its image.
             self.save(c, 'Lantern', 300)
-            path = self.custom / f'{b}.json'; temporary = self.custom / 'next.tmp'
-            temporary.write_text(json.dumps({'prompt': 'Snowy forest', 'created': 200, 'size': '64x48'})); temporary.replace(path)
-            self.assertEqual(self.listing(query='snowy'), ([b], 1))
-            self.assertEqual(sorted(call.args[2] for call in reads.call_args_list), [b, c])
+            self.assertEqual(self.listing(), ([c, b, a], 3))
+            image_catalog.update_tags(self.root, self.images, b, ['winter'])
+            reads.reset_mock()
+            self.assertEqual(self.listing(tags=['winter']), ([b], 1))
+            self.assertEqual([call.args[2] for call in reads.call_args_list], [b])
         # Removing a file outside the server drops it from the next listing.
         (self.images / f'{a}.png').unlink()
         self.assertEqual(self.listing(), ([c, b], 2))
+        # So does losing a whole custom folder.
+        for item in self.custom.iterdir():
+            item.unlink()
+        self.custom.rmdir()
+        self.assertEqual(self.listing(), ([c], 1))
 
-    def test_recently_changed_folders_are_rechecked_file_by_file(self):
-        a = 'a' * 32
+    def test_files_added_within_one_timestamp_step_are_still_found(self):
+        a, b = 'a' * 32, 'b' * 32
         self.save(a, 'Misty castle', 100)
-        self.assertEqual(self.listing(query='castle'), ([a], 1))
-        # Rewrite in place and put the folder time back, as a coarse 10 ms timestamp could:
-        # the folder was fresh at the last listing, so its signature was not trusted.
+        self.assertEqual(self.listing(), ([a], 1))
+        # exFAT stores 10 ms steps: a second write can leave the folder time unchanged.
         folder_time = self.images.stat().st_mtime_ns
-        (self.images / f'{a}.json').write_text(json.dumps({'prompt': 'Sunny meadow with flowers', 'created': 100, 'size': '64x48'}))
+        self.save(b, 'Quiet forest', 200)
         os.utime(self.images, ns=(folder_time, folder_time))
-        self.assertEqual(self.listing(query='meadow'), ([a], 1))
+        self.assertEqual(self.listing(), ([b, a], 2))
 
     def test_tag_edits_and_deletes_in_this_process_show_immediately(self):
         a, b = 'a' * 32, 'b' * 32
