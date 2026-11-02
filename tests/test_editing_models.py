@@ -157,6 +157,7 @@ from PIL import Image
 import server
 from tests.test_api import FakeModel
 root=Path(server.ROOT); root.mkdir(parents=True)
+server.PROJECT_ROOT=root.parent  # keep this run's gallery database out of the real project
 reference=root/'source.png'; Image.new('RGB',(100,73),'red').save(reference)
 server.model=FakeModel()
 request=server.GenerateRequest(prompt='Change the jacket to green.',reference_image=str(reference),size='320x320',seed=1)

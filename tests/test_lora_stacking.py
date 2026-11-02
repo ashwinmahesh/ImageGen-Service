@@ -172,7 +172,7 @@ class StackedRuntimeTest(unittest.TestCase):
             identifier = "c" * 32
             Image.new("RGB", (64, 64), "green").save(images / f"{identifier}.png")
             (images / f"{identifier}.json").write_text(json.dumps({"prompt": "A fox", "lora": None, "loras": self.stack + ["junk"]}))
-            record = image_catalog.image_record(root, images, identifier)
+            record = image_catalog.describe(images / f"{identifier}.png", image_catalog.read_metadata(images / f"{identifier}.json"))
             self.assertEqual(record["loras"], [{"id": "ink", "name": "ink", "strength": 0.6}, {"id": "style", "name": "style", "strength": 0.5}])
             self.assertIsNone(record["lora"])
 

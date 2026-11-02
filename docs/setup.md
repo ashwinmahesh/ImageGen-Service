@@ -103,16 +103,16 @@ Explicit incompatible interpreters fail with an explanation; setup does not sile
 First setup also asks for a model store folder. **Blank/Enter uses the project directory**; another absolute directory (or `~/...`) stores data there and creates per-model symlinks in the project. The chosen store contains one folder per model:
 
 ```text
-<store>/z-image-turbo/{weights,images,references,image-index,cache,loras,logs}
-<store>/chroma1-hd/{weights,images,references,image-index,cache,loras,logs}
-<store>/chroma1-flash/{weights,images,references,image-index,cache,loras,logs}
-<store>/flux2-klein-4b/{weights,images,references,image-index,cache,loras,logs}
-<store>/flux2-klein-9b/{weights,images,references,image-index,cache,loras,logs}
-<store>/qwen-image-2.1-turbo/{weights,images,references,image-index,cache,loras,logs}
+<store>/z-image-turbo/{weights,images,references,cache,loras,logs}
+<store>/chroma1-hd/{weights,images,references,cache,loras,logs}
+<store>/chroma1-flash/{weights,images,references,cache,loras,logs}
+<store>/flux2-klein-4b/{weights,images,references,cache,loras,logs}
+<store>/flux2-klein-9b/{weights,images,references,cache,loras,logs}
+<store>/qwen-image-2.1-turbo/{weights,images,references,cache,loras,logs}
 <store>/prompt-enhancer/weights  # shared Qwen3.5-2B 4-bit, about 1.7 GB
 ```
 
-Source, Git, UI, the native runtime, `.venv`, managed `.python`/`.bootstrap` downloads, and **SQLite state** stay in the project. The shared queue database and their journals/worker leases live in `<project>/state/queue/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
+Source, Git, UI, the native runtime, `.venv`, managed `.python`/`.bootstrap` downloads, and **SQLite state** stay in the project. The shared queue database and their journals/worker leases live in `<project>/state/queue/`, and the gallery database (every saved image's settings, tags and location) in `<project>/state/gallery/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
 
 ```sh
 # Automation: choose model and store explicitly, with no prompts.
