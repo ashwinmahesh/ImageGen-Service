@@ -5,8 +5,38 @@ from config import MODEL_DIR
 from lora_catalog import effective_prompt
 
 
+def enable_z_image_lokr():
+    """Let Z-Image load LyCORIS LoKr adapters (such as ai-toolkit exports).
+
+    mflux applies LoKr through its shared adapter layers but maps LoKr keys only
+    for FLUX. Each unfused Z-Image target gets `<module>.lokr_w1` / `.lokr_w2`
+    names beside the `<module>.alpha` names it already accepts.
+    """
+    from mflux.models.z_image.weights.z_image_lora_mapping import ZImageLoRAMapping
+    if getattr(ZImageLoRAMapping, "_imagegen_lokr", False):
+        return
+    original = ZImageLoRAMapping.get_mapping
+
+    def get_mapping():
+        targets = original()
+        for target in targets:
+            # Fused-qkv splitting is LoRA-specific; leave those targets as they are.
+            if target.up_transform is not None:
+                continue
+            for pattern in target.possible_alpha_patterns:
+                base = pattern.removesuffix(".alpha")
+                for name, patterns in (("lokr_w1", target.possible_lokr_w1_patterns), ("lokr_w2", target.possible_lokr_w2_patterns)):
+                    if f"{base}.{name}" not in patterns:
+                        patterns.append(f"{base}.{name}")
+        return targets
+
+    ZImageLoRAMapping.get_mapping = staticmethod(get_mapping)
+    ZImageLoRAMapping._imagegen_lokr = True
+
+
 def load_z_image(selection):
     from mflux.models.z_image import ZImageTurbo
+    enable_z_image_lokr()
     return ZImageTurbo(model_path=str(MODEL_DIR), quantize=4, bake_lora=False,
         lora_paths=[selection["file_path"]] if selection else None,
         lora_scales=[selection["strength"]] if selection else None)
