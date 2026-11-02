@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from PIL import Image, ImageOps
-from lora_catalog import effective_prompt
+from lora_catalog import adapter_list, effective_prompt
 from config import ROOT, MODEL_FILE, T5_FILE, VAE_FILE, RUNTIME_DIR, RUNTIME_RELEASE, PROFILE
 
 
@@ -62,9 +62,9 @@ class ChromaResult:
             prompt=temporary/'prompt.txt'
             selection = s.get('lora')
             text = effective_prompt(s['prompt'], selection)
-            if selection:
-                name = Path(selection['file_path']).stem
-                text += f" <lora:{name}:{selection['strength']}>"
+            adapters = adapter_list(selection)
+            for adapter in adapters:
+                text += f" <lora:{Path(adapter['file_path']).stem}:{adapter['strength']}>"
             prompt.write_text(text)
             destination=temporary/'result.png'
             command=[str(self.binary), '--diffusion-model',str(MODEL_FILE),
@@ -77,9 +77,11 @@ class ChromaResult:
                      '--width',str(s['width']),'--height',str(s['height']),
                      '--seed',str(s['seed']),'--prompt-file',str(prompt),
                      '--output',str(destination),'--disable-image-metadata']
-            if selection:
-                command += ['--lora-model-dir', str(Path(selection['file_path']).parent),
-                            '--lora-apply-mode', 'at_runtime']
+            if adapters:
+                folders = {str(Path(adapter['file_path']).parent) for adapter in adapters}
+                if len(folders) > 1:
+                    raise ValueError('Stacked Chroma LoRAs must be installed in the same LoRA folder')
+                command += ['--lora-model-dir', folders.pop(), '--lora-apply-mode', 'at_runtime']
             if s.get('preview_dir'):
                 # About eight decoded previews per image, whatever the step count.
                 command += ['--preview', 'vae', '--preview-path', str(Path(s['preview_dir'])/'preview.png'),

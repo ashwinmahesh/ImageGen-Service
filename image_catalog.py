@@ -193,6 +193,13 @@ def _number(value, integer=False):
     return value
 
 
+def _adapter(value):
+    """Public fields of a saved adapter selection; local paths and checksums stay out of the gallery."""
+    if not (isinstance(value, dict) and isinstance(value.get('id'), str)):
+        return None
+    return {'id': value['id'], 'name': str(value.get('name', value['id'])), 'strength': _number(value.get('strength'))}
+
+
 def image_record(root, image_dir, identifier):
     path = resolve_image(root, image_dir, identifier)
     stat = path.stat()
@@ -213,12 +220,9 @@ def image_record(root, image_dir, identifier):
     created = _number(data.get('created'))
     if created is None or not 0 < created <= 253402300799:
         created = stat.st_mtime
-    adapter = data.get('lora')
-    if isinstance(adapter, dict) and isinstance(adapter.get('id'), str):
-        adapter = {'id': adapter['id'], 'name': str(adapter.get('name', adapter['id'])),
-                   'strength': _number(adapter.get('strength'))}
-    else:
-        adapter = None
+    adapter = _adapter(data.get('lora'))
+    stack = [_adapter(item) for item in data['loras']] if isinstance(data.get('loras'), list) else []
+    stack = [item for item in stack if item] or None
     prompt = data.get('prompt') if isinstance(data.get('prompt'), str) else None
     return {
         'id': identifier, 'file_path': str(path),
@@ -230,6 +234,7 @@ def image_record(root, image_dir, identifier):
         'seed': _number(data.get('seed'), integer=True),
         'steps': _number(data.get('steps'), integer=True),
         'generation_seconds': _number(data.get('seconds')), 'lora': adapter,
+        'loras': stack,
         'tags': read_tags(read_metadata(root / 'image-index' / f'{identifier}.json'), data),
         'file_size': stat.st_size, '_version': f'{stat.st_mtime_ns}-{stat.st_size}',
     }
@@ -254,8 +259,8 @@ def list_images(root, image_dir, query='', order='newest', limit=24, offset=0, t
         searchable += ' ' + ' '.join(record['tags'])
         if not required_tags.issubset({tag.casefold() for tag in record['tags']}):
             continue
-        if record['lora']:
-            searchable += ' ' + record['lora']['id'] + ' ' + record['lora']['name']
+        for item in record['loras'] or ([record['lora']] if record['lora'] else []):
+            searchable += ' ' + item['id'] + ' ' + item['name']
         if query and query not in searchable.casefold():
             continue
         records.append(record)

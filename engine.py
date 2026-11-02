@@ -2,7 +2,7 @@
 import gc
 from model_lifecycle import operation
 from config import MODEL_DIR
-from lora_catalog import effective_prompt
+from lora_catalog import adapter_list, effective_prompt
 
 
 def enable_z_image_lokr():
@@ -37,9 +37,10 @@ def enable_z_image_lokr():
 def load_z_image(selection):
     from mflux.models.z_image import ZImageTurbo
     enable_z_image_lokr()
+    adapters = adapter_list(selection)
     return ZImageTurbo(model_path=str(MODEL_DIR), quantize=4, bake_lora=False,
-        lora_paths=[selection["file_path"]] if selection else None,
-        lora_scales=[selection["strength"]] if selection else None)
+        lora_paths=[adapter["file_path"] for adapter in adapters] or None,
+        lora_scales=[adapter["strength"] for adapter in adapters] or None)
 
 
 def release_cache():
@@ -57,7 +58,8 @@ class ZImageEngine:
         self._ensure_model(None)
 
     def _ensure_model(self, selection):
-        key = (selection["file_path"], selection["sha256"], selection["strength"]) if selection else ()
+        # Any change to the stack, its order or a strength reloads clean weights.
+        key = tuple((adapter["file_path"], adapter["sha256"], adapter["strength"]) for adapter in adapter_list(selection))
         if self._model is not None and self._selection_key == key:
             return
         # Release the old model before creating the replacement on this 24 GB Mac.

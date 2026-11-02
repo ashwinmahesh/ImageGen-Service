@@ -263,7 +263,7 @@ class JobStore:
         for row in db.execute("SELECT * FROM jobs WHERE status='queued'"+condition+" ORDER BY queue_position,sequence"):
             request=json.loads(row['payload'])
             if eligible_models is not None and request.get('model') not in eligible_models:continue
-            enabled=(loras_enabled or not request.get('lora')) and (llm_enabled or not request.get('expand_prompt'))
+            enabled=(loras_enabled or not (request.get('lora') or request.get('loras'))) and (llm_enabled or not request.get('expand_prompt'))
             if enabled:return row
             if eligible_models is None:return None
         return None
@@ -372,7 +372,7 @@ class JobStore:
             counts['next_job_id']=head['id'] if head else None
             counts['next_model']=json.loads(head['payload']).get('model') if head else None
             counts['next_requires_llm']=bool(head and json.loads(head['payload']).get('expand_prompt'))
-            counts['next_requires_lora']=bool(head and json.loads(head['payload']).get('lora'))
+            counts['next_requires_lora']=bool(head and any(json.loads(head['payload']).get(key) for key in ('lora','loras')))
             return counts
 
     def listing(self,limit=24,offset=0,status=None,model=None):

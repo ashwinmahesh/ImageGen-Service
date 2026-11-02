@@ -12,7 +12,7 @@ import time
 
 from PIL import Image
 from config import ROOT, MODEL_DIR, PROFILE, PROJECT_ROOT
-from lora_catalog import effective_prompt
+from lora_catalog import adapter_list, effective_prompt
 from model_assets import validate_snapshot
 
 
@@ -126,8 +126,10 @@ class MfluxResult:
                 if not PROFILE.get('mask_editing') or not reference:
                     raise ValueError('Masks require a Qwen photo edit and source reference')
                 command+=['--mask-image',str(settings['mask_path'])]
+            for adapter in adapter_list(selection):
+                command+=['--lora',adapter['file_path'],str(adapter['strength'])]
             if selection:
-                command+=['--lora',selection['file_path'],str(selection['strength']),'--no-bake-lora']
+                command.append('--no-bake-lora')
             if settings.get('preview_dir'):
                 command+=['--stepwise-image-output-dir',str(settings['preview_dir'])]
             if self.engine is not None and (settings.get('keep_loaded') or self.engine.resident is not None):

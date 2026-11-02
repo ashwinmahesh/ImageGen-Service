@@ -48,7 +48,29 @@ def resolve_lora(identifier, strength=None, *, model=None):
             "trigger_prompt": entry.get("trigger_prompt", "")}
 
 
+def adapter_list(lora):
+    """A request's adapters as a list: one selection, a stacked list, or None."""
+    if not lora:
+        return []
+    return list(lora) if isinstance(lora, list) else [lora]
+
+
+def adapter_identity(lora):
+    """Checksum pinned on a job: one adapter's sha256, or one hash over a stack in order."""
+    adapters = adapter_list(lora)
+    if not adapters:
+        return None
+    if len(adapters) == 1:
+        return adapters[0]["sha256"]
+    return hashlib.sha256("|".join(adapter["sha256"] for adapter in adapters).encode()).hexdigest()
+
+
 def effective_prompt(prompt, selection):
-    trigger = selection.get("trigger_prompt", "") if selection else ""
-    present = bool(trigger and re.search(r"(?<!\w)" + re.escape(trigger) + r"(?!\w)", prompt, flags=re.IGNORECASE))
-    return f"{trigger}, {prompt}" if trigger and not present else prompt
+    """Prefix each adapter's trigger words once, unless the prompt already contains them."""
+    missing = []
+    for adapter in adapter_list(selection):
+        trigger = adapter.get("trigger_prompt", "")
+        present = bool(trigger and re.search(r"(?<!\w)" + re.escape(trigger) + r"(?!\w)", prompt, flags=re.IGNORECASE))
+        if trigger and not present and trigger not in missing:
+            missing.append(trigger)
+    return ", ".join([*missing, prompt]) if missing else prompt
