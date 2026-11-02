@@ -16,7 +16,9 @@ def inspect_adapter(source,model):
             info=weights.metadata() or {}
     except Exception as error:
         raise ValueError('Invalid or incomplete .safetensors file; download the adapter weights, not an HTML page or a checkpoint in another format') from error
-    if not keys or not any('lora' in key for key in keys):
+    # Z-Image also accepts LyCORIS LoKr (lokr_w1/lokr_w2), applied through the same adapter path.
+    lokr=model=='z-image-turbo' and any('.lokr_w1' in key for key in keys)
+    if not keys or not (lokr or any('lora' in key for key in keys)):
         raise ValueError('This file does not contain LoRA tensors')
     metadata=json.dumps({key:info.get(key) for key in ('ss_base_model_version','ss_model_type','modelspec.architecture')}).lower()
     if model=='z-image-turbo':
