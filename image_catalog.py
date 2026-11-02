@@ -18,6 +18,12 @@ IDENTIFIER = re.compile(r'[0-9a-f]{32}')
 MAX_METADATA_BYTES = 256 * 1024
 _thumbnail_slots = threading.BoundedSemaphore(2)
 _index_lock = threading.Lock()
+# In-memory library index per (root, image_dir); see _library().
+_library_lock = threading.Lock()
+_libraries = {}
+# exFAT keeps times in 10 ms steps, so a folder changed this recently may change
+# again without a new timestamp; such folders are rechecked file by file.
+SETTLE_NS = 2_000_000_000
 
 
 class ImageDeleteConflict(Exception):
@@ -114,6 +120,7 @@ def write_index(root, identifier, path, tags):
             temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)
+    forget_library(root)
 
 
 def update_tags(root, image_dir, identifier, tags):
@@ -172,6 +179,7 @@ def delete_image(root, image_dir, identifier, *, expected_path):
             for original, temporary in reversed(staged):
                 temporary.replace(original)
             raise
+        forget_library(root)
         pending = []
         for _, temporary in staged:
             try:
@@ -240,32 +248,99 @@ def image_record(root, image_dir, identifier):
     }
 
 
+def _stamp(path):
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return info.st_mtime_ns, info.st_size
+
+
+def _folder_stamp(folder):
+    try:
+        return folder.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _record_stamp(root, image_dir, identifier, path):
+    """Every file an image's record is read from: its index entry, the default PNG, and the resolved PNG and sidecar."""
+    files = [root / 'image-index' / f'{identifier}.json', image_dir / f'{identifier}.png']
+    if path is not None:
+        files += [path, path.with_suffix('.json')]
+    return tuple(_stamp(item) for item in files)
+
+
+def _library_entry(root, image_dir, identifier):
+    path = resolve_image(root, image_dir, identifier)
+    # Stamped before reading, so a file replaced mid-read is read again next time.
+    stamp = _record_stamp(root, image_dir, identifier, path)
+    record = image_record(root, image_dir, identifier)
+    searchable = ' '.join(str(record[key]) for key in ['prompt', 'seed', 'size', 'model'] if record[key] is not None)
+    searchable += ' ' + ' '.join(record['tags'])
+    for item in record['loras'] or ([record['lora']] if record['lora'] else []):
+        searchable += ' ' + item['id'] + ' ' + item['name']
+    return {'record': record, 'path': Path(record['file_path']), 'stamp': stamp,
+            'search': searchable.casefold(), 'tags': {tag.casefold() for tag in record['tags']}}
+
+
+def _library(root, image_dir):
+    """Every saved image's record, newest first, kept in memory between requests.
+
+    Writers replace files (temporary file + rename), so an unchanged modification time on
+    every watched folder means nothing was added, rewritten or removed: the cached list is
+    returned without touching any file. Otherwise each image is checked with stat calls and
+    only new or changed ones are read again.
+    """
+    key = (str(root), str(image_dir))
+    with _library_lock:
+        state = _libraries.get(key) or {'signature': None, 'entries': {}, 'ordered': []}
+        folders = {root / 'image-index', image_dir, *(entry['path'].parent for entry in state['entries'].values())}
+        signature = {str(folder): _folder_stamp(folder) for folder in folders}
+        if state['signature'] == signature:
+            return state['ordered']
+        now = time.time_ns()
+        identifiers = set()
+        for folder, pattern in [(image_dir, '*.png'), (root / 'image-index', '*.json')]:
+            if folder.is_dir():
+                identifiers.update(path.stem for path in folder.glob(pattern) if valid_identifier(path.stem))
+        entries = {}
+        for identifier in identifiers:
+            previous = state['entries'].get(identifier)
+            if previous and _record_stamp(root, image_dir, identifier, previous['path']) == previous['stamp']:
+                entries[identifier] = previous
+                continue
+            try:
+                entries[identifier] = _library_entry(root, image_dir, identifier)
+            except (OSError, ValueError):
+                continue
+        for entry in entries.values():
+            signature.setdefault(str(entry['path'].parent), _folder_stamp(entry['path'].parent))
+        settled = all(stamp is None or now - stamp > SETTLE_NS for stamp in signature.values())
+        ordered = sorted(entries.values(), key=lambda entry: (entry['record']['created'], entry['record']['id']), reverse=True)
+        _libraries[key] = {'signature': signature if settled else None, 'entries': entries, 'ordered': ordered}
+        return ordered
+
+
+def forget_library(root):
+    """Make the next listing recheck every image under root (after this process changes its files)."""
+    with _library_lock:
+        for (cached_root, _), state in _libraries.items():
+            if cached_root == str(root):
+                state['signature'] = None
+
+
 def list_images(root, image_dir, query='', order='newest', limit=24, offset=0, tags=None):
+    """One page of matching records; search and tag filters run on the in-memory library index."""
     if not root.is_dir():
         raise OSError('Project storage is unavailable')
-    identifiers = set()
-    for folder, pattern in [(image_dir, '*.png'), (root / 'image-index', '*.json')]:
-        if folder.is_dir():
-            identifiers.update(path.stem for path in folder.glob(pattern) if valid_identifier(path.stem))
-    records = []
     query = query.casefold().strip()
     required_tags = {tag.casefold() for tag in normalize_tags(tags or [])}
-    for identifier in identifiers:
-        try:
-            record = image_record(root, image_dir, identifier)
-        except (OSError, ValueError):
-            continue
-        searchable = ' '.join(str(record[key]) for key in ['prompt', 'seed', 'size', 'model'] if record[key] is not None)
-        searchable += ' ' + ' '.join(record['tags'])
-        if not required_tags.issubset({tag.casefold() for tag in record['tags']}):
-            continue
-        for item in record['loras'] or ([record['lora']] if record['lora'] else []):
-            searchable += ' ' + item['id'] + ' ' + item['name']
-        if query and query not in searchable.casefold():
-            continue
-        records.append(record)
-    records.sort(key=lambda item: (item['created'], item['id']), reverse=order == 'newest')
-    return records[offset:offset + limit], len(records)
+    matches = [entry['record'] for entry in _library(root, image_dir)
+               if required_tags <= entry['tags'] and (not query or query in entry['search'])]
+    if order != 'newest':
+        matches.reverse()
+    return [dict(record) for record in matches[offset:offset + limit]], len(matches)
 
 
 def thumbnail(root, image_dir, identifier):
