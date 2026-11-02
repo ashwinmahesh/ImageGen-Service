@@ -186,6 +186,7 @@ async def lifespan(app):
         await asyncio.get_running_loop().run_in_executor(executor,initialize_service)
         job_worker.start(executor)
         if progress_tracker:progress_tracker.start()
+        threading.Thread(target=warm_gallery,name='gallery-index',daemon=True).start()
         yield
     finally:
         try:
@@ -1250,6 +1251,15 @@ def catalog_roots():
     if ROOT != MODEL_ROOTS[API_MODEL]:
         return {API_MODEL:ROOT}
     return MODEL_ROOTS
+
+
+def warm_gallery():
+    """Build the gallery's in-memory index at startup so the first visit does not read every sidecar."""
+    for origin,folder in catalog_roots().items():
+        try:
+            if folder.is_dir():image_catalog.list_images(folder,IMAGE_DIR if folder==ROOT else folder/'images',limit=1)
+        except (OSError,ValueError,RuntimeError):
+            log.warning('Could not index saved images for %s; the gallery will retry when opened',origin,exc_info=True)
 
 
 def image_location(identifier):
