@@ -236,6 +236,8 @@ class GenerateRequest(BaseModel):
     task: Literal['generate','edit'] = Field(default='generate',description='generate retains the existing generation/reference workflow. edit requires a source photo and a setup editing-capable model; prompt is an edit instruction, with preservation-focused expansion and no composition variation.')
     preserve: str | None = Field(default=None,max_length=1000,description='Edit task only: optional explicit requirements for what must stay unchanged, such as face, pose or background. These are prompt constraints, not a pixel mask or a guarantee.')
     mask_image: str | None = Field(default=None,max_length=4096,description='Qwen photo edits only: absolute local path to a mask matching the oriented source photo. White pixels are edited, black pixels preserve the resized source. Upload mask PNG bytes through /v1/reference-images if needed.')
+    edit_strength: float | None = Field(default=None,ge=0.1,le=1,allow_inf_nan=False,description='Qwen photo edits only: how much to redraw, 0.1–1. Omitted/1.0 redraws from scratch, so the instruction can replace or add things. Lower values start from the photo partway through sampling and keep its shapes, lighting and colours; 0.45–0.65 suits subtle tweaks to a selected area, and below about 0.3 little changes. Works with or without mask_image.')
+    mask_feather: int = Field(default=0,ge=0,le=128,strict=True,description='Qwen selected-area edits only: blend the edit into the photo over this many output pixels outside mask_image. The model also redraws that band, which then fades into the original, hiding seams in skin tones, shadows and fabric. 0 (default) keeps a hard edge; 32–64 is typical. Pixels farther out stay exactly the source.')
 
     @model_validator(mode='before')
     @classmethod
@@ -314,6 +316,10 @@ class GenerateRequest(BaseModel):
             raise ValueError('preserve requires task:edit')
         if self.mask_image is not None and (self.task!='edit' or not profile.get('mask_editing')):
             raise ValueError('mask_image requires task:edit with Qwen-Image 2.1 Turbo')
+        if self.edit_strength is not None and (self.task!='edit' or not profile.get('edit_strength')):
+            raise ValueError('edit_strength requires task:edit with Qwen-Image 2.1 Turbo')
+        if self.mask_feather and self.mask_image is None:
+            raise ValueError('mask_feather requires mask_image')
         if profile.get('reference_mode')=='edit' and 'image_strength' in self.model_fields_set:
             raise ValueError('image_strength is unsupported for instruction editing; omit it and describe the desired change in prompt')
         if self.reference_image is not None and self.steps < 2:
@@ -596,12 +602,13 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             **({'keep_loaded':keep_weights_loaded(job)} if job and PROFILE.get('cli_module') else {}),
             image_path=geometry.image_path,
             image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
-            **({'mask_path':widen_mask_to_grid(mask_path)} if mask_path else {}),
+            **({'mask_path':widen_mask_to_grid(mask_path,grow=payload.mask_feather)} if mask_path else {}),
+            **({'edit_strength':payload.edit_strength} if payload.edit_strength is not None else {}),
             **({'preview_dir':str(preview_dir)} if preview_dir else {}),
         )
         result.save(str(path), overwrite=True)
         if mask_path:
-            composite_edit(path,geometry.image_path,mask_path)
+            composite_edit(path,geometry.image_path,mask_path,feather=payload.mask_feather)
         geometry.finish(path)
         elapsed = round(time.monotonic() - started, 2)
         adapters = adapter_list(selection)
@@ -623,7 +630,9 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
         }
         if payload.task=='edit':
             metadata.update(task='edit',preserve=payload.preserve,mask_image=payload.mask_image,
-                            edit_scope='mask' if payload.mask_image else 'whole_photo')
+                            edit_scope='mask' if payload.mask_image else 'whole_photo',
+                            edit_strength=payload.edit_strength if payload.edit_strength is not None else 1.0,
+                            **({'mask_feather':payload.mask_feather} if payload.mask_image else {}))
         if PROFILE.get('cli_module'):
             metadata[API_MODEL]={**model_details(API_MODEL),'low_ram':True,
                                  'reference_mode':'edit' if payload.reference_image else 'none'}
@@ -712,7 +721,7 @@ def capabilities(identifier=None,*,ready=None):
         'default_steps':profile['steps'],'max_steps':profile['max_steps'],
         identifier:{**model_details(identifier),'prompt_expansion_guidance':public_guidance(identifier)},
         'reference_mode':profile.get('reference_mode','variation'),'image_strength_supported':profile.get('reference_mode')!='edit',
-        'tasks':supported_tasks(profile),'mask_editing':bool(profile.get('mask_editing')),
+        'tasks':supported_tasks(profile),'mask_editing':bool(profile.get('mask_editing')),'edit_strength_supported':bool(profile.get('edit_strength')),
         'photo_editing':{'supported':'edit' in supported_tasks(profile),'models':[key for key in ready if 'edit' in supported_tasks(PROFILES[key])],
             'setup_hint':'Set up '+', '.join(profile['name'] for profile in PROFILES.values() if 'edit' in supported_tasks(profile))+'. Use make setup to add one.',
             'requires_reference':True,'default_reference_size':'auto','default_long_edge':None,'max_long_edge':2048,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
@@ -824,6 +833,11 @@ def normalized_request(payload):
         data.pop('preserve')
     if data['mask_image'] is None:
         data.pop('mask_image')
+    # Off by default; leaving them out keeps earlier request fingerprints unchanged.
+    if data['edit_strength'] is None:
+        data.pop('edit_strength')
+    if not data['mask_feather']:
+        data.pop('mask_feather')
     # Keep legacy request fingerprints stable for the default disabled feature.
     if not data['expand_prompt']:
         data.pop('expand_prompt')

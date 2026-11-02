@@ -8,6 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%2313b2ba%22%2F%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23082c30%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%208H9a3%203%200%200%200-3%203v12a3%203%200%200%200%203%203h14a3%203%200%200%200%203-3V13%22%2F%3E%3Cpath%20d%3D%22m7%2022%206-6%205%205%204-5%204%204M25%203v6m-3-3h6%22%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%2212%22%20r%3D%221.5%22%20fill%3D%22%23082c30%22%2F%3E%3C%2Fsvg%3E">
   <style>
 
+    .edit-tuning{margin-top:14px}.edit-tuning[hidden]{display:none}
     .lora-stack{display:grid;gap:8px;margin-top:10px}.lora-stack:empty{display:none}.lora-row{display:grid;grid-template-columns:minmax(0,1fr) 80px 42px;gap:8px;align-items:center}.lora-row .lora-remove{height:42px;padding:0;display:inline-flex;align-items:center;justify-content:center}.lora-remove svg{width:16px;height:16px}.add-lora{margin-top:10px}.add-lora[hidden]{display:none}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     button,input,select,textarea{font:inherit}button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.5}
@@ -76,7 +77,9 @@
           <details class="reference-path"><summary>Or use a file path</summary><div class="field"><div class="help-label"><label for="reference">Reference photo path</label><button type="button" class="help-button" aria-label="Help with Reference photo path" data-help="Enter an absolute path to an image on the Mac running this server, rather than a web address."><span aria-hidden="true">?</span></button></div><input id="reference" type="text" placeholder="/absolute/path/to/reference.jpg" autocomplete="off"></div></details>
           <div id="reference-options" class="reference-options" hidden><div class="help-label"><label for="strength">Keep the original</label><button type="button" class="help-button" aria-label="Help with Keep the original" data-help="Higher values preserve more of the reference photo; lower values allow bigger changes. Start at 0.6."><span aria-hidden="true">?</span></button></div><input id="strength" type="number" value="0.6" min="0" max="0.99" step="0.01"><p class="hint">Higher values preserve more of the photo. Describe the final image; this makes a variation, so exact localized edits are not reliable. The output automatically keeps the photo’s aspect ratio.</p></div>
         </section>
-        <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><div class="brush-tools" id="brush-tools" hidden><div class="brush-modes" role="group" aria-label="Selection tool"><button type="button" class="secondary" id="brush-paint" aria-pressed="true">Paint</button><button type="button" class="secondary" id="brush-rect" aria-pressed="false">Rectangle</button><button type="button" class="secondary" id="brush-erase" aria-pressed="false">Erase</button></div><label for="brush-size">Brush size<input type="range" id="brush-size" min="1" max="25" value="6"></label><button type="button" class="secondary" id="undo-stroke">Undo</button></div><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p></div>
+        <div class="field" id="edit-area-section" hidden><label for="edit-area">Area to edit</label><select id="edit-area"><option value="whole">Whole photo</option><option value="selected">Selected area</option></select><div class="brush-tools" id="brush-tools" hidden><div class="brush-modes" role="group" aria-label="Selection tool"><button type="button" class="secondary" id="brush-paint" aria-pressed="true">Paint</button><button type="button" class="secondary" id="brush-rect" aria-pressed="false">Rectangle</button><button type="button" class="secondary" id="brush-erase" aria-pressed="false">Erase</button></div><label for="brush-size">Brush size<input type="range" id="brush-size" min="1" max="25" value="6"></label><button type="button" class="secondary" id="undo-stroke">Undo</button></div><p class="hint" id="edit-area-hint">Qwen can edit a selected area. Klein edits the whole photo.</p>
+          <div class="edit-tuning" id="edit-strength-field" hidden><div class="help-label"><label for="edit-strength">Edit strength</label><button type="button" class="help-button" aria-label="Help with Edit strength" data-help="How much Qwen redraws. 1 starts from scratch, so it can replace or add things. Lower values start from your photo partway through, keeping its shapes, lighting and colours; 0.45–0.65 suits subtle tweaks, and below about 0.3 little changes."><span aria-hidden="true">?</span></button></div><input id="edit-strength" type="number" min="0.1" max="1" step="0.05" value="1"><p class="hint">1 replaces what’s there. Try 0.45–0.65 for subtle tweaks to a selected area.</p></div>
+          <div class="edit-tuning" id="blend-edge-field" hidden><div class="help-label"><label for="blend-edge">Blend edge</label><button type="button" class="help-button" aria-label="Help with Blend edge" data-help="Qwen also redraws a band this wide around your selection, then fades it into the original photo, so skin tones, shadows and fabric seams match. Pixels farther out stay exactly as they were. Hard edge keeps the selection's outline exact."><span aria-hidden="true">?</span></button></div><select id="blend-edge"><option value="0">Hard edge</option><option value="16">16 px</option><option value="32" selected>32 px</option><option value="64">64 px</option></select><p class="hint">Fades the edit into its surroundings to hide seams.</p></div></div>
         <div class="field" id="resolution-field"><div class="help-label"><label id="size-label" for="size">Image size</label><button type="button" class="help-button" aria-label="Help with image resolution" data-help="Choose output dimensions; larger images use more memory and time. With a reference photo, Auto detects its dimensions without upscaling (up to a 2048 px long edge). Choose a long edge only to override it; the photo’s aspect ratio is preserved."><span aria-hidden="true">?</span></button></div><select id="size"><option value="1024x1024">Square · 1024 × 1024</option><option value="1024x768">Landscape · 1024 × 768</option><option value="768x1024">Portrait · 768 × 1024</option><option value="768x768">Square · 768 × 768</option><option value="512x512">Quick draft · 512 × 512</option><option value="1536x1024">Large landscape · 1536 × 1024</option><option value="1024x1536">Large portrait · 1024 × 1536</option><option value="1536x1536">Large square · 1536 × 1536</option><option value="2048x2048">2K square · 2048 × 2048</option></select><select id="reference-size" aria-label="Reference resolution" hidden><option value="auto">Auto · match photo</option><option value="256">256 px long edge</option><option value="512">512 px long edge</option><option value="768">768 px long edge</option><option value="1024">1024 px long edge</option><option value="1536">1536 px long edge</option><option value="2048">2048 px long edge</option></select><p class="hint" id="reference-size-hint" hidden></p><p class="hint" id="size-hint" hidden>Larger images take longer and use more memory. Start at 1536 if other apps are open.</p></div>
         <div class="field"><div class="help-label"><label for="image-count">Number of images</label><button type="button" class="help-button" aria-label="Help with Number of images" data-help="Generate 1–5 options, one after another, with different seeds. More options take more time; composition variation can add further variety."><span aria-hidden="true">?</span></button></div><select id="image-count"><option value="1" selected>1 image</option><option value="2">2 options</option><option value="3">3 options</option><option value="4">4 options</option><option value="5">5 options</option></select><p class="hint" id="image-count-hint">Same prompt, different seeds. Options render one at a time and appear together for comparison.</p></div>
         <section id="variation-controls" hidden><div class="help-choice"><label class="immediate-choice"><input id="vary-prompt" type="checkbox" role="switch" class="setting-switch" checked>Different compositions with LLM</label><button type="button" class="help-button" aria-label="Help with Different compositions with LLM" data-help="Gives each option its own composition prompt while keeping your stated subjects and style. Requires at least two images and prompt expansion."><span aria-hidden="true">?</span></button></div><p class="hint" id="variation-hint"></p></section>
@@ -163,7 +166,7 @@
       for(const [id,field] of Object.entries(state.fields)){
         if(['model-choice','lora'].includes(id) || (id==='steps' && !sameModel))continue;
         const input=$(id);
-        if(['size','reference-size'].includes(id) && ![...input.options].some(option=>option.value===field.value))input.add(new Option(field.value.replace('x',' × '),field.value));
+        if(['size','reference-size','blend-edge'].includes(id) && ![...input.options].some(option=>option.value===field.value))input.add(new Option(id==='blend-edge' ? field.value+' px' : field.value.replace('x',' × '),field.value));
         input.value=field.value;if(input.type==='checkbox')input.checked=field.checked;
       }
       if(maskSupported()){maskStrokes=structuredClone(state.maskStrokes);maskUpload=state.maskUpload;savedMaskPath=state.savedMaskPath;}
@@ -319,7 +322,19 @@
         sourceContext.lineWidth=1.5; sourceContext.strokeStyle=brushMode==='erase' ? '#fca5a5' : palette.getPropertyValue('--accent-solid').trim(); sourceContext.stroke();
       }
     }
+    // Qwen-only edit controls: strength for any edit, blend edge for a selected area.
+    function updateEditTuning() {
+      const editing=workflow==='edit';
+      $('edit-strength-field').hidden=!editing || chosenProfile()?.edit_strength_supported!==true;
+      $('blend-edge-field').hidden=!editing || !maskSupported() || $('edit-area').value!=='selected';
+    }
+    function setBlendEdge(value) {
+      const text=String(value ?? 0);
+      if (![...$('blend-edge').options].some(option=>option.value===text)) $('blend-edge').add(new Option(text+' px',text));
+      $('blend-edge').value=text;
+    }
     function updateSourceCanvas() {
+      updateEditTuning();
       const image=$('reference-preview');
       updateWorkflowPreview();
       if ($('source-editor').hidden) return;
@@ -659,9 +674,14 @@
       if ($('seed').value !== '') payload.seed = Number($('seed').value);
       if ($('output-dir').value.trim()) payload.output_dir = $('output-dir').value.trim();
       if (referencePath) { payload.reference_image = referencePath; if (referenceMode !== 'edit') payload.image_strength = imageStrength; }
+      if (!$('edit-strength-field').hidden) {
+        const editStrength = Number($('edit-strength').value);
+        if (!(editStrength >= 0.1 && editStrength <= 1)) { showError('Edit strength must be between 0.1 and 1.'); $('edit-strength').focus(); return; }
+        if (editStrength < 1) payload.edit_strength = editStrength;
+      }
       generating = true; updateButton(); $('error').hidden = true; $('button-text').textContent = 'Submitting…';
       // Keep the submitted reference stable while upload and generation are running.
-      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = true;
+      for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','edit-strength','blend-edge','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = true;
       for (const control of $('lora-stack').querySelectorAll('select,input,button')) control.disabled = true; $('add-lora').disabled = true;
       $('announcement').textContent = 'Saving your image request…';
       try {
@@ -677,7 +697,7 @@
           payload.reference_image = uploaded.file_path; if (referenceMode !== 'edit') payload.image_strength = imageStrength;
           $('button-text').textContent = 'Generating…';
         }
-        if (workflow==='edit' && $('edit-area').value==='selected') payload.mask_image=await uploadSelection();
+        if (workflow==='edit' && $('edit-area').value==='selected') { payload.mask_image=await uploadSelection(); if (Number($('blend-edge').value)) payload.mask_feather=Number($('blend-edge').value); }
         const body = JSON.stringify(payload), remembered = JSON.parse(sessionStorage.getItem('imagegen-pending-'+workflow) || 'null');
         const key = remembered && remembered.body === body ? remembered.key : crypto.randomUUID();
         sessionStorage.setItem('imagegen-pending-'+workflow, JSON.stringify({body, key}));
@@ -693,7 +713,7 @@
         $('error').textContent = error instanceof TypeError ? 'Could not confirm the saved job. Check the queue before retrying. Submitting identical settings again reuses the same request key.' : error.message;
         $('error').hidden = false;
       } finally {
-        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = false;
+        for (const id of ['choose-photo', 'remove-photo', 'reference', 'strength', 'edit', 'lora', 'lora-strength', 'reference-size','mode-generate','mode-edit','model-choice','edit-area','edit-strength','blend-edge','brush-paint','brush-rect','brush-erase','brush-size']) $(id).disabled = false;
         for (const control of $('lora-stack').querySelectorAll('select,input,button')) control.disabled = false; $('add-lora').disabled = false; updateLoRA(false);
         generating = false; updateButton(); await checkHealth();
       }
@@ -761,6 +781,7 @@
       const size=request.size || (reference ? 'auto' : '1024x1024'),edge=/^(\d+)x\1$/.exec(size);
       if(reference)set('reference-size',edge ? edge[1] : 'auto');else set('size',size);
       set('reference',reference);set('edit-area',request.mask_image ? 'selected' : 'whole');
+      set('edit-strength',request.edit_strength ?? 1);set('blend-edge',request.mask_feather ?? 0);
       Object.assign(state,{initialized:true,referenceFile:null,referenceUpload:null,referencePreviewURL:null,referenceDimensions:null,usingReferenceSizing:!!reference,
         referenceSrc:preview,referenceHidden:!reference,referenceName:reference ? owner==='edit' ? 'Photo being edited' : 'Reference photo' : '',
         referenceInfo:reference ? 'From this job · '+reference.split('/').pop() : '',
@@ -952,7 +973,7 @@
           referenceDimensions=[item.width,item.height].every(value=>Number.isFinite(value) && value>0) ? [item.width,item.height] : null;
           $('reference-name').textContent='Gallery photo';$('reference-info').textContent=(item.size || 'PNG')+' · ready for editing';
           $('reference-card').hidden=false;$('reference-preview').src=url.href;$('choose-photo').textContent='Change photo';
-          $('prompt').value='';$('preserve').value='';$('seed').value='';$('image-count').value='1';$('edit-area').value='whole';applyLoraStack([]);
+          $('prompt').value='';$('preserve').value='';$('seed').value='';$('image-count').value='1';$('edit-area').value='whole';$('edit-strength').value='1';setBlendEdge(32);applyLoraStack([]);
           $('tags').value=(item.tags || []).join(', ');$('reference-size').value='auto';
           expansionPreview=null;$('expanded-details').hidden=true;
           updateReferenceSizing();updateVariationControls();updateSourceCanvas();updateWorkflowPreview();
@@ -969,7 +990,7 @@
         displayedBatch=null;lastResult=null;$('image-options').replaceChildren();updateWorkflowPreview();
         if (item.model && modelCatalog.some(profile=>profile.id===item.model)) { $('model-choice').value=item.model; updateModelChoice(); await loadLoRAs(); }
         if(targetVersion!==workflowVersion)return;
-        if(workflow==='edit')$('preserve').value=metadata.preserve || '';
+        if(workflow==='edit'){$('preserve').value=metadata.preserve || '';$('edit-strength').value=metadata.edit_strength ?? 1;setBlendEdge(metadata.mask_feather ?? 0);}
         const sameModel = !item.model || item.model === chosenModel();
         if (!sameModel) warnings.push(modelCatalog.some(profile=>profile.id===item.model) ? `Select ${item.model} to restore model-specific settings.` : `This image used ${item.model}; that model is not set up here. Model-specific settings use current defaults.`);
         $('prompt').value = metadata.expanded_prompt || item.prompt || '';

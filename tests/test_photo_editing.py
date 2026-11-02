@@ -13,7 +13,7 @@ import mflux_engine
 import prompt_expander
 from model_profiles import PROFILES
 from photo_workflows import EDIT_SCOPE
-from reference_geometry import prepare_geometry,prepare_mask,composite_edit,read_mask,ReferenceError
+from reference_geometry import prepare_geometry,prepare_mask,composite_edit,read_mask,widen_mask_to_grid,ReferenceError
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -112,6 +112,50 @@ class EditMaskGeometryTest(unittest.TestCase):
             with Image.open(generated) as result:
                 self.assertEqual(result.getpixel((0,0)),(255,0,0,255))
                 self.assertEqual(result.getpixel((1,0)),(50,100,150,255))
+
+    def test_feather_fades_only_a_band_outside_the_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            for feather in (0,32):
+                source=root/'source.png';generated=root/'generated.png';mask=root/'mask.png'
+                Image.new('RGB',(200,40),'red').save(source);Image.new('RGB',(200,40),(0,128,0)).save(generated)
+                pixels=Image.new('L',(200,40));ImageDraw.Draw(pixels).rectangle((0,0,99,39),fill=255);pixels.save(mask)
+                composite_edit(generated,source,mask,feather=feather)
+                with Image.open(generated) as result:
+                    row=[result.getpixel((x,20))[:3] for x in range(200)]
+                self.assertTrue(all(pixel==(0,128,0) for pixel in row[:100]))
+                self.assertTrue(all(pixel==(255,0,0) for pixel in row[100+feather+1:]))
+                if feather:
+                    band=row[100:100+feather]
+                    self.assertTrue(all(0<pixel[1]<128 for pixel in band[:feather//2]),band)
+                    self.assertEqual([pixel[1] for pixel in band],sorted((pixel[1] for pixel in band),reverse=True))
+                else:
+                    self.assertEqual(row[100],(255,0,0))
+
+    def test_grow_frees_model_patches_within_the_feather(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'mask.png'
+            pixels=Image.new('L',(64,64));pixels.putpixel((20,20),200);pixels.save(path)
+            for grow,expected in ((0,[(16,16,31,31)]),(16,[(0,0,47,47)]),(17,[(0,0,63,63)])):
+                with self.subTest(grow=grow),Image.open(widen_mask_to_grid(str(path),grow=grow)) as widened:
+                    self.assertEqual(widened.getbbox(),(expected[0][0],expected[0][1],expected[0][2]+1,expected[0][3]+1))
+                    self.assertEqual(widened.getextrema(),(0 if grow<17 else 200,200))
+
+    def test_edit_strength_reaches_qwen_and_is_refused_elsewhere(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);commands=[]
+            def run(command,**kwargs):
+                commands.append(command);Image.new('RGBA',(256,256),'green').save(command[command.index('--output')+1])
+                return subprocess.CompletedProcess(command,0)
+            settings=dict(prompt='Edit',width=256,height=256,seed=1,num_inference_steps=8,image_path='/tmp/photo.png',edit_strength=.55)
+            with patch.object(mflux_engine,'ROOT',root),patch.object(mflux_engine.subprocess,'run',side_effect=run):
+                with patch.object(mflux_engine,'PROFILE',PROFILES['qwen-image-2.1-turbo']):
+                    mflux_engine.MfluxResult(settings).save(root/'out.png')
+                    with self.assertRaisesRegex(ValueError,'source reference'):mflux_engine.MfluxResult({**settings,'image_path':None}).save(root/'text.png')
+                with patch.object(mflux_engine,'PROFILE',PROFILES['flux2-klein-4b']),self.assertRaisesRegex(ValueError,'Qwen photo edit'):
+                    mflux_engine.MfluxResult(settings).save(root/'klein.png')
+            self.assertEqual(commands[0][commands[0].index('--strength')+1],'0.55')
+            self.assertEqual(len(commands),1)
 
     def test_mask_is_forwarded_to_qwen_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -233,8 +277,28 @@ try:
             assert image.getpixel((75,75))==(0,128,0,255)
         assert fixture.fake.calls[-1]['mask_path']
         assert not Path(fixture.fake.calls[-1]['mask_path']).exists()
+        assert 'edit_strength' not in fixture.fake.calls[-1]
+        # Subtle edit with a blended edge: inside stays generated, the band fades, farther out stays the source.
+        response=fixture.client.post('/v1/images/edits',json={**base,'mask_image':str(mask),'edit_strength':.5,'mask_feather':32})
+        assert response.status_code==200,response.text
+        assert fixture.fake.calls[-1]['edit_strength']==.5
+        with Image.open(response.json()['data'][0]['file_path']) as image:
+            assert image.getpixel((75,75))==(0,128,0,255)
+            blended=image.getpixel((106,75))
+            assert blended not in ((255,0,0,255),(0,128,0,255)) and blended[0]>0 and blended[1]>0,blended
+            assert image.getpixel((140,75))==(255,0,0,255) and image.getpixel((0,0))==(255,0,0,255)
+        metadata=json.loads(Path(response.json()['data'][0]['metadata_path']).read_text())
+        assert (metadata['edit_strength'],metadata['mask_feather'])==(.5,32),metadata
+        # Defaults stay out of stored requests, so earlier fingerprints are unchanged.
+        plain=server.normalized_request(server.EditRequest.model_validate({**base,'mask_image':str(mask)}))
+        assert 'edit_strength' not in plain and 'mask_feather' not in plain,plain
+        assert fixture.client.post('/v1/images/edits',json={**base,'edit_strength':.05}).status_code==422
+        assert fixture.client.post('/v1/images/edits',json={**base,'mask_feather':32}).status_code==422
+        assert fixture.client.post('/v1/images/edits',json={**base,'mask_image':str(mask),'mask_feather':200}).status_code==422
+        assert fixture.client.post('/v1/jobs',json={**fixture.payload,'edit_strength':.5}).status_code==422
     else:
         assert fixture.client.post('/v1/images/edits',json={**base,'mask_image':str(mask)}).status_code==422
+        assert fixture.client.post('/v1/images/edits',json={**base,'edit_strength':.5}).status_code==422
     def refine(prompt,**kwargs):
         assert kwargs['task']=='edit' and kwargs['preserve']=='face and background'
         return dict(original_prompt=prompt,expanded_prompt=prompt+'\nKeep everything else unchanged.',task='edit',model='fake',revision='pinned',mode='expand',policy_version=1,seconds=.1)
