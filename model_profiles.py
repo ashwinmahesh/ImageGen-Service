@@ -39,7 +39,7 @@ PROFILES = {
                      notice='Commercial use of these model weights requires a separate license from Black Forest Labs.')),
     'qwen-image-2.1-turbo': dict(name='Qwen-Image 2.1 Turbo', backend='mflux', steps=8, max_steps=8,
         repository='mflux-community/qwen-image-2-1-turbo-mflux-q4', revision='bda8951ec6b8cc288a961432fe15c22433521a1d',
-        base_model='qwen-image-2.1-turbo', quantization=4, reference_mode='edit', vae_tiling=True, mask_editing=True,
+        base_model='qwen-image-2.1-turbo', quantization=4, reference_mode='edit', vae_tiling=True, mask_editing=True, edit_strength=True,
         cli_module='mflux.models.qwen21.cli.qwen21_edit_generate',
         required_files=['transformer/model.safetensors.index.json', 'text_encoder/model.safetensors.index.json',
                         'vae/model.safetensors.index.json', 'text_encoder/config.json', 'model_index.json',

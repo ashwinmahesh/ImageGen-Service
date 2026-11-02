@@ -126,6 +126,10 @@ class MfluxResult:
                 if not PROFILE.get('mask_editing') or not reference:
                     raise ValueError('Masks require a Qwen photo edit and source reference')
                 command+=['--mask-image',str(settings['mask_path'])]
+            if settings.get('edit_strength') is not None:
+                if not PROFILE.get('edit_strength') or not reference:
+                    raise ValueError('Edit strength requires a Qwen photo edit and source reference')
+                command+=['--strength',str(settings['edit_strength'])]
             for adapter in adapter_list(selection):
                 command+=['--lora',adapter['file_path'],str(adapter['strength'])]
             if selection:

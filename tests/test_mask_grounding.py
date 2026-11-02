@@ -370,10 +370,10 @@ try:
         return real_generate(**kwargs)
     fixture.fake.generate_image=spy_generate
     real_composite=server.composite_edit
-    def spy_composite(path,source_path,mask_path):
+    def spy_composite(path,source_path,mask_path,feather=0):
         with Image.open(mask_path) as image: mask=image.convert('L'); mask.load()
-        composites.append({'mask_name':Path(mask_path).name,'mask':mask})
-        return real_composite(path,source_path,mask_path)
+        composites.append({'mask_name':Path(mask_path).name,'mask':mask,'feather':feather})
+        return real_composite(path,source_path,mask_path,feather=feather)
     # A 2x2 pixel selection inside one 16px model patch of a 256x256 photo, over a photo with no flat areas.
     source=fixture.root/'source.png'
     photo=Image.new('RGB',(256,256))

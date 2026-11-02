@@ -216,6 +216,15 @@ To edit a saved result, open **Gallery**, select the image and choose **Edit pho
 
 The Edit preview uses a single box: upload or select a gallery photo to show it centered at the same display scale as generated images, then the completed edit replaces that preview. Removing the photo returns the box to its empty state. The source file stays unchanged.
 
+### Edit strength and blend edge (Qwen)
+
+Two settings under **Area to edit** tune Qwen edits:
+
+- **Edit strength** (0.1–1, default 1) is how much Qwen redraws. At 1 it starts from scratch, so it can replace or add things. Lower values start from your photo partway through, keeping the shapes, lighting and colours: try **0.45–0.65** for subtle tweaks such as changing a colour or smoothing a texture in a selected area. Below about 0.3 little changes.
+- **Blend edge** (shown for a selected area; 32 px by default in the webpage) redraws a band that wide around the selection and fades it into the original, so skin tones, shadows and fabric seams match. Pixels farther out stay exactly as they were. **Hard edge** keeps the old behaviour: the outline of the selection is exact.
+
+There is no guidance (CFG) setting: Qwen-Image 2.1 Turbo is distilled and always runs at guidance 1.
+
 ### How a selected area steers the edit (Qwen)
 
 A mask alone only decides which pixels are kept; the model never sees it. So for every masked Qwen edit the service automatically adds one line to the instruction that names where the selection is, as `{"bbox_2d": [x1, y1, x2, y2]}` boxes on the 0–1000 scale of the image that Qwen's text encoder was trained to read. There is no setting for this: choosing **Selected area** (or sending `mask_image`) is the signal. Whole-photo edits, Klein and ordinary generation send exactly the prompts they always did.

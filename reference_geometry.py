@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tempfile
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageFilter, ImageOps, UnidentifiedImageError
 
 MAX_REFERENCE_EDGE = 2048
 
@@ -137,29 +137,44 @@ def prepare_mask(mask_path, geometry, scratch_root):
         yield str(path)
 
 
-def widen_mask_to_grid(mask_path, grid=16):
+def widen_mask_to_grid(mask_path, grid=16, grow=0):
     """Give every model patch the strongest mask value it contains, so thin strokes are not blended back to the source.
 
     Qwen edits in 16x16 latent patches and pins each one toward the source in proportion to how much of it
     is unselected. Per-patch maxima widen strokes without thresholding or averaging, so soft 0-255 coverage
-    survives. Only inference receives this copy; composite_edit still uses the exact prepared mask.
+    survives. grow (output pixels) also frees the patches within that distance, so the model redraws the
+    band composite_edit feathers. Only inference receives this copy; composite_edit still uses the exact mask.
     """
     with Image.open(mask_path) as image:
         mask=image.convert('L')
-    widened=Image.new('L',mask.size,0)
-    for top in range(0,mask.height,grid):
-        for left in range(0,mask.width,grid):
-            box=(left,top,min(left+grid,mask.width),min(top+grid,mask.height))
-            value=mask.crop(box).getextrema()[1]
-            if value:
-                widened.paste(value,box)
+    columns,rows=-(-mask.width//grid),-(-mask.height//grid)
+    patches=Image.new('L',(columns,rows),0)
+    for row in range(rows):
+        for column in range(columns):
+            box=(column*grid,row*grid,min((column+1)*grid,mask.width),min((row+1)*grid,mask.height))
+            patches.putpixel((column,row),mask.crop(box).getextrema()[1])
+    if grow:
+        reach=-(-grow//grid)
+        patches=patches.filter(ImageFilter.MaxFilter(2*reach+1))
+    widened=patches.resize((columns*grid,rows*grid),Image.Resampling.NEAREST).crop((0,0,mask.width,mask.height))
     path=Path(mask_path).with_name('model-mask.png')
     widened.save(path)
     return str(path)
 
 
-def composite_edit(path, source_path, mask_path):
-    """Copy unselected source pixels exactly at the prepared output resolution."""
+def feathered_alpha(mask, feather):
+    """Full strength over the selection, fading to 0 about `feather` pixels outside it."""
+    selected=mask.point(lambda value:255 if value else 0)
+    if not feather:
+        return selected
+    # Two box blurs of the selection make a smooth ramp that is 0.5 at its edge and 0 one feather
+    # outside; doubling it keeps the whole selection at full strength.
+    soft=selected.filter(ImageFilter.BoxBlur(feather/2)).filter(ImageFilter.BoxBlur(feather/2))
+    return ImageChops.lighter(selected,soft.point(lambda value:min(255,2*value)))
+
+
+def composite_edit(path, source_path, mask_path, feather=0):
+    """Copy unselected source pixels exactly at the prepared output resolution, fading over `feather` pixels when set."""
     with Image.open(path) as image:
         generated=image.convert('RGBA')
     with Image.open(source_path) as image:
@@ -169,6 +184,6 @@ def composite_edit(path, source_path, mask_path):
     if generated.size!=source.size or mask.size!=source.size:
         raise ReferenceError('Masked edit output does not match the prepared source and mask')
     # Qwen already blends soft mask values. Copy only fully unselected pixels
-    # here, rather than applying fractional alpha a second time.
-    editable=mask.point(lambda value:255 if value else 0)
-    Image.composite(generated,source,editable).save(path,format='PNG')
+    # here, rather than applying fractional alpha a second time; a feather
+    # fades the band just outside the selection instead of cutting it.
+    Image.composite(generated,source,feathered_alpha(mask,feather)).save(path,format='PNG')
