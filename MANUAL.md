@@ -247,7 +247,7 @@ You can download a LoRA from Hugging Face or import one you already have. Your a
    make setup-lora
    ```
 
-4. Choose the model (Enter defaults to Z-Image Turbo). Paste a local file path, a Hugging Face repository such as `owner/repository`, or the LoRA's Hugging Face file-page/download URL. If the repository has several weight files, choose the adapter file from the list.
+4. Choose the model (Enter defaults to Z-Image Turbo). Paste a local file path, a Hugging Face repository such as `owner/repository`, the LoRA's Hugging Face file-page/download URL, or a Civitai model page such as `https://civitai.com/models/123`. Civitai fills in the name and trigger words; if a download needs sign-in, rerun with `CIVITAI_TOKEN=<your API key>`. If the repository has several weight files, choose the adapter file from the list.
 5. Enter a display name, a short ID, optional trigger words and a default strength (Enter defaults to `0.8`; allowed range `0–2`). The command adds `custom-` to the ID: `ink` becomes `custom-ink`.
 6. Reload the webpage, select that model and choose the new **Style adapter**. The service loads the weights and inserts configured trigger words automatically. For the API, discover it with `GET /v1/loras?model=z-image-turbo`, then use `"lora":"custom-ink"` and optionally `"lora_strength":0.8`. Do not put `<lora:...>` tags in the prompt.
 
