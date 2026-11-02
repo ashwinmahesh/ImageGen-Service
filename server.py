@@ -33,6 +33,7 @@ from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt, adapter_list, adapter_identity
 from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
+import gallery_search
 import gallery_store
 import image_catalog
 from job_queue import JobStore, QueueConflict, fingerprint, TERMINAL, KEEP_WEIGHTS_SETTING
@@ -52,6 +53,7 @@ import live_preview
 import prompt_expander
 from prompt_policy import public_guidance, public_edit_guidance
 from enhancer_profile import check_assets as check_enhancer_assets
+from search_profile import check_assets as check_search_assets
 
 # Downloads are an explicit separate step. Serving never needs the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -72,6 +74,12 @@ job_worker = None
 progress_tracker = None
 observability_monitor = None
 observability_error = None
+# Similar-image search is optional; without its model the gallery keeps exact search.
+gallery_embedder = None
+gallery_indexer = None
+gallery_vectors = None
+gallery_search_error = 'Gallery search has not started'
+SEARCH_WAIT_SECONDS = 10
 queue_client = QueueClient(int(os.environ.get("IMAGEGEN_QUEUE_PORT",DEFAULT_QUEUE_PORT)),project=PROJECT_ROOT)
 preview_gate = threading.Lock()
 
@@ -171,7 +179,7 @@ def initialize_service():
         if license.get('notice'):log.warning('%s: %s %s',PROFILES[identifier]['name'],license['notice'],license['url'])
     log.info('Generator ready for all setup models; default %s. Models load on demand.',API_MODEL)
     # Part of real startup only (tests replace initialize_service): imports touch the live image folders.
-    threading.Thread(target=prepare_gallery,name='gallery-import',daemon=True).start()
+    threading.Thread(target=lambda:(prepare_gallery(),start_gallery_search()),name='gallery-import',daemon=True).start()
 
 
 @asynccontextmanager
@@ -713,6 +721,7 @@ def health():
         except (OSError,RuntimeError,sqlite3.Error):
             state.update(status='error',queue={'error':'Queue storage unavailable'})
     state['queue_api']=queue_client.status()
+    state['gallery_search']=gallery_search_status()
     return state
 
 
@@ -1270,6 +1279,48 @@ def prepare_gallery():
         log.warning('Could not import saved images into the gallery; rerun python gallery_store.py',exc_info=True)
 
 
+def start_gallery_search():
+    """Embed gallery images in the background when the search model is set up (make download-search)."""
+    global gallery_embedder,gallery_indexer,gallery_vectors,gallery_search_error
+    try:
+        folder=check_search_assets(PROJECT_ROOT)
+    except (OSError,ValueError,RuntimeError) as error:
+        gallery_search_error=str(error)
+        log.info('Similar-image search is off: %s',error)
+        return
+    gallery_embedder=gallery_search.Embedder(folder)
+    gallery_vectors=gallery_search.VectorIndex(gallery_db)
+    gallery_indexer=gallery_search.Indexer(gallery_db,gallery_embedder,busy=busy.locked)
+    gallery_indexer.start()
+    gallery_search_error=None
+
+
+def gallery_search_status():
+    if gallery_indexer is None:
+        return {'available':False,'reason':gallery_search_error}
+    try:
+        return {'available':True,**gallery_indexer.status()}
+    except (OSError,RuntimeError,sqlite3.Error):
+        return {'available':True,'state':gallery_indexer.state,'error':'Gallery storage unavailable'}
+
+
+def similar_to_image(identifier):
+    """Ranked images that look like this one, embedding it now if the indexer has not reached it yet."""
+    row=gallery_db().get(identifier) if image_catalog.valid_identifier(identifier) else None
+    if row is None:
+        raise FileNotFoundError('Saved image is unavailable')
+    vector=gallery_vectors.vector_of(row['number'])
+    if vector is None:
+        try:
+            picture=gallery_search.read_image(row['file_path'])
+        except FileNotFoundError:
+            gallery_db().mark_missing([identifier])
+            raise
+        vector=gallery_embedder.images([picture])[0]
+        gallery_db().save_vectors(gallery_search.EMBEDDING_MODEL,[(row['number'],identifier,vector)])
+    return gallery_search.looking_like(gallery_vectors,vector,row['number'])
+
+
 def image_location(identifier):
     """(model folder, PNG path) of a gallery image, from the database; missing files are hidden from listings."""
     row=gallery_db().get(identifier) if image_catalog.valid_identifier(identifier) else None
@@ -1312,6 +1363,8 @@ class CatalogImage(BaseModel):
     lora: dict | None = None
     loras: list[dict] | None = None
     file_size: int
+    match: Literal['exact','similar'] | None = Field(default=None, description="In a search: exact (the words match) or similar (the picture resembles the query or the similar_to image).")
+    similarity: float | None = Field(default=None, description="Cosine similarity of a similar match, -1 to 1; higher is closer.")
 
 
 class CatalogDetail(CatalogImage):
@@ -1328,6 +1381,8 @@ class CatalogResponse(BaseModel):
     previous_offset: int | None = None
     has_more: bool
     next_offset: int | None = None
+    similar_total: int | None = Field(default=None, description="With q or similar_to: how many of total are similar (not exact) matches, listed after the exact ones.")
+    similar_search: Literal['ready','loading','unavailable'] | None = Field(default=None, description="With q or similar_to: ready when similar images were searched; loading when the search model was still starting (exact matches only; retry shortly); unavailable when it is not set up.")
 
 
 def catalog_urls(record, request):
@@ -1339,25 +1394,57 @@ def catalog_urls(record, request):
 
 @app.get("/gallery", include_in_schema=False)
 def gallery():
+    # Opening the gallery usually precedes a search, so the CPU search model starts loading now.
+    if gallery_embedder:gallery_embedder.warm_in_background()
     return render_page(PROJECT_ROOT,"gallery.html")
 
 
 @app.get("/v1/images", response_model=CatalogResponse, response_model_exclude_none=True,
          summary="Browse saved generations",
-         description="Lists images from the gallery database (every image the service saved, in any output folder). Reference uploads are excluded. Search q matches whole words or word starts, in any order, across prompts, tags, seeds, dimensions, models and adapter labels. Repeated tag parameters require all exact labels (case-insensitive). Pagination uses limit/offset and returns totals and previous/next offsets. Images whose file is gone are hidden (only the returned page is checked) and reappear if the file comes back; images without readable metadata remain browsable. No GPU inference is performed.")
+         description="Lists images from the gallery database (every image the service saved, in any output folder). Reference uploads are excluded. Search q first lists exact matches (whole words or word starts, in any order, across prompts, tags, seeds, dimensions, models and adapter labels) in the chosen order, then, when the search model is set up (make download-search), similar images whose picture fits the words, best first (match: exact or similar). similar_to=<image id> instead lists images that look like that one, best first (More like this); it cannot be combined with q. Repeated tag parameters require all exact labels (case-insensitive) and also filter similar images. Pagination uses limit/offset across both groups and returns totals and previous/next offsets. Images whose file is gone are hidden (only the returned page is checked) and reappear if the file comes back; images without readable metadata remain browsable. Similar search runs a small SigLIP 2 model on the CPU, never the GPU.")
 def saved_images(request: Request, response: Response,
                  limit: int = Query(default=24, ge=1, le=100),
                  offset: int = Query(default=0, ge=0),
                  q: str = Query(default="", max_length=4000),
                  sort: Literal["newest", "oldest"] = "newest",
-                 tag: list[str] | None = Query(default=None, max_length=32, description="Optional exact tag filters; repeat tag to require all labels. Combined with q.")):
+                 tag: list[str] | None = Query(default=None, max_length=32, description="Optional exact tag filters; repeat tag to require all labels. Combined with q."),
+                 similar_to: str | None = Query(default=None, pattern=r"^[0-9a-f]{32}$", description="Gallery image ID: list images that look like it, best first, instead of searching words.")):
+    if similar_to and q.strip():
+        raise HTTPException(422, 'Use either q or similar_to, not both.')
+    related,similar_search,similar_total=None,None,0
+    if similar_to:
+        if gallery_indexer is None:
+            raise HTTPException(503, 'Similar-image search is not set up. Run make download-search, then restart the generator.')
+        try:
+            related,similar_search=similar_to_image(similar_to),'ready'
+        except FileNotFoundError:
+            raise HTTPException(404, 'Saved image is unavailable') from None
+        except Exception:
+            log.warning('More like this failed for %s',similar_to,exc_info=True)
+            raise HTTPException(503, 'Cannot search for similar images. Check the project storage and server log.') from None
+    elif q.strip():
+        similar_search='unavailable'
+        if gallery_indexer is not None:
+            gallery_indexer.wake()
+            try:
+                vector=gallery_embedder.text(q,timeout=SEARCH_WAIT_SECONDS)
+                if vector is None:
+                    similar_search='loading'
+                else:
+                    related,similar_search=gallery_search.described_by(gallery_vectors,vector),'ready'
+            except Exception:
+                # Similar matches are a bonus: exact search still answers.
+                log.warning('Similar-image search failed; listing exact matches only',exc_info=True)
     try:
         require_storage(ROOT)
         if not ROOT.is_dir():
             raise OSError('Active storage is unavailable')
         # Only the shown page's files are checked; images whose file is gone are hidden and the page refilled.
         for _ in range(5):
-            rows,total=gallery_db().search(q,tag or [],sort,limit,offset)
+            if related is None:
+                rows,total=gallery_db().search(q,tag or [],sort,limit,offset)
+            else:
+                rows,total,similar_total=gallery_db().search_similar(q,tag or [],sort,limit,offset,related)
             shown,missing=[],[]
             for row in rows:
                 try:
@@ -1374,11 +1461,14 @@ def saved_images(request: Request, response: Response,
         raise HTTPException(503, "Cannot read the image library. Check the project storage.") from None
     response.headers['Cache-Control'] = 'no-store'
     next_offset = offset + len(records)
-    return {'object': 'list', 'data': [catalog_urls(item, request) for item in records],
-            'total': total, 'limit': limit, 'offset': offset,
-            'has_previous': offset > 0, 'previous_offset': max(0, offset - limit) if offset > 0 else None,
-            'has_more': next_offset < total,
-            'next_offset': next_offset if next_offset < total else None}
+    result = {'object': 'list', 'data': [catalog_urls(item, request) for item in records],
+              'total': total, 'limit': limit, 'offset': offset,
+              'has_previous': offset > 0, 'previous_offset': max(0, offset - limit) if offset > 0 else None,
+              'has_more': next_offset < total,
+              'next_offset': next_offset if next_offset < total else None}
+    if similar_search:
+        result.update(similar_search=similar_search,similar_total=similar_total)
+    return result
 
 
 @app.get("/v1/images/{identifier}", response_model=CatalogDetail, response_model_exclude_none=True,

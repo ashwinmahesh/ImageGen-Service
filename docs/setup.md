@@ -110,7 +110,10 @@ First setup also asks for a model store folder. **Blank/Enter uses the project d
 <store>/flux2-klein-9b/{weights,images,references,cache,loras,logs}
 <store>/qwen-image-2.1-turbo/{weights,images,references,cache,loras,logs}
 <store>/prompt-enhancer/weights  # shared Qwen3.5-2B 4-bit, about 1.7 GB
+<store>/gallery-search/weights   # shared SigLIP 2 base for similar-image search, about 1.5 GB
 ```
+
+`make setup` also downloads the pinned SigLIP 2 search model (`make download-search` on its own). It runs on the CPU only and is optional: without it the gallery keeps exact word search, and `/health.gallery_search` says how to add it. After downloading, restart the generator; it then gives every gallery image a search vector in the background (`make index-gallery` does the same from the command line).
 
 Source, Git, UI, the native runtime, `.venv`, managed `.python`/`.bootstrap` downloads, and **SQLite state** stay in the project. The shared queue database and their journals/worker leases live in `<project>/state/queue/`, and the gallery database (every saved image's settings, tags and location) in `<project>/state/gallery/`, independently of `DATA_DIR`; `state/` is ignored by Git. The store choice is remembered in ignored `storage.json`. Repeated setup reuses it and existing assets without another storage prompt. Existing links are recognized. Conflicting/nonempty folders are never overwritten or silently moved. Missing external volumes fail clearly without an internal fallback download.
 

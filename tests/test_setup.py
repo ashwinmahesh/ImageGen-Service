@@ -52,14 +52,14 @@ elif args and pathlib.Path(args[0]).name in ['setup.py','runtime_setup.py']:
         self.assertEqual(calls[0][:3],['-m','venv','--copies'])
         self.assertEqual(calls[1][:3],['-m','pip','install']);self.assertIn('--no-deps',calls[1])
         self.assertEqual(calls[2],['-m','pip','check'])
-        self.assertEqual(calls[3:],[['download.py'],['download_enhancer.py']])
+        self.assertEqual(calls[3:],[['download.py'],['download_enhancer.py'],['download_search.py']])
         log.write_text('')
         subprocess.run(command+['WITH_REALISM=1'],cwd=self.root,env=env,capture_output=True,check=True)
         calls=[json.loads(line) for line in log.read_text().splitlines()]
         calls=[call for call in calls if call[:2]!=['-I','-c'] and (not call or Path(call[0]).name not in ['storage_paths.py','setup.py','runtime_setup.py'])]
         self.assertEqual(calls[0][:3],['-m','pip','install'])
         self.assertEqual(calls[1],['-m','pip','check'])
-        self.assertEqual(calls[2:],[['download.py'],['download_enhancer.py'],['download_loras.py','--id','realism']])
+        self.assertEqual(calls[2:],[['download.py'],['download_enhancer.py'],['download_search.py'],['download_loras.py','--id','realism']])
 
     def test_model_downloader_uses_pinned_hugging_face_snapshot(self):
         weights = self.root / 'weights'

@@ -24,6 +24,8 @@
     .empty{background:var(--output-gradient)}.card{box-shadow:inset 0 1px 0 #ffffff06,0 10px 26px #00000018}
     .edit-action{display:flex;align-items:center;gap:8px;margin-bottom:20px}.edit-action .primary{flex:1}.edit-action [aria-disabled=true]{opacity:.5;cursor:not-allowed}
 
+    .similar-divider{grid-column:1/-1;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:8px 0 -4px;padding-top:18px;border-top:1px solid var(--line)}.similar-divider strong{color:var(--text);font-size:14px;font-weight:550}
+    select:disabled{opacity:.5;cursor:default}.similar-thumb{width:44px;height:34px;object-fit:cover;border-radius:6px;background:#141414;border:1px solid var(--line);flex:none}
     .delete-action{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.button.danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#3b292e;border-color:#69434b;color:#dfc4cb}.button.danger:hover:not(:disabled){background:#4d353c;border-color:#885b65;color:#f1dce2}.delete-icon{width:14px;height:14px;flex:none}.delete-confirm{width:min(480px,calc(100vw - 32px));padding:24px;max-height:90dvh;overflow:auto}.delete-confirm h2{font-size:20px;font-weight:550;margin:0 0 12px}.delete-confirm p{font-size:13px;color:var(--muted);line-height:1.6}.delete-target{display:flex;align-items:center;gap:14px;margin:20px 0}.delete-target img{width:88px;height:72px;object-fit:contain;background:var(--bg);border-radius:7px;flex:none}.delete-target div{min-width:0}.delete-target strong{font-size:13px;display:block}.delete-target code{display:block;font-size:10px;margin-top:6px;overflow-wrap:anywhere;color:var(--muted)}.delete-target p{font-size:12px;margin:5px 0 0;overflow-wrap:anywhere}.delete-confirm .dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.delete-confirm .error{color:#f7c6bc}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
@@ -35,10 +37,11 @@
   <main class="studio-main">
     <div class="intro"><div><h1>Your image library.</h1><p>A place for everything you’ve made.</p></div><span class="local">Stored on this Mac</span></div>
     <div class="toolbar">
-      <div class="search help-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><label class="sr-only" for="search">Search images</label><input id="search" type="search" maxlength="4000" placeholder="Search prompts, tags, seeds or styles…" autocomplete="off"><button type="button" class="help-button" aria-label="Help with gallery search" data-help="Search prompts, tags, models, adapter names, seeds and dimensions. Click an image’s tag to filter by that exact label."><span aria-hidden="true">?</span></button></div>
-      <div class="help-control"><label class="sr-only" for="sort">Image order</label><select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><button type="button" class="help-button" aria-label="Help with image order" data-help="Sort saved images by creation time. This does not change generation queue order."><span aria-hidden="true">?</span></button></div>
+      <div class="search help-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><label class="sr-only" for="search">Search images</label><input id="search" type="search" maxlength="4000" placeholder="Search prompts, tags, seeds or styles…" autocomplete="off"><button type="button" class="help-button" aria-label="Help with gallery search" data-help="Search prompts, tags, models, adapter names, seeds and dimensions. Exact matches come first, then similar images: pictures that fit your words even when the prompt used other ones. Click an image’s tag to filter by that exact label."><span aria-hidden="true">?</span></button></div>
+      <div class="help-control"><label class="sr-only" for="sort">Image order</label><select id="sort" title="Similar images are listed best match first"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><button type="button" class="help-button" aria-label="Help with image order" data-help="Sort saved images by creation time. Similar images are always listed best match first. This does not change generation queue order."><span aria-hidden="true">?</span></button></div>
       <button type="button" class="button" id="refresh">Refresh ↻</button>
     </div>
+    <div class="active-filter" id="similar-filter" hidden><img id="similar-thumb" class="similar-thumb" alt=""><span>Images that look like this one, best match first</span><button class="button" id="clear-similar" type="button">Clear ×</button></div>
     <div class="active-filter" id="active-filter" hidden><span id="filter-label"></span><button class="button" id="clear-filter" type="button">Clear tag filter ×</button></div>
     <div class="results-line"><span id="count" role="status" aria-live="polite">Loading your images…</span><span id="loading" hidden>Loading…</span></div>
     <p id="error" class="error" role="alert" hidden></p>
@@ -56,7 +59,7 @@
         <p class="eyebrow">Prompt</p><p class="full-prompt" id="full-prompt"></p><button id="copy-prompt" class="button">Copy prompt</button>
         <form id="tag-form" class="tag-form"><div class="help-label"><label for="tags">Image tags</label><button type="button" class="help-button" aria-label="Help with image tags" data-help="Replace this image’s searchable tags using comma-separated labels; leave blank to clear them. The original image and generation settings stay unchanged."><span aria-hidden="true">?</span></button></div><input id="tags" type="text" maxlength="2110" placeholder="e.g. gothic, village, campaign" autocomplete="off" aria-describedby="tags-hint"><p class="hint" id="tags-hint">Separate tags with commas. Up to 32 tags, 64 characters each. Leave blank to clear.</p><button class="button" id="save-tags" type="submit">Save tags</button><p class="error" id="tag-error" role="alert" hidden></p></form>
         <dl class="settings" id="settings"></dl>
-        <div class="detail-actions"><a id="variation" class="button">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
+        <div class="detail-actions"><button id="more-like-this" class="button" type="button" hidden>More like this</button><a id="variation" class="button">Make a variation ↗</a><a id="reuse" class="button">Reuse settings</a><a id="download" class="button" download>Download PNG ↓</a><a id="metadata" class="button" download>Save metadata ↓</a></div>
         <p class="eyebrow file-label">Saved file</p><code class="file-path" id="file-path"></code><button id="copy-path" class="button">Copy file path</button>
         <div class="delete-action"><button id="delete-image" class="button danger" type="button"><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>Delete image</button></div>
       </div>
@@ -89,6 +92,8 @@
       updateEditAction();
     }
     $('edit-photo').addEventListener('click',event=>{if($('edit-photo').getAttribute('aria-disabled')==='true')event.preventDefault();});
+    // similarTo lists images that look like one image (More like this) instead of searching words.
+    let similarTo = null, similarAvailable = false, similarRetry;
     let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, deleting = false, pendingDelete = null, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
     // A stacked image lists every adapter in order; older images have one lora.
     function styles(item) { return item.loras || (item.lora ? [item.lora] : []); }
@@ -119,6 +124,21 @@
       body.append(element('span', 'style', (item.model || 'Unknown model') + (styles(item).length ? ' · ' + styles(item).map(entry => entry.name).join(' + ') : '')));
       renderTags(item, body); card.append(button, body); $('grid').append(card);
     }
+    function renderDivider(data) {
+      const divider = element('div', 'similar-divider'); divider.setAttribute('role', 'separator');
+      divider.append(element('strong', '', 'Similar images'), element('span', '', `${data.similar_total} picture${data.similar_total === 1 ? '' : 's'} that fit your words, best match first`));
+      $('grid').append(divider);
+    }
+    async function loadSearchStatus() {
+      try {
+        const response = await fetch('/health', {cache:'no-store', signal:AbortSignal.timeout(5000)});
+        similarAvailable = response.ok && Boolean((await response.json()).gallery_search?.available);
+      } catch { similarAvailable = false; }
+      if (activeIndex >= 0 && $('viewer').open) $('more-like-this').hidden = !similarAvailable;
+    }
+    function showSimilar(identifier) {
+      similarTo = identifier; $('search').value = ''; if ($('viewer').open) $('viewer').close(); window.scrollTo({top:0}); loadImages(0);
+    }
     function updatePagination() {
       $('page-previous').disabled = loading || previousOffset === null;
       $('page-next').disabled = loading || nextOffset === null;
@@ -129,7 +149,9 @@
       const currentController = controller, number = ++requestNumber;
       loading = true; updatePagination(); $('loading').hidden = false; $('grid').setAttribute('aria-busy', 'true'); $('error').hidden = true;
       const timer = setTimeout(() => currentController.abort(), 15000);
-      const params = new URLSearchParams({limit:$('page-size').value, offset:String(offset), q:$('search').value.trim(), sort:$('sort').value});
+      clearTimeout(similarRetry);
+      const params = new URLSearchParams({limit:$('page-size').value, offset:String(offset), sort:$('sort').value});
+      if (similarTo) params.set('similar_to', similarTo); else params.set('q', $('search').value.trim());
       for (const tag of activeTags) params.append('tag', tag);
       try {
         const response = await fetch('/v1/images?' + params, {cache:'no-store', signal:currentController.signal});
@@ -138,20 +160,32 @@
         if (offset > 0 && !data.data.length) { const last = Math.max(0, Math.ceil(data.total / data.limit) - 1) * data.limit; return loadImages(last, keepImage); }
         if ($('viewer').open && !keepImage) $('viewer').close();
         images = data.data; currentOffset = data.offset; $('grid').replaceChildren();
-        for (let index = 0; index < images.length; index++) renderCard(images[index], index);
+        for (let index = 0; index < images.length; index++) {
+          // Exact matches come first; the divider marks where the similar pictures begin.
+          if (!similarTo && images[index].match === 'similar' && (index === 0 || images[index - 1].match !== 'similar')) renderDivider(data);
+          renderCard(images[index], index);
+        }
         nextOffset = data.next_offset ?? null; previousOffset = data.previous_offset ?? null;
         const totalPages = Math.max(1, Math.ceil(data.total / data.limit)), page = Math.floor(data.offset / data.limit) + 1;
         $('page-label').textContent = `Page ${page} of ${totalPages}`;
-        $('count').textContent = data.total ? `${data.offset + 1}–${data.offset + images.length} of ${data.total} image${data.total === 1 ? '' : 's'}` : 'No images found';
+        const exactTotal = data.total - (data.similar_total || 0);
+        const groups = !similarTo && data.similar_total ? ` · ${exactTotal} exact, ${data.similar_total} similar` : '';
+        $('count').textContent = (data.total ? `${data.offset + 1}–${data.offset + images.length} of ${data.total} image${data.total === 1 ? '' : 's'}${groups}` : 'No images found')
+          + (data.similar_search === 'loading' ? ' · similar images are still loading' : '');
+        // The search model was still starting: ask again shortly for the similar pictures.
+        if (data.similar_search === 'loading') similarRetry = setTimeout(() => loadImages(currentOffset), 4000);
         $('active-filter').hidden = !activeTags.length; $('filter-label').textContent = 'Tagged: ' + activeTags.join(' + ');
+        $('similar-filter').hidden = !similarTo; $('sort').disabled = Boolean(similarTo);
+        if (similarTo) $('similar-thumb').src = localURL('/thumbnails/' + similarTo + '.webp');
         $('empty').hidden = images.length > 0;
-        const filtered = Boolean($('search').value.trim() || activeTags.length);
-        $('empty-title').textContent = filtered ? 'Nothing matches just yet.' : 'Your library starts here.';
-        $('empty-text').textContent = filtered ? 'Try another prompt or tag, or clear the filters.' : 'Generate an image and it will appear here automatically.';
+        const filtered = Boolean($('search').value.trim() || activeTags.length || similarTo);
+        $('empty-title').textContent = similarTo ? 'No similar images yet.' : filtered ? 'Nothing matches just yet.' : 'Your library starts here.';
+        $('empty-text').textContent = similarTo ? 'Nothing else in your library looks close enough. Clear to see every image.' : filtered ? 'Try another prompt or tag, or clear the filters.' : 'Generate an image and it will appear here automatically.';
         history.replaceState(null, '', '/gallery?' + params);
         if (keepImage && $('viewer').open) { const index = images.findIndex(item => item.id === keepImage); if (index >= 0) openImage(index); else $('viewer').close(); }
       } catch (error) {
         if (number !== requestNumber) return;
+        if (similarTo) { $('similar-filter').hidden = false; $('similar-thumb').src = localURL('/thumbnails/' + similarTo + '.webp'); }
         $('error').textContent = error.name === 'AbortError' ? 'The library took too long to respond. Try Refresh after checking the server and storage.' : error instanceof TypeError ? 'Could not reach the server. Check that it is running, then refresh.' : error.message;
         $('error').hidden = false; if (!images.length) $('count').textContent = 'Library unavailable';
       } finally {
@@ -169,6 +203,7 @@
       addSetting('Steps', item.steps === undefined ? null : String(item.steps)); addSetting('Generation time', item.generation_seconds === undefined ? null : `${item.generation_seconds}s`);
       addSetting(styles(item).length > 1 ? 'Styles' : 'Style', styles(item).length ? styles(item).map(entry => entry.name + (entry.strength == null ? '' : ` · ${entry.strength}`)).join(', ') : 'Original model'); addSetting('Saved', dateLabel(item.created));
       $('file-path').textContent = item.file_path;
+      $('more-like-this').hidden = !similarAvailable; $('more-like-this').disabled = item.id === similarTo;
       $('variation').href = '/?generation=' + item.id + '&mode=reference'; $('reuse').href = '/?generation=' + item.id + '&mode=settings'; $('reuse').hidden = !item.prompt;
       updateEditAction();
       $('download').href = localURL(item.url); $('download').download = item.id + '.png';
@@ -181,9 +216,11 @@
       $('full-image').alt = (item.prompt || 'Saved generated image').slice(0,400); $('full-image').src = localURL(item.url);
       if (!$('viewer').open) $('viewer').showModal();
     }
-    $('search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadImages(0), 250); });
+    $('search').addEventListener('input', () => { similarTo = null; clearTimeout(searchTimer); searchTimer = setTimeout(() => loadImages(0), 250); });
+    $('more-like-this').addEventListener('click', () => { const item = images[activeIndex]; if (item) showSimilar(item.id); });
+    $('clear-similar').addEventListener('click', () => { similarTo = null; loadImages(0); });
     $('sort').addEventListener('change', () => loadImages(0)); $('page-size').addEventListener('change', () => loadImages(0));
-    $('refresh').addEventListener('click', () => {loadImages(currentOffset);loadEditingModels();});
+    $('refresh').addEventListener('click', () => {loadImages(currentOffset);loadEditingModels();loadSearchStatus();});
     $('page-previous').addEventListener('click', () => { if (previousOffset !== null) loadImages(previousOffset); });
     $('page-next').addEventListener('click', () => { if (nextOffset !== null) loadImages(nextOffset); });
     $('clear-filter').addEventListener('click', () => { activeTags = []; loadImages(0); });
@@ -246,8 +283,9 @@
     if (['newest','oldest'].includes(initial.get('sort'))) $('sort').value = initial.get('sort');
     if (['12','24','48','96'].includes(initial.get('limit'))) $('page-size').value = initial.get('limit');
     activeTags = initial.getAll('tag').slice(0,32);
+    if (/^[0-9a-f]{32}$/.test(initial.get('similar_to') || '')) { similarTo = initial.get('similar_to'); $('search').value = ''; }
     const initialOffset = Number(initial.get('offset') || 0);
-    loadEditingModels();
+    loadEditingModels(); loadSearchStatus();
     loadImages(Number.isSafeInteger(initialOffset) && initialOffset >= 0 ? initialOffset : 0);
   </script>
 <!-- IMAGEGEN_QUEUE -->

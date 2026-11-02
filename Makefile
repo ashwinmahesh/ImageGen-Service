@@ -43,7 +43,7 @@ override LORA_SHA256 := $(value LORA_SHA256)
 export LORA_SHA256
 export NONINTERACTIVE
 
-.PHONY: import-gallery storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test setup-lora install-lora download-loras download-realism download-llm queue stop-queue
+.PHONY: import-gallery index-gallery download-search storage help setup setup-selected setup-env download serve serve-no-loras start health smoke test setup-lora install-lora download-loras download-realism download-llm queue stop-queue
 help:
 	@echo 'Setup reuses compatible Python, or installs it inside the project; serving stays offline'
 	@echo 'make serve-no-loras  Start the base model with LoRAs disabled'
@@ -55,6 +55,7 @@ help:
 	@echo 'Prompt LLM defaults ON; interactive startup asks [Y/n]'
 	@echo 'make serve NO_LLM=1  Disable local prompt expansion explicitly'
 	@echo 'make download-llm  Download/resume the shared 2B prompt LLM'
+	@echo 'make download-search  Download/resume the 1.5 GB SigLIP 2 model for finding similar gallery images (CPU only)'
 	@echo 'make health    Check readiness'
 	@echo 'make smoke     Generate and validate a 512px test image'
 	@echo 'make download  Download/resume the selected model'
@@ -62,6 +63,7 @@ help:
 	@echo 'Setup: q cancels at the model menu; Ctrl-C cancels at any time and keeps existing downloads'
 	@echo 'make setup-lora  Add your own compatible LoRA from a file or Hugging Face; local catalog survives git pull'
 	@echo 'make import-gallery  Add PNGs copied into a model images/ folder by hand to the gallery'
+	@echo 'make index-gallery  Give every gallery image a similar-search vector now (the generator also does this in the background)'
 	@echo 'make setup WITH_REALISM=1  Also download the optional Realism adapter'
 	@echo 'Choose a default: make serve MODEL=chroma1-flash (all setup models remain available)'
 	@echo 'Photo editing models: flux2-klein-4b, flux2-klein-9b, qwen-image-2.1-turbo'
@@ -75,6 +77,10 @@ download-loras:
 import-gallery:
 	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }
 	"$(PYTHON)" gallery_store.py
+
+index-gallery:
+	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }
+	"$(PYTHON)" gallery_search.py
 
 setup-lora:
 	@test -x "$(PYTHON)" || { echo 'Run make setup first to create the project environment.' >&2; exit 1; }
@@ -90,6 +96,7 @@ setup:
 setup-selected: setup-env
 	$(MAKE) download
 	$(MAKE) download-llm
+	$(MAKE) download-search
 	$(if $(filter 1,$(WITH_REALISM)),$(MAKE) download-realism,@:)
 
 storage:
@@ -101,6 +108,9 @@ setup-env:
 
 download-llm: storage
 	"$(PYTHON)" download_enhancer.py
+
+download-search: storage
+	"$(PYTHON)" download_search.py
 
 download: storage
 	"$(PYTHON)" download.py
