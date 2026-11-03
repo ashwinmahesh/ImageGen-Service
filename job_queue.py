@@ -187,8 +187,8 @@ class JobStore:
                 if row['id'] == owner_job_id:
                     raise QueueConflict('This image belongs to an unfinished job. Wait for it to finish before deleting it.')
                 payload = json.loads(row['payload'])
-                for field in ('reference_image', 'mask_image'):
-                    value = payload.get(field)
+                inputs = [payload.get('reference_image'), payload.get('mask_image'), *(payload.get('additional_reference_images') or [])]
+                for value in inputs:
                     if isinstance(value, str) and value.strip() and Path(value).expanduser().resolve() == path:
                         raise QueueConflict('A queued or running job uses this image. Finish or cancel that job before deleting it.')
             yield

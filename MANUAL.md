@@ -158,6 +158,8 @@ This screenshot uses simulated demonstration images; its timing is not a benchma
 
 A reference photo provides a visual starting point. **FLUX.2 Klein and Qwen-Image 2.1 Turbo** follow editing instructions such as “change the jacket to green.” With **Z-Image and Chroma**, the photo instead guides a variation, and **Keep the original** controls how much is preserved. The service keeps the photo's aspect ratio and lets you use generated images as the next reference. Use the dedicated **Edit photo** view to describe a change, specify what should stay the same, and optionally refine the instruction with a preservation-focused text LLM. With **Qwen**, paint or drag rectangles on the source preview to switch automatically to a selected-area edit; the service copies pixels outside the mask from the resized source. Klein supports whole-photo edits. Whole-photo editing does not guarantee exact identity or unchanged pixels.
 
+Klein and Qwen can also combine several photos. After choosing your first photo, **More reference photos** lets you add up to three more; the first is image 1 and the others are image 2, 3 and 4 in the order shown. Refer to them by number in your prompt, for example “put the jacket from image 2 and the hat from image 3 on the person in image 1”, or “the woman from image 1 sitting in the café from image 2”. This works in both Generate and Edit photo. The first photo still sets the size and aspect ratio, and a selected area applies only to it. Each extra photo makes the image take longer and use more memory. Remove one with ×; with Z-Image or Chroma selected the extra photos are hidden and not sent.
+
 Optional **LoRAs** are small adapters that influence the model's learned appearance or style. Choose a compatible installed adapter and adjust its strength; configured trigger words are inserted automatically. Select **＋ Add another LoRA** to stack up to four, applied in order with their own strengths; their effects add up, so lower each one (about 0.4–0.7) when combining. The same picker appears when editing photos with Klein or Qwen. Normal setup downloads no adapters. **Realism for Z-Image Turbo** is the only bundled optional preset; see [adapter setup](docs/setup.md#optional-adapters). To download or import your own compatible LoRA, run `make setup-lora`; its weights and personal catalog stay outside tracked code, so you can keep updating with `git pull`. Follow [Add your own LoRA](#add-your-own-lora).
 
 ### Make iteration easier to compare and repeat
@@ -194,6 +196,7 @@ The API names below map to the webpage controls.
 | Steps | `steps` | Defaults: Z-Image 9, Chroma HD 40, Flash 8. More steps cost time and do not always improve results. Keep the default to start. |
 | Seed | `seed` | Leave blank/omit for random. Reuse a returned seed to compare setting changes; a seed alone does not guarantee the same image across models/settings. |
 | Reference photo | `reference_image` | One absolute path on the server's Mac. The UI also uploads photos for you. Upload limits: 20 MiB and 40 megapixels. |
+| More reference photos | `additional_reference_images` | Klein and Qwen only: up to three more paths, used as image 2–4 with the first photo. |
 | Keep the original | `image_strength` | Z-Image/Chroma variations only: [0,1), default 0.6; higher preserves more. Omit for Klein/Qwen instruction editing; the webpage hides it. All references require at least 2 steps. |
 | Style adapter | `lora`, `lora_strength`, or `loras` | Optional compatible installed LoRA; strength 0–2. Choose an ID from the API catalog, or send up to 4 as `loras:[{"id":…,"strength":…}]` to stack them. Configured trigger words are added automatically. |
 | Tags | `tags` | Optional labels for gallery search. UI: comma-separated text. API: an array such as `["Forest","Watercolor"]`. Editable later. |
@@ -201,7 +204,7 @@ The API names below map to the webpage controls.
 | Priority | `generate_immediately` | True runs next without interrupting active work. UI default true; async API default false to join the end of the queue. |
 | API result format | `response_format` | Use `"url"` for easy previews/downloads. Default is `"b64_json"`. Both save the PNG and metadata on disk. |
 
-With Klein or Qwen selected, upload a photo and write an instruction such as “Change the jacket to green; keep the face, pose and background.” The service follows the photo's aspect ratio. Reference resolution starts on Auto; Qwen also supports a selected-area mask; multiple reference photos are not exposed. Turn off description expansion when you want to send your instruction exactly as written.
+With Klein or Qwen selected, upload a photo and write an instruction such as “Change the jacket to green; keep the face, pose and background.” The service follows the photo's aspect ratio. Reference resolution starts on Auto; Qwen also supports a selected-area mask; both can combine up to four photos (see above). Turn off description expansion when you want to send your instruction exactly as written.
 
 ## Edit an existing photo
 

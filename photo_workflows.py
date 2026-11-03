@@ -1,5 +1,6 @@
 """Shared task semantics; no inference imports or implicit model switching."""
 EDIT_SCOPE='Apply only the requested changes to the source photo. Preserve all other content, identity, framing and appearance unless the requested edit requires changing them.'
+MULTI_REFERENCE_SCOPE='Image 1 is the source photo to edit; use the other images only as references for the requested change.'
 MAX_PROMPT_CHARACTERS=4000
 MAX_LOCATION_BOXES=8
 # Longest possible location hint: the maximum number of boxes with four-digit coordinates.
@@ -58,14 +59,15 @@ def describe_mask_boxes(mask):
     return ', '.join('{"bbox_2d": [%d, %d, %d, %d]}'%tuple(box) for box in boxes) if boxes else None
 
 
-def edit_prompt(instruction, preserve=None, region=None):
-    scope=EDIT_SCOPE+(' Explicit preservation requirements: '+preserve.strip() if preserve else '')
+def edit_prompt(instruction, preserve=None, region=None, references=1):
+    scope=(MULTI_REFERENCE_SCOPE+' ' if references>1 else '')+EDIT_SCOPE+(' Explicit preservation requirements: '+preserve.strip() if preserve else '')
     if region:
-        scope=f'The selected area to edit is inside these boxes (x1, y1, x2, y2 on a 0-1000 scale of the image): {region}. Make the requested change only there.\n'+scope
+        image='image 1' if references>1 else 'the image'
+        scope=f'The selected area to edit is inside these boxes (x1, y1, x2, y2 on a 0-1000 scale of {image}): {region}. Make the requested change only there.\n'+scope
     return instruction+'\n'+scope
 
 
-def edit_prompt_fits(instruction, preserve=None, *, region=None, masked=False):
+def edit_prompt_fits(instruction, preserve=None, *, region=None, masked=False, references=1):
     """Whether the complete rendering prompt stays within the limit.
 
     Pass the real ``region`` once the boxes are known. ``masked`` instead reserves worst-case hint
@@ -74,4 +76,4 @@ def edit_prompt_fits(instruction, preserve=None, *, region=None, masked=False):
     """
     if region is None and masked:
         region=WORST_CASE_REGION
-    return len(edit_prompt(instruction,preserve,region))<=MAX_PROMPT_CHARACTERS
+    return len(edit_prompt(instruction,preserve,region,references))<=MAX_PROMPT_CHARACTERS

@@ -131,7 +131,8 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `generate_immediately` | boolean | false for async jobs, true for synchronous generation. True gets the next free slot before ordinary waiting work; never interrupts active work. |
 | `response_format` | string | `"b64_json"` or `"url"`; default `"b64_json"`. URL format is convenient for polling and downloads. Both save files. |
 | `output_dir` | string | `<store>/<requested-model>/images`. Absolute folder or `~/...`, 1–4096 characters; missing folders are created if writable. Unique files do not overwrite originals. |
-| `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. |
+| `reference_image` | string or null | Omitted/null for text-only generation. One server-local absolute/`~/...` path, max 4096 characters; HTTP URLs are not accepted. This is image 1, the source photo. |
+| `additional_reference_images` | array of strings or null | FLUX.2 Klein and Qwen-Image 2.1 Turbo only (`max_reference_images` 4 in `/v1/models`): 1–3 more server-local paths used with `reference_image`, in order as image 2, 3 and 4. Requires `reference_image`; each must be a different file. Omit when unused (other models reject it with **422**). See [Several reference photos](#several-reference-photos). |
 | `image_strength` | number | Z-Image/Chroma variations only: default 0.6, [0,1), higher preserves more. Only send with a reference. Klein/Qwen reject this field even if set to 0.6; omit it for instruction edits. |
 | `lora` | string or null | Omitted/null for none. Compatible installed catalog ID; lowercase letters, digits and hyphens, starting alphanumeric, max 80 characters. One adapter; use `loras` to stack several. |
 | `lora_strength` | number or null | Requires `lora`; 0–2. Omit/null for its catalog default (Realism: 0.8). |
@@ -147,7 +148,7 @@ Only `prompt` is required for a valid image request. Defaults below apply when t
 | `flux2-klein-9b` | 4 | 1–4 | Distilled flow-match Euler, guidance 1; MLX Q4. |
 | `qwen-image-2.1-turbo` | 8 | 1–8 | Checkpoint Turbo sigma schedule, guidance 1; MLX Q4. |
 
-Negative prompts, CFG/guidance, custom samplers/schedulers and multiple references are **not exposed** as request fields. Qwen photo edits accept `mask_image`; Klein does not. Klein/Qwen instruction editing uses the common `reference_image` and `prompt` fields. No model-specific request-option namespace is implemented. Larger images/options/step counts cost more time and memory. Z-Image uses VAE tiling above 1024; Chroma and Qwen always use it. Klein uses the runtime's default strip decoder. Klein/Qwen use low-RAM child processes and release all model memory afterward.
+Negative prompts, CFG/guidance and custom samplers/schedulers are **not exposed** as request fields. Klein and Qwen accept up to 4 reference photos (`reference_image` plus `additional_reference_images`). Qwen photo edits accept `mask_image`; Klein does not. Klein/Qwen instruction editing uses the common `reference_image` and `prompt` fields. No model-specific request-option namespace is implemented. Larger images/options/step counts cost more time and memory. Z-Image uses VAE tiling above 1024; Chroma and Qwen always use it. Klein uses the runtime's default strip decoder. Klein/Qwen use low-RAM child processes and release all model memory afterward.
 
 ### Submit and poll an image
 
@@ -235,6 +236,17 @@ For Qwen edits with `mask_image`, the service automatically appends the selectio
 
 The 4000-character limit applies to the **complete rendering prompt**: instruction + preservation requirements + scope guidance + location hints (up to about 450 characters for eight boxes). Generator request validation (`/v1/jobs`, `/v1/images/edits`, and the `POST /v1/prompts/expand` preview) counts everything except the hints, because the boxes depend on a mask that is only read at consumption; queue admission on either server does not open the photo or mask. The authoritative check runs when the job is consumed, after prompt refinement and box construction and before inference. An over-budget request fails that job with `The complete edit prompt exceeds 4000 characters, including preservation and selected-area guidance. Shorten the instruction or preservation text, or disable refinement.` (**400** from synchronous routes). The service never truncates the instruction, removes preservation text or omits boxes to fit. For masked edits queued with `expand_prompt:true`, prompt refinement reserves room for the longest possible hint (eight boxes) when it checks its own output; the mask-less `POST /v1/prompts/expand` preview cannot, so a previewed refinement can still be rejected at consumption if a mask is added.
 
+### Several reference photos
+
+FLUX.2 Klein and Qwen-Image 2.1 Turbo can combine up to four photos: `reference_image` is image 1 and `additional_reference_images` lists images 2–4 in order. Refer to them by number in `prompt`, for example "Put the jacket from image 2 on the person in image 1." This works for `task:"generate"` and `task:"edit"`, on both APIs:
+
+```sh
+curl --fail-with-body http://localhost:5742/v1/jobs -H 'Content-Type: application/json' \
+  -d '{"model":"qwen-image-2.1-turbo","prompt":"Put the jacket from image 2 on the person in image 1.","reference_image":"/absolute/path/person.png","additional_reference_images":["/absolute/path/jacket.png"],"size":"auto"}'
+```
+
+Image 1 alone sets the Auto size and aspect ratio, and `mask_image`, `edit_strength`, the selected-area blend and location hints apply only to it. Images 2–4 are passed as they are: each must be a readable image of at most 40 megapixels, and the model orients and resizes each one itself (FLUX.2 to about 1 megapixel, Qwen to about 1024 px). An edit with several photos adds "Image 1 is the source photo to edit; use the other images only as references for the requested change." to the rendering prompt, counted in the 4000-character limit. Each extra photo adds time and memory. The generator checks every photo when the job is accepted and again when it runs; the standalone queue API reads no media. The paths are saved on the job and in the image's metadata as `additional_reference_images`, gallery **Reuse settings** brings them back, and a queued or running job that names a photo blocks deleting it from the gallery. Z-Image and Chroma reject the field with **422**.
+
 ### Edit instructions and saved settings
 
 Edit requests append deterministic scope/preservation guidance even with expansion disabled. With `expand_prompt:true`, a separate text-only editing policy refines only the requested change and preservation requirements. It does not run the generation style/composition expansion policy, inspect the photo, or add composition alternatives. `n` still requests 1–5 attempts at the same edit; `vary_prompt:true` is rejected. Explicit `image_strength` is also rejected for these instruction editors.
@@ -251,6 +263,7 @@ In this table **Both** means the endpoint exists on each port. Both services man
 | GET `/v1/jobs` | Both | 200 | List jobs using optional `status`, `limit`, `offset`; returns a page. |
 | GET `/v1/jobs/{identifier}` | Both | 200 | Read one job and any saved result. |
 | GET `/v1/jobs/{identifier}/inputs/{field}` | Generator | 200 | `field` is `reference_image` or `mask_image`. Returns the PNG, JPEG or WebP file that job's request names, from any saved path, for previews. **404** if the job has no such input or the file is missing or unreadable; **415** for other file types. |
+| GET `/v1/jobs/{identifier}/inputs/additional_reference_images/{index}` | Generator | 200 | The same for one of the job's `additional_reference_images`; `index` 0 is image 2 (0–2, otherwise **422**). |
 | GET `/v1/jobs/{identifier}/preview` | Generator | 200 | The newest in-progress PNG of a running `live_preview` job (uncached). Fetch again when `progress.preview_updated` changes. **404** before the first preview, after the job ends, or without `live_preview`. Previews are deleted when the job finishes. |
 | PATCH `/v1/jobs/{identifier}` | Both | 200 | Replace a never-started waiting request. Generator: complete flat settings. Queue: `{request:{...}}`. Returns the updated job. |
 | POST `/v1/jobs/{identifier}/move` | Both | 200 | Body `{"position":1}`. Move a waiting job to a one-based position across the whole waiting queue. Returns that job. |
@@ -467,7 +480,7 @@ Response: `{file_path:string, url:string, width:integer, height:integer}`. The P
 }
 ```
 
-Output preserves the oriented reference's aspect ratio. Omitted `size` or `"auto"` detects source resolution without upscaling, capped at a 2048px long edge; only the larger dimension of an explicit `WIDTHxHEIGHT` sets the overridden long edge. Model padding is trimmed, so saved dimensions can be nonmultiples of 64 and the short edge can be below 256. Local-path references also have the 40-megapixel check; the 20-MiB limit applies to the upload endpoint. Z-Image/Chroma produce variations controlled by `image_strength`. Klein and Qwen instead perform **instruction-based editing**; describe the change in `prompt` and **omit `image_strength`**. The service exposes one reference. Whole-photo edits do not guarantee unchanged pixels or exact identity. Qwen photo edits can use a mask as described below. For example, while serving `flux2-klein-9b`:
+Output preserves the oriented reference's aspect ratio. Omitted `size` or `"auto"` detects source resolution without upscaling, capped at a 2048px long edge; only the larger dimension of an explicit `WIDTHxHEIGHT` sets the overridden long edge. Model padding is trimmed, so saved dimensions can be nonmultiples of 64 and the short edge can be below 256. Local-path references also have the 40-megapixel check; the 20-MiB limit applies to the upload endpoint. Z-Image/Chroma produce variations controlled by `image_strength`. Klein and Qwen instead perform **instruction-based editing**; describe the change in `prompt` and **omit `image_strength`**. They can also combine several photos (below). Whole-photo edits do not guarantee unchanged pixels or exact identity. Qwen photo edits can use a mask as described below. For example, while serving `flux2-klein-9b`:
 
 ```json
 {
