@@ -135,6 +135,35 @@ class GalleryDeleteTest(unittest.TestCase):
         with patch.object(Image.Image,'save',deleting_save):self.assertEqual(self.client.get('/thumbnails/'+'a'*32+'.webp').status_code,404)
         self.assertFalse(list((self.root/'cache/thumbnails').glob('*')))
 
+    def delete_many(self,*identifiers):return self.client.post('/v1/images/delete',json={'ids':list(identifiers)})
+
+    def test_batch_delete_removes_each_image_once_and_reports_the_ones_it_kept(self):
+        first=self.save('a'*32);second=self.save('b'*32,index=False);other=self.save('c'*32,index=False);busy=self.save('d'*32,index=False)
+        self.enqueue(reference_image=str(busy))
+        response=self.delete_many('a'*32,'b'*32,'a'*32,'d'*32,'e'*32,'invalid')
+        self.assertEqual(response.status_code,200,response.text);self.assertEqual(response.headers['cache-control'],'no-store')
+        body=response.json()
+        self.assertEqual(body['deleted'],[{'id':'a'*32,'deleted':True,'cleanup_pending':[]},{'id':'b'*32,'deleted':True,'cleanup_pending':[]}])
+        self.assertEqual([(row['id'],row['status']) for row in body['failed']],[('d'*32,409),('e'*32,404),('invalid',404)])
+        for path in [first,second,first.with_suffix('.json'),self.root/'image-index'/('a'*32+'.json')]:self.assertFalse(path.exists(),path)
+        self.assertTrue(other.is_file());self.assertTrue(busy.is_file())
+        self.assertEqual(sorted(row['id'] for row in self.client.get('/v1/images').json()['data']),['c'*32,'d'*32])
+
+    def test_batch_delete_keeps_an_image_whose_storage_fails_and_continues_with_the_rest(self):
+        first=self.save('a'*32,index=False);second=self.save('b'*32,index=False);original=server.delete_gallery_image
+        def flaky(identifier):
+            if identifier=='a'*32:raise __import__('sqlite3').OperationalError('locked')
+            return original(identifier)
+        with patch.object(server,'delete_gallery_image',flaky):response=self.delete_many('a'*32,'b'*32)
+        self.assertEqual(response.status_code,200,response.text);body=response.json()
+        self.assertEqual([row['id'] for row in body['deleted']],['b'*32]);self.assertEqual([(row['id'],row['status']) for row in body['failed']],[('a'*32,503)])
+        self.assertTrue(first.is_file());self.assertFalse(second.exists())
+
+    def test_batch_delete_accepts_only_a_bounded_list_of_ids(self):
+        for body in [{},{'ids':[]},{'ids':['a'*32]*101},{'ids':['a'*32],'paths':['/tmp/x']},{'ids':'a'*32}]:
+            self.assertEqual(self.client.post('/v1/images/delete',json=body).status_code,422,body)
+        self.assertIn('requestBody',self.client.get('/openapi.json').json()['paths']['/v1/images/delete']['post'])
+
     def test_delete_is_in_generator_schema_with_no_path_body(self):
         route=self.client.get('/openapi.json').json()['paths']['/v1/images/{identifier}']['delete'];self.assertNotIn('requestBody',route);self.assertIn('200',route['responses'])
 

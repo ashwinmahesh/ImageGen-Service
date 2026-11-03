@@ -285,6 +285,8 @@ Search lists exact matches first, then **Similar images**: pictures that fit you
 
 To delete a result, open it in **Gallery**, choose **Delete image** below its file path, then review the thumbnail and prompt in the confirmation popup. **Cancel** or Escape keeps it; **Delete image** permanently removes the PNG, its JSON settings, tags and cached previews, including files in custom save folders. There is no undo. Uploaded references, other images and job history stay saved. If a waiting or running job uses the image, finish or cancel that job first. The gallery refreshes after deletion and moves back a page if necessary.
 
+To delete several images at once, choose **Select** next to Refresh. Clicking an image or its caption now selects it instead of opening it; Shift-click selects every image between it and the last one you clicked, and **Select page** adds the whole page. Your selection stays while you change pages or search, so one deletion can cover images from several pages. **Delete** in the bar at the bottom shows the selected thumbnails in a confirmation popup; confirming removes them all exactly as **Delete image** would. If some can't be deleted (for example, a waiting job uses them), the rest are still deleted and those stay selected with the reason shown. **Done** or Escape leaves Select mode and clears the selection.
+
 ![Searchable image gallery](docs/screenshots/gallery.png)
 
 This screenshot uses simulated demonstration data.
@@ -378,7 +380,7 @@ Run Now marks that same job immediate and moves it first; it doesn't interrupt a
 ```sh
 curl --fail-with-body http://localhost:5742/v1/models
 curl --fail-with-body http://localhost:5742/v1/loras
-curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&limit=24&offset=0'
+curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&limit=25&offset=0'
 ```
 
 Use a LoRA entry with `available:true`, setting `lora` to its `id`. Adapter discovery reports disabled/empty when the generator starts with `NO_LORAS=1`. For API reference photos, pass `reference_image` as a server-local absolute path; see [uploading references](docs/api.md#reference-photos-and-variations) if you prefer sending image bytes.

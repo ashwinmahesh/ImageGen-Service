@@ -56,7 +56,7 @@ Open **Queue** in the header to see each job's progress, drag waiting jobs into 
 
 ## 4. Find images and edit photos
 
-Open **Gallery** to search by prompt or tags; after the exact matches it shows similar-looking images, and **More like this** in an image's details finds pictures like it. Click an image or its caption to open it, then download it, reuse its settings or expand it to fill the window. **Delete image** asks for confirmation. The generator footer shows the default save folder; use **Save location** to choose another folder for a request.
+Open **Gallery** to search by prompt or tags; after the exact matches it shows similar-looking images, and **More like this** in an image's details finds pictures like it. Click an image or its caption to open it, then download it, reuse its settings or expand it to fill the window. **Delete image** asks for confirmation; **Select** lets you pick several images and delete them together. The generator footer shows the default save folder; use **Save location** to choose another folder for a request.
 
 To edit a photo, stop the app with Ctrl+C, add an editing model with `make setup MODEL=flux2-klein-4b`, then run `make serve` again. Choose **Edit photo**, select the editor, upload a photo and describe the change. Leave resolution on **Auto** to follow the source size. You can also choose **Edit photo** from a gallery image. See [photo editing](MANUAL.md#edit-an-existing-photo) for Qwen selected-area edits and preservation controls.
 

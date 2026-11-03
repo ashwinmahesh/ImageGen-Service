@@ -1403,7 +1403,7 @@ def gallery():
          summary="Browse saved generations",
          description="Lists images from the gallery database (every image the service saved, in any output folder). Reference uploads are excluded. Search q first lists exact matches (whole words or word starts, in any order, across prompts, tags, seeds, dimensions, models and adapter labels) in the chosen order, then, when the search model is set up (make download-search), similar images whose picture fits the words, best first (match: exact or similar). similar_to=<image id> instead lists images that look like that one, best first (More like this); it cannot be combined with q. Repeated tag parameters require all exact labels (case-insensitive) and also filter similar images. Pagination uses limit/offset across both groups and returns totals and previous/next offsets. Images whose file is gone are hidden (only the returned page is checked) and reappear if the file comes back; images without readable metadata remain browsable. Similar search runs a small SigLIP 2 model on the CPU, never the GPU.")
 def saved_images(request: Request, response: Response,
-                 limit: int = Query(default=24, ge=1, le=100),
+                 limit: int = Query(default=25, ge=1, le=100),
                  offset: int = Query(default=0, ge=0),
                  q: str = Query(default="", max_length=4000),
                  sort: Literal["newest", "oldest"] = "newest",
@@ -1517,6 +1517,60 @@ class ImageDeleteResponse(BaseModel):
     cleanup_pending: list[str] = Field(default_factory=list, description='Normally empty. Private staged files that could not be erased; check storage permissions and remove these paths manually.')
 
 
+MAX_DELETE_BATCH = 100
+
+
+class ImageBatchDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] = Field(min_length=1, max_length=MAX_DELETE_BATCH, description="Gallery image IDs to delete, 1–100. Repeated IDs are deleted once.")
+
+
+class ImageDeleteFailure(BaseModel):
+    id: str
+    status: Literal[404, 409, 503] = Field(description="What the single-image DELETE would have returned: 404 unknown or already deleted, 409 in use or not a regular file, 503 storage unavailable.")
+    detail: str
+
+
+class ImageBatchDeleteResponse(BaseModel):
+    deleted: list[ImageDeleteResponse] = Field(description="Images that were deleted, in request order.")
+    failed: list[ImageDeleteFailure] = Field(description="Images that were kept, with the reason. Each image is deleted or kept on its own, so one failure never stops the others.")
+
+
+def delete_gallery_image(identifier):
+    """Delete one gallery image and its database entry, under the queue's artifact-deletion guard."""
+    require_storage(ROOT)
+    folder, path, row = image_location(identifier)
+    metadata = json.loads(row['metadata']) if row['metadata'] else {}
+    with job_store.guard_artifact_deletion(path, metadata.get('job_id') or identifier):
+        result = image_catalog.delete_image(folder, identifier, path)
+        gallery_db().remove(identifier)
+    if result['cleanup_pending']:
+        log.warning('Image %s removed from gallery; cleanup required for %s', identifier, result['cleanup_pending'])
+    return result
+
+
+@app.post('/v1/images/delete', response_model=ImageBatchDeleteResponse,
+          summary='Permanently delete several saved images',
+          responses={503: {'description': 'Queue storage is not ready'}},
+          description='Deletes each listed gallery image exactly as DELETE `/v1/images/{id}` does: its PNG, JSON sidecar, gallery database entry (tags and similar-image vector included) and cached thumbnails. Accepts 1–100 gallery image IDs and never paths. Images are deleted one at a time and independently: an image in use by a queued/running job, already gone or on unavailable storage is listed under `failed` with the status the single-image route would have returned, and the rest are still deleted. The response is 200 whenever the request was valid, so check `failed`. The UI asks for confirmation; API callers authorize deletion by sending the IDs. No GPU inference or queue HTTP call is performed.')
+def delete_saved_images(payload: ImageBatchDeleteRequest, response: Response):
+    queue_ready(require_worker=False)
+    deleted, failed = [], []
+    for identifier in dict.fromkeys(payload.ids):
+        try:
+            deleted.append(delete_gallery_image(identifier))
+        except FileNotFoundError:
+            failed.append({'id': identifier, 'status': 404, 'detail': 'Saved image is unavailable'})
+        except (image_catalog.ImageDeleteConflict, QueueConflict) as error:
+            failed.append({'id': identifier, 'status': 409, 'detail': str(error)})
+        except sqlite3.Error:
+            failed.append({'id': identifier, 'status': 503, 'detail': 'Queue storage is temporarily unavailable, so this image was kept. Try again.'})
+        except (OSError, RuntimeError):
+            failed.append({'id': identifier, 'status': 503, 'detail': 'Cannot delete this image. Check image storage and permissions, then refresh the gallery.'})
+    response.headers['Cache-Control'] = 'no-store'
+    return {'deleted': deleted, 'failed': failed}
+
+
 @app.delete('/v1/images/{identifier}', response_model=ImageDeleteResponse,
             summary='Permanently delete a saved image',
             responses={404: {'description': 'Unknown or already deleted image'}, 409: {'description': 'Image is in use, ambiguous, or has nonregular files'}, 503: {'description': 'Image or queue storage is unavailable'}},
@@ -1524,14 +1578,7 @@ class ImageDeleteResponse(BaseModel):
 def delete_saved_image(identifier: str, response: Response):
     queue_ready(require_worker=False)
     try:
-        require_storage(ROOT)
-        folder, path, row = image_location(identifier)
-        metadata = json.loads(row['metadata']) if row['metadata'] else {}
-        with job_store.guard_artifact_deletion(path, metadata.get('job_id') or identifier):
-            result = image_catalog.delete_image(folder, identifier, path)
-            gallery_db().remove(identifier)
-        if result['cleanup_pending']:
-            log.warning('Image %s removed from gallery; cleanup required for %s', identifier, result['cleanup_pending'])
+        result = delete_gallery_image(identifier)
     except FileNotFoundError:
         raise HTTPException(404, 'Saved image is unavailable') from None
     except image_catalog.ImageDeleteConflict as error:
