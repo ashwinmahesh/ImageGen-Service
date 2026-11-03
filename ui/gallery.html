@@ -26,6 +26,8 @@
 
     .similar-divider{grid-column:1/-1;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:8px 0 -4px;padding-top:18px;border-top:1px solid var(--line)}.similar-divider strong{color:var(--text);font-size:14px;font-weight:550}
     select:disabled{opacity:.5;cursor:default}.similar-thumb{width:44px;height:34px;object-fit:cover;border-radius:6px;background:#141414;border:1px solid var(--line);flex:none}
+    .select-mark{display:none;position:absolute;top:10px;left:10px;z-index:1;width:26px;height:26px;border-radius:50%;border:2px solid #ffffffd9;background:#0000008c;place-items:center;color:transparent;box-shadow:0 1px 6px #0008}.select-mark svg{width:14px;height:14px}.grid.selecting{user-select:none}.grid.selecting .select-mark{display:grid}.card.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 10px 26px #00000018}.card.selected .select-mark{background:var(--accent-fill);border-color:var(--accent);color:var(--accent-ink)}#select-mode[aria-pressed=true]{background:var(--accent-subtle);border-color:var(--accent);color:var(--accent)}
+    .selection-bar{position:sticky;bottom:16px;z-index:5;display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:20px 0 0;padding:12px 14px;background:var(--surface);border:1px solid #555863;border-radius:12px;box-shadow:0 12px 40px #0009}#selection-count{flex:1;min-width:160px;font-size:13px}.delete-strip{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0}.delete-strip img{width:64px;height:52px;object-fit:contain;background:var(--bg);border-radius:6px}.delete-strip span{align-self:center;font-size:12px;color:var(--muted)}
     .delete-action{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.button.danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#3b292e;border-color:#69434b;color:#dfc4cb}.button.danger:hover:not(:disabled){background:#4d353c;border-color:#885b65;color:#f1dce2}.delete-icon{width:14px;height:14px;flex:none}.delete-confirm{width:min(480px,calc(100vw - 32px));padding:24px;max-height:90dvh;overflow:auto}.delete-confirm h2{font-size:20px;font-weight:550;margin:0 0 12px}.delete-confirm p{font-size:13px;color:var(--muted);line-height:1.6}.delete-target{display:flex;align-items:center;gap:14px;margin:20px 0}.delete-target img{width:88px;height:72px;object-fit:contain;background:var(--bg);border-radius:7px;flex:none}.delete-target div{min-width:0}.delete-target strong{font-size:13px;display:block}.delete-target code{display:block;font-size:10px;margin-top:6px;overflow-wrap:anywhere;color:var(--muted)}.delete-target p{font-size:12px;margin:5px 0 0;overflow-wrap:anywhere}.delete-confirm .dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.delete-confirm .error{color:#f7c6bc}
   </style>
   <link rel="stylesheet" href="/assets/help.css">
@@ -39,6 +41,7 @@
     <div class="toolbar">
       <div class="search help-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><label class="sr-only" for="search">Search images</label><input id="search" type="search" maxlength="4000" placeholder="Search prompts, tags, seeds or styles…" autocomplete="off"><button type="button" class="help-button" aria-label="Help with gallery search" data-help="Search prompts, tags, models, adapter names, seeds and dimensions. Exact matches come first, then similar images: pictures that fit your words even when the prompt used other ones. Click an image’s tag to filter by that exact label."><span aria-hidden="true">?</span></button></div>
       <div class="help-control"><label class="sr-only" for="sort">Image order</label><select id="sort" title="Similar images are listed best match first"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><button type="button" class="help-button" aria-label="Help with image order" data-help="Sort saved images by creation time. Similar images are always listed best match first. This does not change generation queue order."><span aria-hidden="true">?</span></button></div>
+      <button type="button" class="button" id="select-mode" aria-pressed="false" title="Select several images to delete at once">Select</button>
       <button type="button" class="button" id="refresh">Refresh ↻</button>
     </div>
     <div class="active-filter" id="similar-filter" hidden><img id="similar-thumb" class="similar-thumb" alt=""><span>Images that look like this one, best match first</span><button class="button" id="clear-similar" type="button">Clear ×</button></div>
@@ -46,8 +49,9 @@
     <div class="results-line"><span id="count" role="status" aria-live="polite">Loading your images…</span><span id="loading" hidden>Loading…</span></div>
     <p id="error" class="error" role="alert" hidden></p>
     <section class="grid" id="grid" aria-label="Saved generations" aria-busy="true"></section>
+    <div class="selection-bar" id="selection-bar" role="region" aria-label="Selected images" hidden><span id="selection-count" role="status" aria-live="polite"></span><button type="button" class="button" id="select-page">Select page</button><button type="button" class="button" id="clear-selection">Clear</button><button type="button" class="button danger" id="delete-selected" disabled><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg><span id="delete-selected-label">Delete</span></button><button type="button" class="button" id="done-selecting">Done</button></div>
     <section class="empty" id="empty" hidden><svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="6" width="36" height="36" rx="7" stroke="currentColor"/><circle cx="18" cy="18" r="4" stroke="currentColor"/><path d="m7 35 13-11 8 6 7-12 6 13" stroke="currentColor"/></svg><h2 id="empty-title">Your library starts here.</h2><p id="empty-text">Generate an image and it will appear here automatically.</p><a class="button primary" href="/">Create an image ↗</a></section>
-    <nav class="pagination" aria-label="Image pages"><button id="page-previous" class="button" disabled>← Previous page</button><span id="page-label" class="page-label">Page 1 of 1</span><button id="page-next" class="button" disabled>Next page →</button><div class="page-size"><label for="page-size">Per page</label><select id="page-size"><option value="12">12</option><option value="24" selected>24</option><option value="48">48</option><option value="96">96</option></select><button type="button" class="help-button" aria-label="Help with images per page" data-help="Choose how many previews to show at once. Previous and Next move through the matching images."><span aria-hidden="true">?</span></button></div></nav>
+    <nav class="pagination" aria-label="Image pages"><button id="page-previous" class="button" disabled>← Previous page</button><span id="page-label" class="page-label">Page 1 of 1</span><button id="page-next" class="button" disabled>Next page →</button><div class="page-size"><label for="page-size">Per page</label><select id="page-size"><option value="10">10</option><option value="25" selected>25</option><option value="50">50</option><option value="100">100</option></select><button type="button" class="help-button" aria-label="Help with images per page" data-help="Choose how many previews to show at once. Previous and Next move through the matching images."><span aria-hidden="true">?</span></button></div></nav>
   </main>
   <footer class="studio-footer"><span>Images stay in their saved folders. Previews are cached locally.</span><a href="/docs" target="_blank" rel="noopener">API documentation ↗</a></footer>
   <dialog id="viewer" aria-labelledby="viewer-title">
@@ -68,9 +72,10 @@
   <dialog id="delete-confirm" class="delete-confirm" aria-labelledby="delete-title" aria-describedby="delete-warning">
     <h2 id="delete-title">Delete this image?</h2>
     <p id="delete-warning">This permanently deletes the image, its saved settings, tags and cached previews. This cannot be undone.</p>
-    <div class="delete-target"><img id="delete-preview" alt="Image selected for deletion"><div><strong id="delete-label"></strong><p id="delete-prompt"></p><code id="delete-file"></code></div></div>
+    <div class="delete-strip" id="delete-strip" role="group" aria-label="Images selected for deletion" hidden></div>
+    <div class="delete-target" id="delete-target"><img id="delete-preview" alt="Image selected for deletion"><div><strong id="delete-label"></strong><p id="delete-prompt"></p><code id="delete-file"></code></div></div>
     <p class="error" id="delete-error" role="alert" hidden></p>
-    <div class="dialog-actions"><button class="button" type="button" id="cancel-delete" autofocus>Cancel</button><button class="button danger" type="button" id="confirm-delete"><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>Delete image</button></div>
+    <div class="dialog-actions"><button class="button" type="button" id="cancel-delete" autofocus>Cancel</button><button class="button danger" type="button" id="confirm-delete"><svg class="delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg><span id="confirm-delete-label">Delete image</span></button></div>
   </dialog>
   <p class="toast" id="toast" role="status" hidden></p>
   <script>
@@ -95,6 +100,9 @@
     // similarTo lists images that look like one image (More like this) instead of searching words.
     let similarTo = null, similarAvailable = false, similarRetry;
     let images = [], currentOffset = 0, nextOffset = null, previousOffset = null, activeTags = [], savingTags = false, deleting = false, pendingDelete = null, activeIndex = -1, requestNumber = 0, loading = false, controller = null, searchTimer, toastTimer;
+    // Select mode: clicks pick images instead of opening them. The selection survives paging and searching, so one delete can span pages.
+    let selectMode = false, lastToggled = -1;
+    const selected = new Map(), DELETE_BATCH = 100, STRIP_LIMIT = 12;
     // A stacked image lists every adapter in order; older images have one lora.
     function styles(item) { return item.loras || (item.lora ? [item.lora] : []); }
     function element(tag, className, text) { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; }
@@ -112,17 +120,43 @@
       if (tags.childNodes.length) container.append(tags);
     }
     function renderCard(item, index) {
-      const card = element('article', 'card');
-      const button = element('button', 'open-image'); button.type = 'button'; button.setAttribute('aria-label', 'Open image · ' + dateLabel(item.created));
+      const card = element('article', 'card'); card.dataset.index = String(index);
+      const button = element('button', 'open-image'); button.type = 'button';
       const photo = element('img'); photo.loading = 'lazy'; photo.decoding = 'async'; photo.alt = (item.prompt || 'Saved generated image').slice(0, 200); photo.src = localURL(item.thumbnail_url);
       photo.addEventListener('error', () => { photo.hidden = true; button.append(element('span', 'image-failed', 'Preview unavailable · open original')); });
-      button.append(photo); button.addEventListener('click', () => openImage(index));
+      const mark = element('span', 'select-mark'); mark.setAttribute('aria-hidden', 'true');
+      mark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>';
+      const choose = event => selectMode ? toggleSelected(index, event.shiftKey) : openImage(index);
+      button.append(photo, mark); button.addEventListener('click', choose);
       const body = element('div', 'card-body'); body.append(element('p', 'prompt', item.prompt || 'No prompt recorded'));
-      // The caption opens the photo too; tag chips keep filtering. The thumbnail stays the keyboard control.
-      body.addEventListener('click', event => { if (!event.target.closest('button, a')) openImage(index); });
+      // The caption opens (or selects) the photo too; tag chips keep filtering. The thumbnail stays the keyboard control.
+      body.addEventListener('click', event => { if (!event.target.closest('button, a')) choose(event); });
       const line = element('div', 'card-data'); line.append(element('span', '', item.size ? item.size.replace('x',' × ') : 'PNG'), element('time', '', dateLabel(item.created, true))); body.append(line);
       body.append(element('span', 'style', (item.model || 'Unknown model') + (styles(item).length ? ' · ' + styles(item).map(entry => entry.name).join(' + ') : '')));
-      renderTags(item, body); card.append(button, body); $('grid').append(card);
+      renderTags(item, body); card.append(button, body); paintCard(card); $('grid').append(card);
+    }
+    function paintCard(card) {
+      const item = images[Number(card.dataset.index)], button = card.querySelector('.open-image'), chosen = selected.has(item.id);
+      card.classList.toggle('selected', selectMode && chosen);
+      button.setAttribute('aria-label', (selectMode ? 'Select image · ' : 'Open image · ') + dateLabel(item.created));
+      if (selectMode) button.setAttribute('aria-pressed', String(chosen)); else button.removeAttribute('aria-pressed');
+    }
+    function paintSelection() {
+      $('grid').classList.toggle('selecting', selectMode);
+      for (const card of $('grid').querySelectorAll('.card')) paintCard(card);
+      const count = selected.size, elsewhere = [...selected.keys()].filter(id => !images.some(item => item.id === id)).length;
+      $('select-mode').setAttribute('aria-pressed', String(selectMode)); $('select-mode').textContent = selectMode ? 'Done' : 'Select';
+      $('selection-bar').hidden = !selectMode;
+      $('selection-count').textContent = count ? `${count} selected` + (elsewhere ? ` · ${elsewhere} on other pages` : '') : 'Click images to select them. Shift-click selects a range.';
+      $('delete-selected').disabled = !count || deleting; $('delete-selected-label').textContent = count ? `Delete ${count}` : 'Delete';
+      $('select-page').disabled = !images.length || images.every(item => selected.has(item.id)); $('clear-selection').disabled = !count;
+    }
+    function setSelectMode(on) { selectMode = on; lastToggled = -1; if (!on) selected.clear(); paintSelection(); }
+    function toggleSelected(index, range) {
+      const item = images[index]; if (!item || deleting) return;
+      const chosen = !selected.has(item.id), from = range && lastToggled >= 0 ? Math.min(lastToggled, index) : index, to = range && lastToggled >= 0 ? Math.max(lastToggled, index) : index;
+      for (let position = from; position <= to; position++) { const entry = images[position]; if (chosen) selected.set(entry.id, entry); else selected.delete(entry.id); }
+      lastToggled = index; paintSelection();
     }
     function renderDivider(data) {
       const divider = element('div', 'similar-divider'); divider.setAttribute('role', 'separator');
@@ -165,6 +199,7 @@
           if (!similarTo && images[index].match === 'similar' && (index === 0 || images[index - 1].match !== 'similar')) renderDivider(data);
           renderCard(images[index], index);
         }
+        lastToggled = -1; paintSelection();
         nextOffset = data.next_offset ?? null; previousOffset = data.previous_offset ?? null;
         const totalPages = Math.max(1, Math.ceil(data.total / data.limit)), page = Math.floor(data.offset / data.limit) + 1;
         $('page-label').textContent = `Page ${page} of ${totalPages}`;
@@ -237,30 +272,79 @@
       } catch (error) { $('tag-error').textContent = error.name === 'AbortError' ? 'The request timed out. Refresh to check the saved tags before retrying.' : error.message; $('tag-error').hidden = false; }
       finally { savingTags = false; $('delete-image').disabled = deleting; $('save-tags').disabled = false; $('tags').disabled = false; $('previous').disabled = activeIndex <= 0; $('next').disabled = activeIndex >= images.length - 1; }
     });
+    // One confirmation dialog serves the viewer's single image and a selection; a selection always uses the batch route.
+    function showDeleteConfirm(items,fromSelection){
+      const many=items.length>1,item=items[0];pendingDelete={items,fromSelection};$('delete-error').hidden=true;
+      $('delete-title').textContent=many?`Delete ${items.length} images?`:'Delete this image?';
+      $('delete-warning').textContent=many?`This permanently deletes these ${items.length} images, their saved settings, tags and cached previews. This cannot be undone.`:'This permanently deletes the image, its saved settings, tags and cached previews. This cannot be undone.';
+      $('confirm-delete-label').textContent=many?`Delete ${items.length} images`:'Delete image';
+      $('delete-target').hidden=many;$('delete-strip').hidden=!many;$('delete-strip').replaceChildren();
+      if(many){
+        for(const entry of items.slice(0,STRIP_LIMIT)){const thumb=element('img');thumb.alt='';thumb.src=localURL(entry.thumbnail_url);$('delete-strip').append(thumb);}
+        if(items.length>STRIP_LIMIT)$('delete-strip').append(element('span','',`+${items.length-STRIP_LIMIT} more`));
+      }else{
+        $('delete-preview').src=localURL(item.thumbnail_url);$('delete-label').textContent=dateLabel(item.created);
+        $('delete-prompt').textContent=(item.prompt || 'No prompt recorded').slice(0,180);$('delete-file').textContent=item.id+'.png';
+      }
+      $('delete-confirm').showModal();
+    }
     $('delete-image').addEventListener('click',()=>{
       const item=images[activeIndex];if(!item || savingTags || deleting)return;
-      pendingDelete={...item};$('delete-error').hidden=true;
-      $('delete-preview').src=localURL(item.thumbnail_url);$('delete-label').textContent=dateLabel(item.created);
-      $('delete-prompt').textContent=(item.prompt || 'No prompt recorded').slice(0,180);$('delete-file').textContent=item.id+'.png';
-      $('delete-confirm').showModal();
+      showDeleteConfirm([{...item}],false);
     });
+    $('select-mode').addEventListener('click',()=>{if(!deleting)setSelectMode(!selectMode);});
+    $('done-selecting').addEventListener('click',()=>{if(!deleting){setSelectMode(false);$('select-mode').focus();}});
+    $('clear-selection').addEventListener('click',()=>{selected.clear();lastToggled=-1;paintSelection();});
+    $('select-page').addEventListener('click',()=>{for(const item of images)selected.set(item.id,item);paintSelection();});
+    $('delete-selected').addEventListener('click',()=>{if(selected.size && !deleting && !savingTags)showDeleteConfirm([...selected.values()],true);});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape' && selectMode && !deleting && !document.querySelector('dialog[open]') && !event.target.closest('input, textarea, select'))setSelectMode(false);});
+    // Deletes in chunks the API accepts. Images already gone (404) count as removed; the rest of failed stay selected.
+    async function deleteSelection(items){
+      const removed=[],kept=[],pending=[];
+      try{
+        for(let start=0;start<items.length;start+=DELETE_BATCH){
+          const ids=items.slice(start,start+DELETE_BATCH).map(item=>item.id);
+          const response=await fetch('/v1/images/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids}),signal:AbortSignal.timeout(120000)});
+          const result=await response.json();
+          if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'Could not delete the selected images.');
+          for(const row of result.deleted){removed.push(row.id);pending.push(...row.cleanup_pending);}
+          for(const row of result.failed){if(row.status===404)removed.push(row.id);else kept.push(row);}
+          if(items.length>DELETE_BATCH)$('confirm-delete-label').textContent=`Deleting… ${removed.length+kept.length} of ${items.length}`;
+        }
+      }finally{for(const id of removed)selected.delete(id);}
+      return {removed,kept,pending};
+    }
     $('cancel-delete').addEventListener('click',()=>{if(!deleting)$('delete-confirm').close();});
     $('delete-confirm').addEventListener('cancel',event=>{if(deleting)event.preventDefault();});
     $('delete-confirm').addEventListener('close',()=>{pendingDelete=null;});
     $('delete-confirm').addEventListener('click',event=>{if(event.target!==$('delete-confirm') || deleting)return;const r=event.target.getBoundingClientRect();if(event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom)event.target.close();});
     $('confirm-delete').addEventListener('click',async()=>{
-      const item=pendingDelete;if(!item || deleting || savingTags)return;
-      deleting=true;$('confirm-delete').disabled=true;$('cancel-delete').disabled=true;$('delete-error').hidden=true;
+      const request=pendingDelete;if(!request || deleting || savingTags)return;
+      deleting=true;$('confirm-delete').disabled=true;$('cancel-delete').disabled=true;$('delete-error').hidden=true;$('delete-selected').disabled=true;
+      if(request.fromSelection){
+        try{
+          const {removed,kept,pending}=await deleteSelection(request.items);
+          $('delete-confirm').close();if(!kept.length)setSelectMode(false);
+          await loadImages(currentOffset);toast(`${removed.length} image${removed.length===1?'':'s'} deleted`);$(kept.length?'delete-selected':'select-mode').focus();
+          if(kept.length){$('error').textContent=`${kept.length} image${kept.length===1?' was':'s were'} kept and ${kept.length===1?'is':'are'} still selected: `+[...new Set(kept.map(row=>row.detail))].join(' ');$('error').hidden=false;}
+          else if(pending.length){$('error').textContent='The images were removed from the gallery, but some files could not be erased. Check storage permissions and the server log for cleanup paths.';$('error').hidden=false;}
+        }catch(error){
+          $('delete-error').textContent=['AbortError','TimeoutError'].includes(error.name) || error instanceof TypeError ? 'Could not confirm deletion. Cancel and refresh the gallery to check before retrying.' : error.message;$('delete-error').hidden=false;
+          loadImages(currentOffset);
+        }finally{deleting=false;$('confirm-delete').disabled=false;$('cancel-delete').disabled=false;$('delete-image').disabled=savingTags;$('confirm-delete-label').textContent=pendingDelete?.items.length>1?`Delete ${pendingDelete.items.length} images`:'Delete image';paintSelection();}
+        return;
+      }
+      const item=request.items[0];
       try{
         const response=await fetch('/v1/images/'+encodeURIComponent(item.id),{method:'DELETE',signal:AbortSignal.timeout(15000)});
         const result=await response.json();
         if(!response.ok && response.status!==404)throw new Error(typeof result.detail==='string'?result.detail:'Could not delete this image.');
         $('delete-confirm').close();$('viewer').close();activeIndex=-1;
-        images=images.filter(image=>image.id!==item.id);$('grid').replaceChildren();images.forEach(renderCard);
+        selected.delete(item.id);images=images.filter(image=>image.id!==item.id);$('grid').replaceChildren();images.forEach(renderCard);
         await loadImages(currentOffset);toast('Image deleted');$('refresh').focus();
         if(result.cleanup_pending?.length){$('error').textContent='The image was removed from the gallery, but some files could not be erased. Check storage permissions and the server log for cleanup paths.';$('error').hidden=false;}
       }catch(error){$('delete-error').textContent=['AbortError','TimeoutError'].includes(error.name) || error instanceof TypeError ? 'Could not confirm deletion. Cancel and refresh the gallery to check before retrying.' : error.message;$('delete-error').hidden=false;}
-      finally{deleting=false;$('confirm-delete').disabled=false;$('cancel-delete').disabled=false;$('delete-image').disabled=savingTags;}
+      finally{deleting=false;$('confirm-delete').disabled=false;$('cancel-delete').disabled=false;$('delete-image').disabled=savingTags;paintSelection();}
     });
     $('close').addEventListener('click', () => $('viewer').close());
     // Expand fills the current browser window with the photo; Escape or the same button returns to the modal.
@@ -281,7 +365,7 @@
     const initial = new URLSearchParams(location.search);
     $('search').value = (initial.get('q') || '').slice(0, 4000);
     if (['newest','oldest'].includes(initial.get('sort'))) $('sort').value = initial.get('sort');
-    if (['12','24','48','96'].includes(initial.get('limit'))) $('page-size').value = initial.get('limit');
+    if (['10','25','50','100'].includes(initial.get('limit'))) $('page-size').value = initial.get('limit');
     activeTags = initial.getAll('tag').slice(0,32);
     if (/^[0-9a-f]{32}$/.test(initial.get('similar_to') || '')) { similarTo = initial.get('similar_to'); $('search').value = ''; }
     const initialOffset = Number(initial.get('offset') || 0);

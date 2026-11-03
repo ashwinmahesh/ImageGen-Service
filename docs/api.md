@@ -534,6 +534,7 @@ The gallery's **Edit photo** action opens the generator webpage at `/?generation
 | GET `/v1/images/{identifier}` | Generator | 200 | Read one image's settings, paths and URLs. |
 | PATCH `/v1/images/{identifier}/tags` | Generator | 200 | Replace its editable tags; returns the updated detail. |
 | DELETE `/v1/images/{identifier}` | Generator | 200 | Permanently delete an image and its own saved settings, tags and previews. |
+| POST `/v1/images/delete` | Generator | 200 | Permanently delete up to 100 images in one request; reports which were kept and why. |
 
 ### GET /v1/images
 
@@ -543,10 +544,10 @@ The gallery's **Edit photo** action opens the generator webpage at `/?generation
 | `similar_to` | omitted | A gallery image ID: list images that look like it, best match first (**More like this**). Requires the search model; `sort` does not apply. |
 | `tag` | omitted | Repeat up to 32 exact label filters. All must match, case-insensitively; combines with `q`. Same tag rules as generation. |
 | `sort` | `newest` | `newest` or `oldest`. |
-| `limit`, `offset` | 24, 0 | Integer limit 1–100 and nonnegative offset. |
+| `limit`, `offset` | 25, 0 | Integer limit 1–100 and nonnegative offset. The webpage offers 10, 25, 50 or 100 per page. |
 
 ```sh
-curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&tag=Winter&limit=24&offset=0&sort=newest'
+curl --fail-with-body 'http://localhost:5742/v1/images?q=forest&tag=Winter&limit=25&offset=0&sort=newest'
 ```
 
 Response has `object:"list"`, `data[]`, matching `total`, `limit`, `offset`, `has_previous`, `has_more`, and available `previous_offset` / `next_offset` (omitted at boundaries). Each request returns only that page. The gallery database (`<project>/state/gallery/images.sqlite3`, SQLite) is the source of truth for every saved image's settings, tags and location: generation adds each image as it is saved, and search, tag filters and ordering run there, so a page or search takes a few milliseconds. `q` uses full-text search: every word must match the start of a word in the prompt, tags, model, adapter ID/name, seed or size, in any order (`castle dawn` finds "Dawn over the castle"; `cast` finds "castle"; text inside a word, such as `astle`, does not match). The JSON sidecar beside each PNG is still written as a portable copy but is not read by the gallery, so editing one by hand does not change the gallery. Only the returned page's files are checked: an image whose PNG was deleted or moved outside the service is hidden (the page refills) and shows again if the file returns. **Similar images.** When the search model is set up (`make download-search`), a `q` search continues after the exact matches with images whose *picture* fits the words, even when the prompt used other words or was an edit instruction, best match first and each marked `match:"similar"` with a `similarity` score (exact matches carry `match:"exact"`). The response then adds `similar_total` (how many of `total` are similar matches; pages run across both groups) and `similar_search`: `ready`, `loading` (the model was still starting; exact matches only, ask again in a few seconds) or `unavailable` (not set up, or it failed; exact search still answers). `similar_to=<id>` lists only images that look like that one: everything with cosine similarity of at least 0.75, or at least the 8 nearest above 0.6. Unknown IDs return **404**, `q` together with `similar_to` **422**, and `similar_to` without the search model **503**. Tag filters and hidden missing files apply to similar images too.
@@ -606,6 +607,24 @@ A **200** response removes the image from the catalog and its media routes. Uplo
 | **503** | Image storage/permissions failed, the queue is not initialized, or local SQLite is unavailable. SQLite failures use `code:queue_storage_unavailable` and `Retry-After:2`. |
 
 The pending-job check and deletion serialize with shared SQLite queue mutations; stale tag saves and in-flight thumbnails cannot recreate an index/preview after successful removal. After a timeout or lost response, refresh the gallery or GET its detail before retrying: the server may already have deleted the image. Browser Cancel/Escape dismisses confirmation without issuing DELETE. Search, tag filters, sort and page size remain selected after success; an emptied last page moves back to the last available page.
+
+### POST /v1/images/delete
+
+Deletes several gallery images in one request. The body is `{"ids":[...]}` with 1–100 gallery image IDs (repeats are deleted once); no paths, model or other fields are accepted (**422**). Each image is deleted exactly as DELETE `/v1/images/{identifier}` would delete it, one at a time and independently, so an image that is in use or already gone never stops the others. Sending the IDs authorizes deletion; the webpage's **Select** mode shows a confirmation popup with the selected thumbnails first.
+
+```sh
+# Replace these example IDs with the gallery images you intend to delete.
+curl --fail-with-body http://localhost:5742/v1/images/delete \
+  -H 'Content-Type: application/json' \
+  -d '{"ids":["0123456789abcdef0123456789abcdef","fedcba9876543210fedcba9876543210"]}'
+```
+
+```json
+{"deleted":[{"id":"0123456789abcdef0123456789abcdef","deleted":true,"cleanup_pending":[]}],
+ "failed":[{"id":"fedcba9876543210fedcba9876543210","status":409,"detail":"A queued or running job uses this image. Finish or cancel that job before deleting it."}]}
+```
+
+The response is **200** whenever the request is valid, even if some or all images were kept: always check `failed`. `deleted` lists removed images in request order, each with its own `cleanup_pending` (see above). Each `failed` entry carries the status the single-image route would have returned (**404** unknown or already deleted, **409** in use or not a regular file, **503** image storage or queue SQLite unavailable) and a readable `detail`; the image is kept and can be retried. The whole request returns **503** only when queue storage is not initialized. After a timeout, refresh the gallery before retrying; repeating the request is safe because already-deleted IDs come back under `failed` with 404.
 
 ## Observability
 
