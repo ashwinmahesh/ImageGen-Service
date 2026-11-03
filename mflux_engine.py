@@ -121,7 +121,7 @@ class MfluxResult:
             if PROFILE.get('vae_tiling'):
                 command.append('--vae-tiling')
             if reference:
-                command+=['--image-paths',str(reference)]
+                command+=['--image-paths',str(reference),*map(str,settings.get('additional_image_paths') or [])]
             if settings.get('mask_path'):
                 if not PROFILE.get('mask_editing') or not reference:
                     raise ValueError('Masks require a Qwen photo edit and source reference')

@@ -26,6 +26,7 @@ Open **[localhost:5742](http://localhost:5742/)** to generate your first image. 
 - **Develop your prompt:** an optional local language model adds detail about lighting, style and composition. Preview its suggestions or turn it off.
 - **Edit photos:** use Klein or Qwen to change an existing image. With Qwen, paint over the area to change; the model is also told where your selection is.
 - **Try styles:** add compatible LoRA adapters with [`make setup-lora`](MANUAL.md#add-your-own-lora).
+- **Combine photos:** with FLUX.2 Klein or Qwen-Image, use up to four reference photos at once and refer to them by number ("the jacket from image 2 on the person in image 1").
 - **Keep your favourites:** search the gallery by prompt or tags (with similar-looking images after the exact matches, and **More like this**), open an image to view it fitted or full-window, download it, reuse settings or delete it (or a whole selection) with confirmation.
 - **Queue work:** save requests for later, drag jobs into order or choose **Run Now**. **Monitor** opens a job in a new tab with its settings filled in. Switch off **Process queue** to pause; waiting work survives restarts.
 - **Save reloads:** the gear icon opens **Settings**. **Keep image weights loaded between generations** keeps FLUX.2 Klein or Qwen-Image in memory for back-to-back images of the same model, then releases it.

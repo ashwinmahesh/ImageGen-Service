@@ -156,6 +156,7 @@ from pathlib import Path
 from PIL import Image
 import server
 from tests.test_api import FakeModel
+from photo_workflows import MULTI_REFERENCE_SCOPE
 root=Path(server.ROOT); root.mkdir(parents=True)
 server.PROJECT_ROOT=root.parent  # keep this run's gallery database out of the real project
 reference=root/'source.png'; Image.new('RGB',(100,73),'red').save(reference)
@@ -173,8 +174,20 @@ assert server.model.calls[-1]['image_path']
 assert Image.open(path).size==(320,234)
 assert metadata[server.API_MODEL]['reference_mode']=='edit'
 assert metadata['image_strength'] is None
+extras=[root/'jacket.png',root/'hat.png']
+for extra in extras: Image.new('RGB',(64,64),'blue').save(extra)
+extras=[str(extra.resolve()) for extra in extras]
+for task in ['generate','edit']:
+    multi=server.GenerateRequest.model_validate(server.normalized_request(server.GenerateRequest(task=task,prompt='Put the jacket from image 2 and the hat from image 3 on the person in image 1.',
+        reference_image=str(reference),additional_reference_images=extras,size='320x320',seed=1)))
+    path,metadata=server.generate(multi)
+    call=server.model.calls[-1]
+    assert call['additional_image_paths']==extras and metadata['additional_reference_images']==extras
+    assert (MULTI_REFERENCE_SCOPE in call['prompt'])==(task=='edit')
+    assert Image.open(path).size==(320,234)  # image 1 alone sets the size and aspect ratio
+assert 'additional_reference_images' not in server.generate(request)[1] and 'additional_image_paths' not in server.model.calls[-1]
 cap=server.capabilities()
-assert cap['reference_mode']=='edit' and not cap['image_strength_supported']
+assert cap['reference_mode']=='edit' and not cap['image_strength_supported'] and cap['max_reference_images']==4
 assert server.API_MODEL in server.GenerateRequest.model_json_schema()['properties']['model']['enum']
 print(json.dumps({'model':server.API_MODEL,'steps':request.steps}))
 '''

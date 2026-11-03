@@ -145,7 +145,7 @@ def create_app(project=PROJECT_ROOT):
     def models():
         return {'default_model':default_model(project),'data':[{'id':identifier,'name':profile['name'],
             'reference_mode':profile.get('reference_mode','variation'),'tasks':supported_tasks(profile),
-            'mask_editing':bool(profile.get('mask_editing')),identifier:model_details(identifier)}
+            'mask_editing':bool(profile.get('mask_editing')),'max_reference_images':profile.get('max_references',1),identifier:model_details(identifier)}
             for identifier in available_models(project) for profile in [PROFILES[identifier]]]}
 
     @app.get('/v1/loras',response_model=LoRAList,response_model_exclude_none=True,
@@ -277,7 +277,7 @@ def with_model(request,model):
 
 class Replacement(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed. Photo edits use task:"edit", reference_image, optional preserve, and Qwen-only mask_image (white edits, black preserves). Paths must remain accessible on the generator Mac until completion and recovery.',examples=[
+    request:dict=Field(description='Complete image request. Model defaults and validation are applied by the generator when consumed. Photo edits use task:"edit", reference_image, optional preserve, and Qwen-only mask_image (white edits, black preserves). FLUX.2 Klein and Qwen also accept up to 3 more photos in additional_reference_images (image 2-4). Paths must remain accessible on the generator Mac until completion and recovery.',examples=[
         {'prompt':'A lantern in a misty forest','size':'1024x1024','n':1,'expand_prompt':True},
         {'task':'edit','prompt':'Change the jacket to green.','reference_image':'/absolute/path/photo.png',
          'mask_image':'/absolute/path/mask.png','preserve':'Face, pose and background','size':'auto'}])

@@ -32,7 +32,7 @@ from photo_workflows import supported_tasks, edit_prompt, edit_prompt_fits, desc
 from config import QUEUE_DATABASE, GPU_LOCK_FILE, PROFILE, MODEL_ROOTS, RUNTIME_DIR, API_MODEL, IMAGE_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION, ROOT, PROJECT_ROOT
 from storage_paths import require_storage
 from lora_catalog import list_loras, resolve_lora, effective_prompt, adapter_list, adapter_identity
-from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, ReferenceError
+from reference_geometry import prepare_geometry, prepare_mask, read_mask, composite_edit, widen_mask_to_grid, check_reference, ReferenceError, MAX_REFERENCE_PIXELS
 import gallery_search
 import gallery_store
 import image_catalog
@@ -59,7 +59,7 @@ from search_profile import check_assets as check_search_assets
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Path as FastAPIPath, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from ui_shell import render_page
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -127,6 +127,12 @@ def ready_or_error(identifier):
 
 
 MAX_STACKED_LORAS=4
+# FLUX.2 Klein and Qwen-Image take a list of references; image 1 plus three keeps memory reasonable on 24 GB.
+MAX_ADDITIONAL_REFERENCES=3
+
+
+def reference_count(payload):
+    return (payload.reference_image is not None)+len(payload.additional_reference_images or [])
 
 
 def wants_lora(payload):
@@ -217,7 +223,8 @@ app = FastAPI(
         f"`{IMAGE_DIR}` by default. Set `output_dir` in a generation request to choose another "
         "absolute directory on this Mac. Every response includes `file_path` and `metadata_path`. "
         "These are server-local filesystem paths; `url` is the browser-accessible PNG. "
-        "Use `reference_image` for one local reference photo. FLUX.2 Klein and Qwen 2.1 Turbo "
+        "Use `reference_image` for a local reference photo; FLUX.2 Klein and Qwen 2.1 Turbo also take up to 3 more in "
+        "`additional_reference_images` (image 2, 3, 4). FLUX.2 Klein and Qwen 2.1 Turbo "
         "apply editing instructions; Z-Image and Chroma make variations controlled by `image_strength`. The webpage can also upload a photo "
         "to `/v1/reference-images` and use its returned local path. One image can generate at a time. Interactive webpage: `/`. Browse saved generations at `/gallery` or GET `/v1/images`. "
         "The generator API reads/writes project-local SQLite directly. "
@@ -284,7 +291,11 @@ class GenerateRequest(BaseModel):
     )
     reference_image: str | None = Field(
         default=None, max_length=4096,
-        description="Optional absolute local image path (~/ supported). One reference only; a path string, not HTTP URLs or raw image bytes. FLUX.2 Klein and Qwen 2.1 Turbo follow prompt editing instructions; Z-Image and Chroma make image-to-image variations. Output preserves the oriented photo aspect ratio; the longer dimension of size sets its long edge. Uploads are supported via /v1/reference-images.",
+        description="Optional absolute local image path (~/ supported); a path string, not HTTP URLs or raw image bytes. This is image 1, the source photo. FLUX.2 Klein and Qwen 2.1 Turbo follow prompt editing instructions; Z-Image and Chroma make image-to-image variations. Output preserves the oriented photo aspect ratio; the longer dimension of size sets its long edge. Uploads are supported via /v1/reference-images.",
+    )
+    additional_reference_images: list[str] | None = Field(
+        default=None, min_length=1, max_length=MAX_ADDITIONAL_REFERENCES,
+        description="FLUX.2 Klein and Qwen-Image 2.1 Turbo only: up to 3 more absolute local image paths (~/ supported) used together with reference_image, in order as image 2, 3 and 4. Refer to them by number in the prompt, for example \"the person from image 1 wearing the jacket from image 2\". Requires reference_image. Image 1 alone sets the Auto size and aspect ratio, and mask_image, edit_strength and the selected-area blend apply only to it. Each must be a different file of at most 40 megapixels; the model resizes each one itself. More references take longer and use more memory. Upload photos through /v1/reference-images.",
     )
     image_strength: float = Field(
         default=0.6, ge=0, lt=1,
@@ -302,6 +313,16 @@ class GenerateRequest(BaseModel):
         if value is None:
             return None
         return cls.validate_output_dir(value)
+
+    @field_validator("additional_reference_images")
+    @classmethod
+    def validate_additional_references(cls, value):
+        if value is None:
+            return None
+        paths = [cls.validate_output_dir(item) for item in value]
+        if len(set(paths)) != len(paths):
+            raise ValueError("Each additional reference must be a different file")
+        return paths
 
     @field_validator('mask_image')
     @classmethod
@@ -321,7 +342,7 @@ class GenerateRequest(BaseModel):
                 raise ValueError('Edit photo requires reference_image')
             if self.vary_prompt:
                 raise ValueError('Composition variation is unavailable for photo edits; use n for alternate attempts at the same edit')
-            if not edit_prompt_fits(self.prompt,self.preserve):
+            if not edit_prompt_fits(self.prompt,self.preserve,references=reference_count(self)):
                 raise ValueError('Edit instruction and preservation requirements must fit within 4000 characters including editing guidance')
         elif self.preserve is not None:
             raise ValueError('preserve requires task:edit')
@@ -337,6 +358,16 @@ class GenerateRequest(BaseModel):
             raise ValueError("Reference-image generation requires at least 2 steps")
         if self.reference_image is None and "image_strength" in self.model_fields_set:
             raise ValueError("image_strength requires reference_image")
+        if self.additional_reference_images:
+            limit=profile.get('max_references',1)
+            if limit<2:
+                raise ValueError('additional_reference_images require FLUX.2 Klein or Qwen-Image 2.1 Turbo')
+            if self.reference_image is None:
+                raise ValueError('additional_reference_images require reference_image, which is image 1')
+            if reference_count(self)>limit:
+                raise ValueError(f"{profile['name']} accepts at most {limit} reference images in total")
+            if self.reference_image in self.additional_reference_images:
+                raise ValueError('reference_image cannot also be an additional reference')
         check_adapter_fields(self)
         if self.vary_prompt and (not self.expand_prompt or self.n<2):
             raise ValueError('vary_prompt requires expand_prompt:true and n>=2')
@@ -432,7 +463,6 @@ class LocalFileError(Exception):
 
 
 MAX_REFERENCE_BYTES = 20 * 1024**2
-MAX_REFERENCE_PIXELS = 40_000_000
 
 
 class ReferenceResult(BaseModel):
@@ -521,9 +551,20 @@ INPUT_MEDIA_TYPES = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/we
                      "Only paths recorded on that job are read, and only PNG, JPEG or WebP images are returned unchanged. "
                      "404 when the job has no such input or the file is missing or unreadable; 415 for other file types.")
 def job_input(identifier: str, field: Literal["reference_image", "mask_image"]):
-    value = find_job(identifier)["request"].get(field)
+    return serve_job_input(find_job(identifier)["request"].get(field), field)
+
+
+@app.get("/v1/jobs/{identifier}/inputs/additional_reference_images/{index}", summary="Read one of a job's additional reference photos",
+         description="Serves the file at position `index` (0 is image 2) of a job's `additional_reference_images`, with the same rules as the source photo route: "
+                     "only paths recorded on that job, only PNG, JPEG or WebP returned unchanged, 404 when missing and 415 for other file types.")
+def job_additional_input(identifier: str, index: int = FastAPIPath(ge=0, lt=MAX_ADDITIONAL_REFERENCES)):
+    values = find_job(identifier)["request"].get("additional_reference_images") or []
+    return serve_job_input(values[index] if index < len(values) else None, f"reference image {index + 2}")
+
+
+def serve_job_input(value, label):
     if not isinstance(value, str) or not value.strip():
-        raise HTTPException(404, f"This job has no {field}")
+        raise HTTPException(404, f"This job has no {label}")
     path = Path(value).expanduser()
     from PIL import Image, UnidentifiedImageError
     try:
@@ -546,6 +587,9 @@ def generate(payload, job=None):
     except RuntimeError as error:
         raise LocalFileError(str(error)) from error
     try:
+        # Images 2-4 are passed as they are; the model orients and resizes each one itself.
+        for number,path in enumerate(payload.additional_reference_images or [],start=2):
+            check_reference(path,f'reference image {number}')
         with prepare_geometry(payload.reference_image, payload.size, ROOT / "cache" / "scratch") as geometry:
             with prepare_mask(payload.mask_image,geometry,ROOT/'cache'/'scratch') as mask_path:
                 return generate_with_geometry(payload, geometry, job, mask_path=mask_path)
@@ -598,8 +642,9 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             from PIL import Image
             with Image.open(mask_path) as prepared_mask:
                 region=describe_mask_boxes(prepared_mask)
-        rendering_prompt=edit_prompt(payload.prompt,payload.preserve,region) if payload.task=='edit' else payload.prompt
-        if payload.task=='edit' and not edit_prompt_fits(payload.prompt,payload.preserve,region=region):
+        references=reference_count(payload)
+        rendering_prompt=edit_prompt(payload.prompt,payload.preserve,region,references) if payload.task=='edit' else payload.prompt
+        if payload.task=='edit' and not edit_prompt_fits(payload.prompt,payload.preserve,region=region,references=references):
             raise LocalFileError(PROMPT_TOO_LONG)
         preview_dir=None
         if payload.live_preview and job:
@@ -612,6 +657,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             **({'inherited_fds':job.get('_inherited_fds',()),'job_id':identifier} if job and child_backend else {}),
             **({'keep_loaded':keep_weights_loaded(job)} if job and PROFILE.get('cli_module') else {}),
             image_path=geometry.image_path,
+            **({'additional_image_paths':payload.additional_reference_images} if payload.additional_reference_images else {}),
             image_strength=payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
             **({'mask_path':widen_mask_to_grid(mask_path,grow=payload.mask_feather)} if mask_path else {}),
             **({'edit_strength':payload.edit_strength} if payload.edit_strength is not None else {}),
@@ -633,6 +679,7 @@ def generate_with_geometry(payload, geometry, job=None, *, mask_path=None):
             "steps": payload.steps, "seconds": elapsed,
             "file_path": str(final_path), "metadata_path": str(final_path.with_suffix(".json")),
             "reference_image": payload.reference_image,
+            **({"additional_reference_images": payload.additional_reference_images} if payload.additional_reference_images else {}),
             "image_strength": payload.image_strength if payload.reference_image is not None and not instruction_edit else None,
             "vae_tiling": tiled, "lora": adapters[0] if len(adapters)==1 else None,
             **({"loras": adapters} if len(adapters)>1 else {}),
@@ -732,7 +779,7 @@ def capabilities(identifier=None,*,ready=None):
         'default_steps':profile['steps'],'max_steps':profile['max_steps'],
         identifier:{**model_details(identifier),'prompt_expansion_guidance':public_guidance(identifier)},
         'reference_mode':profile.get('reference_mode','variation'),'image_strength_supported':profile.get('reference_mode')!='edit',
-        'tasks':supported_tasks(profile),'mask_editing':bool(profile.get('mask_editing')),'edit_strength_supported':bool(profile.get('edit_strength')),
+        'tasks':supported_tasks(profile),'max_reference_images':profile.get('max_references',1),'mask_editing':bool(profile.get('mask_editing')),'edit_strength_supported':bool(profile.get('edit_strength')),
         'photo_editing':{'supported':'edit' in supported_tasks(profile),'models':[key for key in ready if 'edit' in supported_tasks(PROFILES[key])],
             'setup_hint':'Set up '+', '.join(profile['name'] for profile in PROFILES.values() if 'edit' in supported_tasks(profile))+'. Use make setup to add one.',
             'requires_reference':True,'default_reference_size':'auto','default_long_edge':None,'max_long_edge':2048,'composition_variation':False,'mask_supported':bool(profile.get('mask_editing')),
@@ -844,6 +891,8 @@ def normalized_request(payload):
         data.pop('preserve')
     if data['mask_image'] is None:
         data.pop('mask_image')
+    if data['additional_reference_images'] is None:
+        data.pop('additional_reference_images')
     # Off by default; leaving them out keeps earlier request fingerprints unchanged.
     if data['edit_strength'] is None:
         data.pop('edit_strength')
@@ -911,16 +960,11 @@ def submit_job(payload,key=None,retry_of=None):
         require_storage(model_root(payload.model)); require_storage(payload.output_dir)
         # Check input headers without resizing/re-encoding every waiting request.
         if payload.reference_image:
-            from PIL import Image
-            try:
-                with Image.open(payload.reference_image) as photo:
-                    if photo.width*photo.height>MAX_REFERENCE_PIXELS:
-                        raise ValueError('Reference photo must be at most 40 megapixels')
-                    photo.verify()
-            except (OSError,ValueError,Image.DecompressionBombError) as error:
-                raise ReferenceError(f'Cannot read reference_image: {error}') from error
+            check_reference(payload.reference_image)
+        for number,path in enumerate(payload.additional_reference_images or [],start=2):
+            check_reference(path,f'reference image {number}')
         if payload.mask_image:
-            from PIL import ImageOps
+            from PIL import Image, ImageOps
             with Image.open(payload.reference_image) as photo:
                 read_mask(payload.mask_image,ImageOps.exif_transpose(photo).size)
         selection=resolve_for_model(payload)
@@ -979,7 +1023,8 @@ def prepare_job_prompt(payload,job):
         if not job.get('prompt_expansion'):
             job_worker.stage='expanding_prompt'
             expansion=prompt_expander.expand(payload.prompt,project=PROJECT_ROOT,image_model=API_MODEL,
-                  **({'task':'edit','preserve':payload.preserve,**({'masked':True} if payload.mask_image else {})} if payload.task=='edit' else {}),
+                  **({'task':'edit','preserve':payload.preserve,**({'masked':True} if payload.mask_image else {}),
+                      **({'references':reference_count(payload)} if reference_count(payload)>1 else {})} if payload.task=='edit' else {}),
                   image_weights=MODEL_DIR,selection=selection,inherited_fds=job.get('_inherited_fds',()))
             job['prompt_expansion']=job_store.save_expansion(job['id'],expansion)
         prompt_expander.validate_expansion(payload.prompt,job['prompt_expansion'])
@@ -1218,6 +1263,8 @@ def retry_job(identifier:str,request:Request):
         raise HTTPException(422,str(error)) from error
     if payload.reference_image and not Path(payload.reference_image).is_file():
         raise HTTPException(400,'Cannot read reference_image; restore it before retrying')
+    for number,path in enumerate(payload.additional_reference_images or [],start=2):
+        if not Path(path).is_file():raise HTTPException(400,f'Cannot read reference image {number}; restore it before retrying')
     return job_response(submit_job(payload,retry_of=identifier),request)
 
 

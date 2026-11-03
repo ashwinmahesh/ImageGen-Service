@@ -52,9 +52,9 @@ def adapter_triggers(selection):
     return ', '.join(dict.fromkeys(adapter['trigger_prompt'] for adapter in adapters if adapter.get('trigger_prompt')))
 
 
-def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None, masked=False):
+def expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), task='generate', preserve=None, masked=False, references=1):
     return _expand(prompt,project=project,image_model=image_model,image_weights=image_weights,
-                   selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve,masked=masked)
+                   selection=selection,inherited_fds=inherited_fds,task=task,preserve=preserve,masked=masked,references=references)
 
 
 def expand_batch(prompt, *, count, project, image_model, image_weights, selection=None, inherited_fds=()):
@@ -62,7 +62,7 @@ def expand_batch(prompt, *, count, project, image_model, image_weights, selectio
                    selection=selection,inherited_fds=inherited_fds)
 
 
-def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None, task='generate', preserve=None, masked=False):
+def _expand(prompt, *, project, image_model, image_weights, selection=None, inherited_fds=(), count=None, task='generate', preserve=None, masked=False, references=1):
     if task not in ('generate','edit'):
         raise ValueError('Unknown expansion task')
     folder = check_assets(project)
@@ -75,6 +75,8 @@ def _expand(prompt, *, project, image_model, image_weights, selection=None, inhe
         request.update(task='edit',preserve=preserve)
         if masked:
             request['masked']=True
+        if references>1:
+            request['references']=references
     if count is not None:
         if type(count) is not int or not 2<=count<=5: raise ValueError('Variation count must be 2–5')
         request['variation_count']=count
@@ -310,6 +312,10 @@ def run_edit_worker(request):
     masked=request.get('masked',False)
     if not isinstance(masked,bool):
         raise ExpansionError('Invalid selected-area flag')
+    # With several reference images the final prompt also says which one is being edited.
+    references=request.get('references',1)
+    if type(references) is not int or not 1<=references<=10:
+        raise ExpansionError('Invalid reference image count')
     guidance=edit_guidance_for(identifier)
     messages=[{'role':'system','content':EDIT_SYSTEM_PROMPT+'\n\n'+guidance['instructions']},
               {'role':'user','content':EDIT_EXAMPLE_USER},
@@ -331,7 +337,7 @@ def run_edit_worker(request):
     try:validate_expansion(original,data)
     except (ValueError,TypeError,KeyError) as error:
         raise ExpansionError('The refined edit exceeds its prompt budget; shorten the instruction or disable Prompt expansion.') from error
-    if not edit_prompt_fits(data['expanded_prompt'],preserve,masked=masked):
+    if not edit_prompt_fits(data['expanded_prompt'],preserve,masked=masked,references=references):
         raise ExpansionError('The refined edit, preservation requirements'+(' and selected-area guidance' if masked else '')+' exceed the final prompt budget; shorten them or disable Prompt expansion.')
     import resource
     data.update(details=details,image_model=identifier,guidance_profile=guidance['id'],guidance_version=guidance['version'],

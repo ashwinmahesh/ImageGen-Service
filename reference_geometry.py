@@ -7,6 +7,7 @@ import tempfile
 from PIL import Image, ImageChops, ImageFilter, ImageOps, UnidentifiedImageError
 
 MAX_REFERENCE_EDGE = 2048
+MAX_REFERENCE_PIXELS = 40_000_000
 
 
 class ReferenceError(ValueError):
@@ -79,7 +80,7 @@ def prepare_geometry(reference_path, requested_size, scratch_root):
         if not Path(reference_path).is_file():
             raise ReferenceError("File does not exist or is not a regular file")
         with Image.open(reference_path) as source:
-            if source.width * source.height > 40_000_000:
+            if source.width * source.height > MAX_REFERENCE_PIXELS:
                 raise ReferenceError("Reference photo must be at most 40 megapixels")
             orientation = source.getexif().get(274, 1)
             photo = ImageOps.exif_transpose(source).convert("RGB")
@@ -104,6 +105,17 @@ def prepare_geometry(reference_path, requested_size, scratch_root):
         except OSError as exc:
             raise ReferenceError(f"Cannot prepare reference photo: {exc}") from exc
         yield Geometry(str(prepared), model_size, output_size, photo.size)
+
+
+def check_reference(path, field='reference_image'):
+    """Read only the header of a reference photo: it must open, verify and be at most 40 megapixels."""
+    try:
+        with Image.open(path) as photo:
+            if photo.width*photo.height>MAX_REFERENCE_PIXELS:
+                raise ValueError('Reference photo must be at most 40 megapixels')
+            photo.verify()
+    except (OSError,ValueError,Image.DecompressionBombError) as error:
+        raise ReferenceError(f'Cannot read {field}: {error}') from error
 
 
 def read_mask(mask_path, reference_size):
